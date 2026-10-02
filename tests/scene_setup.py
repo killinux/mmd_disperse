@@ -1,0 +1,66 @@
+"""Load the old and new outfit for the tests: append from .blend files, or import PMX with mmd_tools."""
+
+import addon_utils
+import bpy
+
+
+def add_model_args(parser):
+    parser.add_argument("--target-blend", help="append the new outfit from this .blend (old outfit = opened file)")
+    parser.add_argument("--target-root", help="root object of the new outfit inside --target-blend")
+    parser.add_argument("--base-root", help="root object of the old outfit in the opened file")
+    parser.add_argument("--pmx", nargs=2, metavar=("OLD", "NEW"), help="import both outfits with mmd_tools")
+    parser.add_argument("--toon-dir", help="folder with MMD shared toons (toon01.bmp ...) when mmd_tools has none")
+
+
+def _has_pmx_import():
+    try:  # bpy.ops proxies always exist; only a registered operator has an RNA type
+        bpy.ops.mmd_tools.import_model.get_rna_type()
+        return True
+    except (AttributeError, KeyError):
+        return False
+
+
+def _enable_mmd_tools():
+    for name in ("mmd_tools", "bl_ext.user_default.mmd_tools", "bl_ext.blender_org.mmd_tools"):
+        if _has_pmx_import():
+            return
+        addon_utils.enable(name, default_set=False)
+    if not _has_pmx_import():
+        raise RuntimeError("mmd_tools is not installed for this Blender")
+
+
+def _import_pmx(path):
+    before = set(bpy.data.objects)
+    bpy.ops.mmd_tools.import_model(filepath=path)
+    roots = [ob for ob in bpy.data.objects if ob not in before and getattr(ob, "mmd_type", "") == "ROOT"]
+    return roots[0]
+
+
+def _fix_shared_toons(folder):
+    import os
+
+    for image in bpy.data.images:
+        path = os.path.join(folder, image.name)
+        if image.name.lower().startswith("toon") and not image.has_data and os.path.exists(path):
+            image.filepath = path
+            image.reload()
+
+
+def load_models(args):
+    """Return (old_root, new_root)."""
+    if args.pmx:
+        for ob in list(bpy.data.objects):  # factory-startup cube, light and camera
+            bpy.data.objects.remove(ob)
+        _enable_mmd_tools()
+        roots = _import_pmx(args.pmx[0]), _import_pmx(args.pmx[1])
+        if args.toon_dir:
+            _fix_shared_toons(args.toon_dir)
+        return roots
+    with bpy.data.libraries.load(args.target_blend, link=False) as (src, dst):
+        dst.objects = [n for n in src.objects if n.startswith(args.target_root)]
+    coll = bpy.data.collections.new("New Outfit")
+    bpy.context.scene.collection.children.link(coll)
+    for ob in dst.objects:
+        if ob is not None:
+            coll.objects.link(ob)
+    return bpy.data.objects[args.base_root], bpy.data.objects[args.target_root]

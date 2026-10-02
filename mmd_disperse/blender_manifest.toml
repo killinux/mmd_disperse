@@ -1,0 +1,13 @@
+schema_version = "1.0.0"
+
+id = "mmd_disperse"
+version = "1.0.0"
+name = "MMD Disperse"
+tagline = "Geometry Nodes suit-up transformation between two MMD outfits"
+maintainer = "mmd_disperse"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+tags = ["Animation", "Geometry Nodes"]

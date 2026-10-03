@@ -7,9 +7,9 @@ import time
 import bpy
 from mathutils import Matrix, Vector
 
-from . import arrival, materials, particles, ribbons
+from . import arrival, launch, materials, particles, ribbons
 from . import model as mdl
-from .node_groups import BASE_GROUP, TARGET_GROUP, ensure_node_groups, input_identifiers
+from .node_groups import BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups, input_identifiers
 
 MOD_NAME = "MMD Disperse"
 MASK_NAME = "MMD Disperse Mask"
@@ -22,11 +22,14 @@ P_REST = "mmd_disperse_rest_attr"
 P_ARM = "mmd_disperse_armatures"
 P_MATRIX = "mmd_disperse_matrix"
 P_ROOTS = "mmd_disperse_roots"
+P_FOLLOWERS = "mmd_disperse_followers"  # on the mask: armatures whose bones copy the old armature's pose
+FOLLOW = "MMD Disperse Follow"  # name of those bone constraints
 # What sync() needs to know about the built effect (stored on the mask).
 P_PATH = "mmd_disperse_path"
-P_REACH = "mmd_disperse_reach"
-P_WAVE = "mmd_disperse_wave"
+P_REACH = "mmd_disperse_reach"  # largest mask radius (end of the keys)
+P_WAVE = "mmd_disperse_wave"  # mask radius at which the wave has passed everything
 P_AREA = "mmd_disperse_area"
+P_AREA_NEW = "mmd_disperse_area_new"
 
 # Sizes as a fraction of the model height (tuned on Tifa, ~20.7 MMD units tall).
 SIZE_RATIOS = {
@@ -54,6 +57,7 @@ SIZE_RATIOS = {
     "silhouette_width": 0.1,
     "ribbon_width": 0.004,
     "ribbon_linger": 0.12,
+    "finale_distance": 0.17,
 }
 HOLO_LINE_SPACING = 0.006  # scan line spacing of the hologram, fraction of the model height
 NOISE_CELLS_PER_HEIGHT = 6.0
@@ -134,6 +138,60 @@ def _create_mask(settings, location, armature, bone, collection, radius_max, pat
     return mask
 
 
+def _tail(settings, has_base, has_target):
+    """How long things go on after the wave has passed (flakes, particles, the finale), as a share of it."""
+    tail = 0.0
+    if has_base:
+        if settings.exit_style in ("FRAGMENTS", "CHUNKS"):
+            tail = settings.frag_life
+        if settings.particles != "NONE":
+            tail = max(tail, settings.particle_life)
+    if has_target and settings.finale:
+        tail = max(tail, settings.finale_length)
+    return tail
+
+
+def _scale_curves(ob):
+    """F-curves animating the object's scale (the mask radius)."""
+    ad = ob.animation_data
+    action = ad.action if ad is not None else None
+    if action is None:
+        return []
+    curves = getattr(action, "fcurves", None)  # gone in Blender 5.0: layered actions keep them per slot
+    if curves is None:
+        from bpy_extras import anim_utils
+        bag = anim_utils.action_get_channelbag_for_slot(action, ad.action_slot)
+        curves = bag.fcurves if bag is not None else []
+    return [fc for fc in curves if fc.data_path == "scale"]
+
+
+def _retime(settings, mask, objects):
+    """Stretch the mask's keys so it grows far enough for the flakes, particles and finale to finish after
+    the wave (their timing follows the panel). Scaling the key values keeps any retiming done by hand."""
+    wave = float(mask.get(P_WAVE, 0.0))
+    old = float(mask.get(P_REACH, 0.0))
+    if wave <= 0.0 or old <= 0.0:
+        return
+    roles = {ob.get(P_ROLE) for ob in objects}
+    radius = wave * (1.0 + _tail(settings, "BASE" in roles, "TARGET" in roles))
+    curves = _scale_curves(mask)
+    if abs(radius - old) <= 1e-6 * radius or not curves:
+        return
+    ratio = radius / old
+    for fc in curves:
+        for key in fc.keyframe_points:
+            key.co[1] *= ratio
+            key.handle_left[1] *= ratio
+            key.handle_right[1] *= ratio
+        fc.update()
+    mask[P_REACH] = radius
+    for ob in objects:  # recorded for the old timing: follow the body until the next build
+        launch.remove(ob)
+    frame = settings.id_data.frame_current
+    for fc in curves:  # show the new radius now, not only after the next frame change
+        mask.scale[fc.array_index] = fc.evaluate(frame)
+
+
 # --------------------------------------------------------------------------- objects
 
 def _move_after_armature(ob, mod):
@@ -186,6 +244,35 @@ def _bind_to_armature(meshes, armature):
     return skipped
 
 
+def _contains_skeleton(armature, source, threshold=0.8):
+    """True when `armature` has most of the bones of `source` (e.g. the same skeleton plus skirt bones)."""
+    bones = source.data.bones
+    return len(bones) > 0 and sum(1 for b in bones if b.name in armature.data.bones) >= threshold * len(bones)
+
+
+def _copy_pose(armature, source):
+    """Make every bone of `armature` that `source` also has copy that bone's local pose, so a new outfit
+    with extra bones (skirt, ribbons ...) still dances along: the extra bones follow their parents.
+    Returns how many bones copy."""
+    count = 0
+    for pb in armature.pose.bones:
+        if pb.name not in source.pose.bones:
+            continue
+        con = pb.constraints.new("COPY_TRANSFORMS")
+        con.name = FOLLOW
+        con.target = source
+        con.subtarget = pb.name
+        con.owner_space = con.target_space = "LOCAL"
+        count += 1
+    return count
+
+
+def _uncopy_pose(armature):
+    for pb in armature.pose.bones:
+        for con in [c for c in pb.constraints if c.name.startswith(FOLLOW)]:
+            pb.constraints.remove(con)
+
+
 def _cleanup_mesh(ob):
     for mod in list(ob.modifiers):
         if mod.type == "NODES" and mod.node_group and mod.node_group.name in (TARGET_GROUP, BASE_GROUP):
@@ -206,6 +293,7 @@ def _cleanup_mesh(ob):
     if ob.type == "MESH":
         mdl.remove_lock_attribute(ob)
         arrival.remove(ob)
+        launch.remove(ob)
     for key in (P_MASK, P_ROLE, P_REST, P_ARM):
         if key in ob:
             del ob[key]
@@ -230,6 +318,10 @@ def remove_effect(mask):
         root = bpy.data.objects.get(root_name)
         if root is not None:
             _restore_root(root)
+    for arm_name in list(mask.get(P_FOLLOWERS, [])):
+        arm = bpy.data.objects.get(arm_name)
+        if arm is not None and arm.type == "ARMATURE":
+            _uncopy_pose(arm)
     ribbons.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
     bpy.data.objects.remove(mask)
@@ -303,9 +395,14 @@ def sync(settings):
     mask = settings.mask
     if mask is None:
         return
+    objects = effect_objects(mask)
+    _retime(settings, mask, objects)
     wire = bpy.data.materials.get(WIRE_MATERIAL)
     materials.update_wire_material(wire, settings)
     shape = _particle_object(settings)
+    sparkle = None
+    if settings.finale and settings.finale_sparkles > 0:
+        sparkle = particles.ensure_asset("STAR", settings.id_data)
     materials.update_particle_material(settings)
     _update_ribbons(settings, mask)
     common = {
@@ -343,6 +440,13 @@ def sync(settings):
             "Fly Distance": settings.fly_distance,
             "Fly Range": settings.fly_range,
             "Spin": settings.frag_spin,
+            "Finale": settings.finale,
+            # the material multiplies the stored flash by the edge glow strength
+            "Finale Glow": settings.finale_glow / max(settings.edge_glow_strength, 1e-3),
+            "Sparkles": sparkle is not None,
+            "Sparkle Object": sparkle,
+            "Sparkle Size": settings.particle_size,
+            "Sparkle Distance": settings.finale_distance,
         }),
         BASE_GROUP: dict(common, **{
             "Shrink": settings.base_shrink,
@@ -364,24 +468,35 @@ def sync(settings):
             "Flap": settings.particles == "BUTTERFLY",
             "Flap Speed": settings.flap_speed,
             "Particle Size": settings.particle_size,
+            "Leave Behind": settings.leave_behind,
         }),
     }
     reach = float(mask.get(P_REACH, 0.0)) or 1e6
     wave = float(mask.get(P_WAVE, 0.0)) or reach
     area = float(mask.get(P_AREA, 0.0))
     density = settings.particle_count / area if area > 0.0 else 0.0
+    area_new = float(mask.get(P_AREA_NEW, 0.0))
+    sparkle_density = settings.finale_sparkles / area_new if area_new > 0.0 else 0.0
     wind = Vector(settings.frag_wind_dir)
     wind = wind.normalized() * settings.frag_wind if wind.length > 1e-9 else Vector((0.0, 0.0, 0.0))
-    for ob in effect_objects(mask):
+    for ob in objects:
         role = ob.get(P_ROLE)
-        s = _object_scale(ob)  # node trees work in object space
-        own = {"Reach": reach / s}
+        # Node trees work in object space: world distances shrink with the object's scale (densities and
+        # frequencies grow), so a scaled model looks the same as an unscaled one.
+        s = _object_scale(ob)
+        own = {"Reach": reach}
         if role == "BASE":
             own.update({
-                "Flight": settings.frag_life * wave / s,
-                "Particle Flight": settings.particle_life * wave / s,
+                "Flight": settings.frag_life * wave,
+                "Particle Flight": settings.particle_life * wave,
                 "Wind": tuple(ob.matrix_world.inverted_safe().to_3x3() @ wind),
                 "Particle Density": density * s * s,
+            })
+        elif role == "TARGET":
+            own.update({
+                "Finale Start": wave,
+                "Finale Length": settings.finale_length * wave,
+                "Sparkle Density": sparkle_density * s * s,
             })
         for mod in ob.modifiers:
             group = mod.node_group if mod.type == "NODES" else None
@@ -390,12 +505,18 @@ def sync(settings):
             ids = input_identifiers(group)
             for name, value in list(values[group.name].items()) + list(own.items()):
                 key = ids.get(name)
-                if key is not None and value is not None:
-                    mod[key] = value
+                if key is None or value is None:
+                    continue
+                if name in DISTANCE_INPUTS:
+                    value = value / s
+                elif name == "Noise Scale":
+                    value = value * s
+                mod[key] = value
             ob.update_tag()
         flashes = settings.glitch_enable and settings.glitch_flash
         if role == "TARGET":
-            _update_glow(ob, settings, settings.edge_glow or flashes, settings.edge_glow_strength)
+            _update_glow(ob, settings, settings.edge_glow or flashes or settings.finale,
+                         settings.edge_glow_strength)
             _update_hologram(ob, settings)
         elif role == "BASE":
             flakes = settings.exit_style in ("FRAGMENTS", "CHUNKS") and settings.frag_glow
@@ -427,13 +548,10 @@ def build(context, settings):
         else:
             _cleanup_mesh(ob)
 
-    lo, hi = mdl.rest_bounds((target or base).meshes)
-    height = hi.z - lo.z
-    if settings.auto_size and abs(height - settings.size_reference) > 1e-4 * max(height, 1.0):
-        fit_sizes(settings, height)
-
     roots = []
     unbound = []
+    followers = []
+    copied = 0
     if settings.follow_base and base.armature is not None and target.armature is not None:
         if target.root.type in {"EMPTY", "ARMATURE"} and base.root.type in {"EMPTY", "ARMATURE"}:
             target.root[P_MATRIX] = [v for row in target.root.matrix_basis for v in row]
@@ -441,6 +559,17 @@ def build(context, settings):
             roots.append(target.root.name)
             context.view_layer.update()  # the meshes' matrix_world now include the snap
         unbound = _bind_to_armature(target.meshes, base.armature)
+        # Extra bones in the new outfit (skirt, ribbons ...): keep its own armature, copying the old pose.
+        if unbound and _contains_skeleton(target.armature, base.armature):
+            copied = _copy_pose(target.armature, base.armature)
+            followers.append(target.armature.name)
+            unbound = []
+
+    # Measured after the snap: the new outfit takes over the old one's transform (and scale).
+    lo, hi = mdl.rest_bounds((target or base).meshes)
+    height = hi.z - lo.z
+    if settings.auto_size and abs(height - settings.size_reference) > 1e-4 * max(height, 1.0):
+        fit_sizes(settings, height)
 
     owner = base if base else target
     meshes = target.meshes + base.meshes
@@ -468,19 +597,14 @@ def build(context, settings):
     margin = settings.noise_amount + max(settings.edge_width, settings.wire_outer) + 0.02 * height
     if path == "SPHERE" and settings.space == "POSED":
         margin += 0.1 * height
-    # Flakes and particles keep flying after the front has passed: leave them time to finish.
+    # Flakes, particles and the finale go on after the front has passed: leave them time to finish.
     wave = reach + margin
-    tail = 0.0
-    if base:
-        if settings.exit_style in ("FRAGMENTS", "CHUNKS"):
-            tail = settings.frag_life
-        if settings.particles != "NONE":
-            tail = max(tail, settings.particle_life)
-    radius = wave * (1.0 + tail)
+    radius = wave * (1.0 + _tail(settings, bool(base), bool(target)))
     root = target.root or base.root
     collection = root.users_collection[0] if root.users_collection else context.scene.collection
     mask = _create_mask(settings, location, owner.armature, bone, collection, radius, path)
     mask[P_ROOTS] = roots
+    mask[P_FOLLOWERS] = followers
     mask[P_PATH] = path
     mask[P_REACH] = radius
     mask[P_WAVE] = wave
@@ -495,7 +619,20 @@ def build(context, settings):
     for ob in base.meshes:
         locked += _prepare_mesh(ob, "BASE", mask, base_group, patterns)
     mask[P_AREA] = sum(mdl.free_area(ob) for ob in base.meshes)
+    mask[P_AREA_NEW] = sum(mdl.free_area(ob) for ob in target.meshes)
     sync(settings)
+
+    # Leave behind: play the transformation once and record where the old outfit breaks off.
+    recorded, record_seconds = 0, 0.0
+    if settings.leave_behind and base.meshes:
+        t0 = time.time()
+        scene = context.scene
+        physics = scene.rigidbody_world is not None and scene.rigidbody_world.enabled
+        start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
+        warmup = scene.frame_start if physics and scene.frame_start < start else None
+        recorded = launch.record(context, base.meshes, target.meshes + ribbons.ribbon_objects(mask),
+                                 range(start, end + 1), warmup)
+        record_seconds = time.time() - t0
     return {
         "mask": mask,
         "height": height,
@@ -508,4 +645,6 @@ def build(context, settings):
         "locked_faces": locked,
         "origin_bone": bone,
         "unbound": unbound,
+        "recorded": recorded,
+        "record_seconds": record_seconds,
     }

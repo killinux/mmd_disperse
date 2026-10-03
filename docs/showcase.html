@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MMD 变身效果展示</title>
+<style>
+  :root {
+    --bg: #f5f5f8;
+    --surface: #ffffff;
+    --surface-2: #eef0f5;
+    --text: #1b1d24;
+    --muted: #5d6272;
+    --border: #dcdfe8;
+    --accent: #d6337f;
+    --accent-2: #0b7fae;
+    --chip: #eceef4;
+    --code-bg: #eef0f5;
+    --video-bg: #0b0c10;
+    --shadow: 0 1px 2px rgba(20, 22, 30, 0.06), 0 8px 24px rgba(20, 22, 30, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d0e13;
+      --surface: #16181f;
+      --surface-2: #1d2029;
+      --text: #e9eaf0;
+      --muted: #9da2b3;
+      --border: #2a2e3a;
+      --accent: #ff6fae;
+      --accent-2: #4cc9f5;
+      --chip: #232733;
+      --code-bg: #1f2230;
+      --video-bg: #000000;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d0e13;
+    --surface: #16181f;
+    --surface-2: #1d2029;
+    --text: #e9eaf0;
+    --muted: #9da2b3;
+    --border: #2a2e3a;
+    --accent: #ff6fae;
+    --accent-2: #4cc9f5;
+    --chip: #232733;
+    --code-bg: #1f2230;
+    --video-bg: #000000;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.7 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  }
+  a { color: var(--accent-2); }
+  code {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 0.86em;
+    background: var(--code-bg);
+    border-radius: 6px;
+    padding: 0.1em 0.4em;
+    word-break: break-all;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+
+  /* --- header */
+  .hero { padding: 56px 0 28px; }
+  .hero h1 {
+    margin: 0 0 12px;
+    font-size: clamp(28px, 5vw, 44px);
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero p { margin: 0 0 16px; max-width: 760px; color: var(--muted); font-size: 16px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+  .stats span {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 14px;
+    font-size: 13px;
+  }
+  .stats b { color: var(--accent); }
+  .links { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+
+  nav.toc {
+    position: sticky; top: 0; z-index: 5;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  nav.toc .wrap { display: flex; gap: 6px; overflow-x: auto; padding-top: 10px; padding-bottom: 10px; }
+  nav.toc a {
+    flex: none;
+    text-decoration: none; color: var(--text);
+    padding: 4px 12px; border-radius: 999px; font-size: 14px;
+  }
+  nav.toc a:hover { background: var(--chip); }
+
+  section { padding: 36px 0 8px; }
+  section > .wrap > h2 { font-size: 24px; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  /* --- common steps */
+  ol.setup { list-style: none; counter-reset: s; margin: 0; padding: 8px 20px; }
+  ol.setup > li {
+    counter-increment: s; position: relative;
+    padding: 14px 0 14px 44px; border-bottom: 1px solid var(--border);
+  }
+  ol.setup > li:last-child { border-bottom: 0; }
+  ol.setup > li::before {
+    content: counter(s); position: absolute; left: 0; top: 14px;
+    width: 28px; height: 28px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--accent); color: #fff; font-weight: 700; font-size: 14px;
+  }
+  .note {
+    margin-top: 16px; padding: 12px 16px; border-radius: 12px;
+    background: var(--surface-2); color: var(--muted); font-size: 14px;
+  }
+
+  /* UI names and values inside instructions */
+  .ui { font-weight: 650; color: var(--accent-2); }
+  .ui::before { content: "「"; color: var(--muted); font-weight: 400; }
+  .ui::after { content: "」"; color: var(--muted); font-weight: 400; }
+  .v { background: var(--chip); border-radius: 6px; padding: 0 6px; white-space: nowrap; }
+
+  /* --- thumbnail index */
+  .index { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin-bottom: 28px; }
+  .index a { text-decoration: none; color: var(--text); font-size: 12px; text-align: center; }
+  .index img {
+    display: block; width: 100%; aspect-ratio: 9 / 16; object-fit: cover;
+    border-radius: 10px; background: var(--video-bg); border: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+  .index a:hover img { outline: 2px solid var(--accent); }
+
+  /* --- effect rows */
+  .effect { display: grid; grid-template-columns: 300px 1fr; gap: 24px; padding: 20px; margin-bottom: 20px; scroll-margin-top: 64px; }
+  figure.clip { margin: 0; position: relative; }
+  figure.clip video {
+    display: block; width: 100%; aspect-ratio: 9 / 16;
+    background: var(--video-bg); border-radius: 12px;
+  }
+  figure.clip figcaption {
+    display: none; position: absolute; inset: 0; border-radius: 12px;
+    background: rgba(0, 0, 0, 0.78); color: #fff; font-size: 13px;
+    padding: 20px; align-content: center; text-align: center;
+  }
+  figure.clip.missing figcaption { display: grid; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+  .ver {
+    font-size: 12px; font-weight: 700; color: #fff; background: var(--accent);
+    border-radius: 999px; padding: 1px 10px;
+  }
+  .tag { font-size: 12px; background: var(--chip); border-radius: 999px; padding: 1px 10px; color: var(--muted); }
+  .effect h3 { margin: 4px 0 6px; font-size: 22px; }
+  .lead { margin: 0 0 14px; color: var(--muted); }
+  .effect h4 { margin: 0 0 6px; font-size: 15px; }
+  ol.steps { margin: 0 0 14px; padding-left: 22px; }
+  ol.steps li { margin: 4px 0; }
+  .cmd { font-size: 13px; color: var(--muted); margin: 0; }
+
+  /* --- options overview */
+  .options { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .opt { padding: 16px 18px; }
+  .opt h3 { margin: 0 0 8px; font-size: 16px; display: flex; justify-content: space-between; align-items: baseline; }
+  .opt h3 b { color: var(--accent); font-size: 22px; }
+  .opt ul { margin: 0; padding-left: 18px; color: var(--muted); }
+  .sum { margin: 18px 0 0; font-size: 16px; }
+  .sum b { color: var(--accent); }
+
+  /* --- presets */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 640px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; background: var(--surface-2); }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 650; white-space: nowrap; }
+
+  footer { padding: 40px 0 56px; color: var(--muted); font-size: 13px; }
+
+  @media (max-width: 760px) {
+    .hero { padding-top: 36px; }
+    .effect { grid-template-columns: 1fr; padding: 16px; }
+    figure.clip { max-width: 340px; width: 100%; margin: 0 auto; }
+    ol.setup > li { padding-left: 40px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>MMD 变身效果展示</h1>
+    <p>mmd_disperse 1.3：用 Blender 几何节点给 MMD 模型做换装变身。下面十段视频都是插件生成的
+      （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤。</p>
+    <div class="stats">
+      <span><b>10</b> 段演示</span>
+      <span><b>7</b> 个一键预设</span>
+      <span><b>120</b> 种基本组合</span>
+      <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
+    </div>
+    <div class="links">
+      <a href="https://github.com/killinux/mmd_disperse">GitHub 仓库</a>
+      <a href="tutorial.md">详细教程（tutorial.md）</a>
+      <a href="../README.md">README</a>
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <a href="#setup">通用准备</a>
+    <a href="#effects">效果演示</a>
+    <a href="#options">全部玩法</a>
+    <a href="#presets">预设对照</a>
+  </div>
+</nav>
+
+<main>
+
+<section id="setup">
+  <div class="wrap">
+    <h2>通用准备</h2>
+    <p class="sub">每段视频都先做这几步，再按各自的设置调整。界面名称以中文 Blender 为准。</p>
+    <div class="card">
+      <ol class="setup">
+        <li><b>安装插件。</b>Blender 4.2 及以上：编辑 › 偏好设置 › 获取扩展 › 右上角下拉 › 从磁盘安装，选
+          <code>dist/mmd_disperse-1.3.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
+          <code>mmd_disperse-1.3.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
+        <li><b>导入两个模型。</b>用 mmd_tools（文件 › 导入 › MikuMikuDance 模型 (.pmd, .pmx)）导入
+          旧服装（变身前，视频里是 V2）和新服装（变身后，V1）。位置随意，生成时新服装会自动对齐到旧服装上。</li>
+        <li><b>跳舞的话先加载动作。</b>只给旧模型加载：选中旧模型脚下的根物体，文件 › 导入 ›
+          MikuMikuDance 动作 (.vmd)，缩放和导入模型时一致。要在生成之前加载，新服装生成后会跟着旧骨架一起跳。</li>
+        <li><b>选模型。</b>3D 视图按 <code>N</code>，打开 <span class="ui">MMD 变身</span> 标签页。选中旧模型的任意部分，
+          点 <span class="ui">旧服装（变身前）</span> 右边的吸管；同样设好 <span class="ui">新服装（变身后）</span>。
+          <span class="ui">跟随旧模型骨架</span> 保持勾选。</li>
+        <li><b>时间。</b><span class="ui">开始帧</span> <span class="v">10</span>、<span class="ui">结束帧</span>
+          <span class="v">185</span>（演示一共 200 帧），<span class="ui">方向</span> <span class="v">穿上（旧→新）</span>，
+          <span class="ui">缓动</span> <span class="v">缓入缓出</span>。</li>
+        <li><b>共用部分。</b>展开 <span class="ui">旧服装处理</span>，勾选 <span class="ui">保留共用部分</span>，
+          <span class="ui">材质</span> 填 <code>Face*;Hair*;Eye*;*Brows*;Eyelashes*;Mouth*;*Teeth*;Inners*</code>，
+          脸和头发始终用旧模型的。</li>
+        <li><b>按下面每段视频的设置调好</b>，点 <span class="ui">生成变身效果</span>。所有尺寸按模型身高自动换算，不用手调。</li>
+        <li><b>辉光。</b>展开 <span class="ui">线框层</span> 面板，点 <span class="ui">添加辉光</span>
+          （4.2 及以上在合成器里加 Glare 节点；3.6 打开 EEVEE 泛光）。</li>
+        <li><b>渲染。</b><code>Ctrl + F12</code>。之前可以切到「材质预览」视图，按空格看效果。</li>
+      </ol>
+    </div>
+    <p class="note">视频里的 PBR 材质、工作室灯光、反光地面和环绕镜头，是演示脚本 <code>demo/render_hd.py</code> 布置的。
+      插件只负责变身本身，模型保持原来的 MMD 材质也一样能用。每段下面的「演示参数」是这个脚本用的命令行参数，方便原样重渲。</p>
+  </div>
+</section>
+
+<section id="effects">
+  <div class="wrap">
+    <h2>效果演示</h2>
+    <p class="sub">点缩略图跳到对应的一段；视频都是 1080×1920、200 帧（第 10～185 帧变身）。</p>
+
+    <div class="index">
+      <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
+      <a href="#flow"><img src="../test_output/posters/flow.jpg" alt="" loading="lazy">纳米流动</a>
+      <a href="#petals"><img src="../test_output/posters/petals.jpg" alt="" loading="lazy">碎成花瓣</a>
+      <a href="#butterflies"><img src="../test_output/posters/butterflies.jpg" alt="" loading="lazy">化成蝴蝶</a>
+      <a href="#hologram"><img src="../test_output/posters/hologram.jpg" alt="" loading="lazy">全息扫描</a>
+      <a href="#glitch"><img src="../test_output/posters/glitch.jpg" alt="" loading="lazy">故障风</a>
+      <a href="#armor"><img src="../test_output/posters/armor.jpg" alt="" loading="lazy">装甲换装</a>
+      <a href="#magical"><img src="../test_output/posters/magical.jpg" alt="" loading="lazy">魔法少女</a>
+      <a href="#dance-magical"><img src="../test_output/posters/dance_magical.jpg" alt="" loading="lazy">跳舞·魔法少女</a>
+      <a href="#dance-dust"><img src="../test_output/posters/dance_dust.jpg" alt="" loading="lazy">跳舞·灰飞烟灭</a>
+    </div>
+
+    <article class="effect card" id="suitup">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/suitup.jpg">
+          <source src="../test_output/demo_hd/tifa_suitup_hd_200f.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.0</span><span class="tag">球形扩散</span><span class="tag">六边形线框</span><span class="tag">收缩消失</span></div>
+        <h3>纳米战衣 · 视频原版</h3>
+        <p class="lead">从胸口长出一个带噪波的球，发光的六边形线框沿边界扫过全身，新战衣跟着长出来，旧服装缩到下面消失。就是 B 站教程里的做法。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li>主面板最上面的 <span class="ui">预设</span> 选 <span class="v">纳米战衣</span>（和默认设置一样）。</li>
+          <li><span class="ui">路径</span> <span class="v">球形扩散</span>，<span class="ui">起点</span> <span class="v">骨骼</span>
+            （骨骼栏留空，自动用胸口的「上半身2」），<span class="ui">测量空间</span> <span class="v">静止姿态</span>。</li>
+          <li><span class="ui">线框层</span> 标题栏勾上，<span class="ui">六边形</span> 勾上，<span class="ui">发光颜色</span> 青色。</li>
+          <li><span class="ui">旧服装处理</span> › <span class="ui">退场方式</span> <span class="v">收缩消失</span>。</li>
+        </ol>
+        <p class="cmd">演示参数：（默认设置，不加参数）</p>
+      </div>
+    </article>
+
+    <article class="effect card" id="flow">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/flow.jpg">
+          <source src="../test_output/demo_v3/tifa_flow_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.1</span><span class="tag">沿体表流动</span><span class="tag">起点 + 手脚</span><span class="tag">线框层</span></div>
+        <h3>纳米流动</h3>
+        <p class="lead">变身贴着身体表面流动，从胸口和两只手腕、两只脚踝同时出发，绕过躯干、顺着四肢流开，像钢铁侠 Mark 50 的纳米战衣。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">纳米流动</span>；或者手动设置下面两项。</li>
+          <li><span class="ui">路径</span> <span class="v">沿体表流动</span>，<span class="ui">出发点</span> <span class="v">起点 + 手脚</span>，
+            <span class="ui">起点</span> <span class="v">骨骼</span>。</li>
+          <li>其余保持默认（线框层打开，收缩消失）。生成时会给每个顶点算一次到达距离，测试模型大约 1 秒。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--set path=SURFACE --set seeds=ORIGIN_LIMBS</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="petals">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/petals.jpg">
+          <source src="../test_output/demo_v3/tifa_petals_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.1</span><span class="tag">从下往上扫</span><span class="tag">碎片飞散</span><span class="tag">花瓣</span></div>
+        <h3>从下往上 · 碎成花瓣</h3>
+        <p class="lead">一条水平的边界从脚扫到头，旧服装碎成发光的小片被风吹走，同时飘出樱花花瓣。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">路径</span> <span class="v">从下往上扫</span>。</li>
+          <li><span class="ui">旧服装处理</span> › <span class="ui">退场方式</span> <span class="v">碎片飞散</span>
+            （<span class="ui">碎片发光</span> 保持勾选）。</li>
+          <li><span class="ui">粒子</span> 子面板 › <span class="ui">粒子</span> <span class="v">花瓣</span>，
+            <span class="ui">数量</span> <span class="v">1200</span>。</li>
+          <li>线框层保持打开。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--set path=UP --set exit_style=FRAGMENTS --set particles=PETAL --set particle_count=1200</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="butterflies">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/butterflies.jpg">
+          <source src="../test_output/demo_v3/tifa_butterflies_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.1</span><span class="tag">从上往下扫</span><span class="tag">碎片飞散</span><span class="tag">蝴蝶</span></div>
+        <h3>从上往下 · 化成蝴蝶</h3>
+        <p class="lead">边界从头扫到脚，旧服装碎开，飞出一群各自扇着翅膀的浅蓝色蝴蝶。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">路径</span> <span class="v">从上往下扫</span>。</li>
+          <li><span class="ui">旧服装处理</span> › <span class="ui">退场方式</span> <span class="v">碎片飞散</span>。</li>
+          <li><span class="ui">粒子</span> <span class="v">蝴蝶</span>，<span class="ui">数量</span> <span class="v">900</span>，
+            <span class="ui">粒子颜色</span> 浅蓝 <span class="v">R 0.45 / G 0.8 / B 1.0</span>，
+            <span class="ui">扇动速度</span> 用默认的 <span class="v">1.5</span>。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--set path=DOWN --set exit_style=FRAGMENTS --set particles=BUTTERFLY --set particle_color=0.45,0.8,1.0 --set particle_count=900</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="hologram">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/hologram.jpg">
+          <source src="../test_output/demo_v4/tifa_hologram_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.2</span><span class="tag">从下往上扫</span><span class="tag">全息先行</span><span class="tag">关闭线框</span></div>
+        <h3>全息扫描</h3>
+        <p class="lead">从脚往上扫描。新服装先以半透明的全息投影出现，带横向扫描线、轮廓光，最前端还有一圈扫描光环；边界扫过后才变成实体。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">全息扫描</span>；或者手动设置下面三项。</li>
+          <li><span class="ui">路径</span> <span class="v">从下往上扫</span>。</li>
+          <li><span class="ui">全息先行</span> 面板标题栏勾上（<span class="ui">全息范围</span>、<span class="ui">全息不透明度</span>、
+            <span class="ui">全息亮度</span> 可以调）。</li>
+          <li><span class="ui">线框层</span> 标题栏取消勾选。Blender 3.6 的旧版 EEVEE 需要「Alpha 哈希」才能透明，插件会临时改好。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--set path=UP --set holo_enable=1 --set wire_enable=0</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="glitch">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/glitch.jpg">
+          <source src="../test_output/demo_v4/tifa_glitch_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.2</span><span class="tag">球形扩散</span><span class="tag">故障风</span><span class="tag">色散</span></div>
+        <h3>故障风</h3>
+        <p class="lead">边界附近切成一条条水平切片，在新旧服装之间随机闪烁、横向错位、偶尔闪光；画面再叠一层红绿蓝色散。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">故障风</span> 面板标题栏勾上（<span class="ui">故障范围</span>、<span class="ui">切片高度</span>、
+            <span class="ui">闪烁频率</span>、<span class="ui">切片错位</span> 可以调，<span class="ui">闪光</span> 保持勾选）。</li>
+          <li><span class="ui">线框层</span> 标题栏取消勾选。</li>
+          <li>生成后在 <span class="ui">故障风</span> 面板点 <span class="ui">添加色散</span>（合成器里加一个按帧号驱动的镜头畸变节点）。</li>
+          <li>预设 <span class="v">故障风</span> 是同样的组合，只是发光颜色换成了粉色。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--set glitch_enable=1 --set wire_enable=0 --glitch-fx</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="armor">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/armor.jpg">
+          <source src="../test_output/demo_v4/tifa_armor_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.2</span><span class="tag">沿体表流动</span><span class="tag">零件飞入</span><span class="tag">装甲弹开</span></div>
+        <h3>装甲换装</h3>
+        <p class="lead">旧装甲切成一块块，整块甩出去、翻滚、落地消失；新装甲一块块从远处飞来装上，像假面骑士的 Cast Off。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">装甲换装</span>，它会设好下面这些。</li>
+          <li><span class="ui">路径</span> <span class="v">沿体表流动</span>，<span class="ui">出发点</span> <span class="v">只从起点</span>。</li>
+          <li><span class="ui">新服装登场</span> › <span class="v">零件飞入</span>；<span class="ui">旧服装处理</span> ›
+            <span class="ui">退场方式</span> <span class="v">装甲弹开</span>，<span class="ui">碎片发光</span> 勾选。</li>
+          <li><span class="ui">发光颜色</span> 橙色。<span class="ui">零件大小</span>、<span class="ui">飞来距离</span>、
+            <span class="ui">弹开力度</span> 都可以再调。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset ARMOR</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="magical">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/magical.jpg">
+          <source src="../test_output/demo_v4/tifa_magical_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.2</span><span class="tag">只从手脚</span><span class="tag">光剪影</span><span class="tag">光带</span><span class="tag">星光</span></div>
+        <h3>魔法少女</h3>
+        <p class="lead">手脚先亮成光的剪影，双股螺旋光带缠上四肢，旧服装碎成光尘和星光，新服装从手脚往身体中间换上。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">魔法少女</span>，它会设好下面这些。</li>
+          <li><span class="ui">路径</span> <span class="v">沿体表流动</span>，<span class="ui">出发点</span> <span class="v">只从手脚</span>；
+            <span class="ui">退场方式</span> <span class="v">碎片飞散</span>，<span class="ui">光剪影</span> 勾选。</li>
+          <li><span class="ui">光带</span> 标题栏勾上；<span class="ui">粒子</span> <span class="v">星光</span>；<span class="ui">发光颜色</span> 粉色。</li>
+          <li>这段是 1.2 录的。1.3 的这个预设还会打开 <span class="ui">收尾闪光</span>；想和这段视频一模一样，把它的勾去掉。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset MAGICAL</code>（1.2 版）</p>
+      </div>
+    </article>
+
+    <article class="effect card" id="dance-magical">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/dance_magical.jpg">
+          <source src="../test_output/demo_v5/tifa_dance_magical_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.3</span><span class="tag">VMD 舞蹈</span><span class="tag">留在原地</span><span class="tag">收尾闪光</span></div>
+        <h3>边跳舞边变身 · 魔法少女</h3>
+        <p class="lead">跳着《回レ！雪月花》变身：星光留在手臂划过的地方，形成一道道弧线；第 128 帧左右变身完成，整身闪一下，迸出一圈星星。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li>先按「通用准备」第 3 步给旧模型加载 VMD。</li>
+          <li><span class="ui">预设</span> 选 <span class="v">魔法少女</span>（1.3 版，包含收尾闪光）。</li>
+          <li><span class="ui">旧服装处理</span> › 勾选 <span class="ui">留在原地</span>。</li>
+          <li>点 <span class="ui">生成变身效果</span>：插件会把这段动画播一遍，记下每片碎片脱落时的位置（测试模型约 8 秒）。
+            改了舞蹈或帧范围要重新生成。</li>
+          <li>收尾闪光的 <span class="ui">闪光时长</span>、<span class="ui">闪光亮度</span>、<span class="ui">星光数量</span>、
+            <span class="ui">星光飞散距离</span> 在 <span class="ui">收尾闪光</span> 面板里调。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset MAGICAL --set leave_behind=1 --vmd "回レ！雪月花.vmd"</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="dance-dust">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/dance_dust.jpg">
+          <source src="../test_output/demo_v5/tifa_dance_dust_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.3</span><span class="tag">VMD 舞蹈</span><span class="tag">只从手脚</span><span class="tag">碎片飞散</span><span class="tag">留在原地</span></div>
+        <h3>边跳舞边变身 · 灰飞烟灭</h3>
+        <p class="lead">手脚先开始，旧服装化成不发光的灰被风吹走。灰留在她跳过的地方慢慢飘散，不会跟着身体甩。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li>给旧模型加载 VMD（同上）。</li>
+          <li><span class="ui">预设</span> 选 <span class="v">灰飞烟灭</span>：沿体表流动 + 只从手脚 + 碎片飞散，碎片发光和边缘发光都关掉。</li>
+          <li>勾选 <span class="ui">留在原地</span>，再点 <span class="ui">生成变身效果</span>。</li>
+          <li>想让灰飘得更远，调 <span class="ui">风力</span> 和 <span class="ui">风向</span>（世界坐标，MMD 模型面朝 -Y）。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset DUST --set leave_behind=1 --vmd "回レ！雪月花.vmd"</code></p>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section id="options">
+  <div class="wrap">
+    <h2>全部玩法</h2>
+    <p class="sub">预设只是常用搭配，下面这些选项都可以自由组合。</p>
+    <div class="options">
+      <div class="opt card">
+        <h3>变身路径 <b>4</b></h3>
+        <ul><li>球形扩散</li><li>沿体表流动（出发点：只从起点 / 起点 + 手脚 / 只从手脚）</li><li>从下往上扫</li><li>从上往下扫</li></ul>
+      </div>
+      <div class="opt card">
+        <h3>新服装登场 <b>2</b></h3>
+        <ul><li>边缘生长</li><li>零件飞入</li></ul>
+      </div>
+      <div class="opt card">
+        <h3>旧服装退场 <b>3</b></h3>
+        <ul><li>收缩消失</li><li>碎片飞散</li><li>装甲弹开</li></ul>
+      </div>
+      <div class="opt card">
+        <h3>粒子 <b>4</b></h3>
+        <ul><li>花瓣</li><li>蝴蝶（会扇翅膀）</li><li>星光</li><li>自定义物体</li><li>也可以不要</li></ul>
+      </div>
+      <div class="opt card">
+        <h3>叠加开关 <b>7</b></h3>
+        <ul><li>线框层（六边形 / 三角网）</li><li>全息先行</li><li>故障风</li><li>光剪影</li><li>光带</li><li>收尾闪光</li><li>留在原地</li></ul>
+      </div>
+      <div class="opt card">
+        <h3>其他</h3>
+        <ul><li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散</li></ul>
+      </div>
+    </div>
+    <p class="sum">路径 × 登场 × 退场 × 粒子 = 4 × 2 × 3 × 5 = <b>120</b> 种基本组合；再叠加 7 个开关，理论上有一万多种
+      （「留在原地」只在碎片飞散或开了粒子时起作用）。</p>
+  </div>
+</section>
+
+<section id="presets">
+  <div class="wrap">
+    <h2>预设对照</h2>
+    <p class="sub">主面板最上面的「预设」。预设只改选项，尺寸仍按模型自动适配；已经生成过效果时，套用预设会直接重新生成。</p>
+    <div class="card table-wrap">
+      <table>
+        <thead><tr><th>预设</th><th>路径</th><th>新服装登场</th><th>旧服装退场</th><th>其他</th></tr></thead>
+        <tbody>
+          <tr><td>纳米战衣</td><td>球形扩散</td><td>边缘生长</td><td>收缩消失</td><td>六边形线框，青色发光</td></tr>
+          <tr><td>纳米流动</td><td>沿体表流动（起点 + 手脚）</td><td>边缘生长</td><td>收缩消失</td><td>六边形线框，青色发光</td></tr>
+          <tr><td>灰飞烟灭</td><td>沿体表流动（只从手脚）</td><td>边缘生长</td><td>碎片飞散</td><td>不发光的灰，风吹向侧后方</td></tr>
+          <tr><td>全息扫描</td><td>从下往上扫</td><td>边缘生长</td><td>收缩消失</td><td>全息先行，青色发光</td></tr>
+          <tr><td>故障风</td><td>球形扩散</td><td>边缘生长</td><td>收缩消失</td><td>故障风 + 闪光，粉色发光</td></tr>
+          <tr><td>装甲换装</td><td>沿体表流动（只从起点）</td><td>零件飞入</td><td>装甲弹开</td><td>碎片发光，橙色发光</td></tr>
+          <tr><td>魔法少女</td><td>沿体表流动（只从手脚）</td><td>边缘生长</td><td>碎片飞散</td><td>光剪影、光带、星光、收尾闪光，粉色发光</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    本页在仓库的 <code>docs/</code> 里，用浏览器直接打开即可。视频和缩略图在 <code>test_output/</code>（渲染结果不进 git），
+    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.3.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
+  </div>
+</footer>
+
+<script>
+  // One video plays at a time; a missing file (renders are not in git) shows a hint instead.
+  const videos = Array.from(document.querySelectorAll("video"));
+  videos.forEach((video) => {
+    video.addEventListener("play", () => videos.forEach((other) => { if (other !== video) other.pause(); }));
+    const source = video.querySelector("source");
+    if (source) {
+      source.addEventListener("error", () => video.closest("figure").classList.add("missing"));
+    }
+  });
+</script>
+</body>
+</html>

@@ -170,8 +170,7 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     frag_subdivide: IntProperty(name="Flake Subdivide", default=0, min=0, max=2, update=_sync,
                                 description="Cut big faces into smaller flakes (slower)")
     frag_life: FloatProperty(name="Flight Time", default=0.2, min=0.01, max=1.0, subtype="FACTOR", update=_sync,
-                             description="How long a flake stays in the air, as a share of the transformation "
-                                         "(rebuild after a big change so the last flakes have time to finish)")
+                             description="How long a flake stays in the air, as a share of the transformation")
     frag_burst: _distance("Burst", "How far the flakes pop out from the surface", 0.25, min_value=-10.0)
     frag_wind_dir: FloatVectorProperty(name="Wind Direction", subtype="XYZ", size=3, default=(0.0, 0.4, 1.0),
                                        update=_sync,
@@ -184,6 +183,11 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                             description="Flakes light up in the glow color as they break off")
     frag_glow_strength: FloatProperty(name="Flake Glow Strength", default=3.0, min=0.0, soft_max=50.0,
                                       update=_sync)
+
+    leave_behind: BoolProperty(name="Leave Behind", default=False, update=_sync,
+                               description="Flakes and particles fly on from where they broke off instead of "
+                                           "moving with the dancing body. Building plays the animation once to "
+                                           "record it: rebuild after changing the motion or the timing")
 
     silhouette: BoolProperty(name="Glowing Silhouette", default=False, update=_sync,
                              description="The old outfit lights up just before the edge reaches it, so the body "
@@ -199,6 +203,20 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     ribbon_width: _distance("Ribbon Width", "Width of the ribbons", 0.12, soft_max=1.0)
     ribbon_linger: _distance("Ribbon Linger", "How far the wave moves on before a ribbon fades", 2.5)
     ribbon_strength: FloatProperty(name="Ribbon Glow", default=2.5, min=0.0, soft_max=50.0, update=_sync)
+
+    # --- finale: flash and sparkle burst once the new outfit is complete
+    finale: BoolProperty(name="Finale Flash", default=False, update=_sync,
+                         description="When the new outfit is complete it flashes with light and stars burst out "
+                                     "of it (uses the glow color; the stars use the particle color)")
+    finale_length: FloatProperty(name="Flash Time", default=0.15, min=0.02, max=1.0, subtype="FACTOR",
+                                 update=_sync,
+                                 description="How long the flash and the sparkles last, as a share of the "
+                                             "transformation")
+    finale_glow: FloatProperty(name="Flash Glow", default=2.0, min=0.0, soft_max=20.0, update=_sync,
+                               description="Brightness of the flash")
+    finale_sparkles: IntProperty(name="Sparkle Count", default=300, min=0, soft_max=3000, update=_sync,
+                                 description="About how many stars burst out of the new outfit (0 = none)")
+    finale_distance: _distance("Sparkle Distance", "How far the stars fly out", 3.5, soft_max=20.0)
 
     # --- particles released by the old outfit
     particles: EnumProperty(

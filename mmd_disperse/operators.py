@@ -50,8 +50,11 @@ class MMDDISPERSE_OT_build(bpy.types.Operator):
             self.report({"WARNING"}, "Bone names differ, not following the old armature: "
                         + ", ".join(info["unbound"]))
         else:
-            self.report({"INFO"}, "Built: {} new / {} old meshes, radius {:.2f}, path computed in {:.1f}s".format(
-                info["target_meshes"], info["base_meshes"], info["radius"], info["arrival_seconds"]))
+            text = "Built: {} new / {} old meshes, radius {:.2f}, path computed in {:.1f}s".format(
+                info["target_meshes"], info["base_meshes"], info["radius"], info["arrival_seconds"])
+            if info["record_seconds"]:
+                text += ", motion recorded in {:.1f}s".format(info["record_seconds"])
+            self.report({"INFO"}, text)
         return {"FINISHED"}
 
 

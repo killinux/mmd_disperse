@@ -13,25 +13,28 @@ Mirrors the Hell FX "Spider-Man suit-up" tutorial:
 Beyond the tutorial, the distance can come from a precomputed arrival field (the wave flows over the body
 or sweeps up / down, see arrival.py), the old outfit can break into flakes and particles instead, the new
 outfit can show up as a hologram ahead of the edge, and the edge can glitch: horizontal slices flicker
-between the two outfits.
+between the two outfits. Once the new outfit is complete it can flash and burst into sparkles (finale).
 """
 
 import math
 
 import bpy
 
-VERSION = 7
+VERSION = 8
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
 BASE_GROUP = "MMDDisperse Base"
 RIBBON_GROUP = "MMDDisperse Ribbon"
+PROBE_GROUP = "MMDDisperse Probe"
 
 ATTR_EDGE = "disperse_edge"
 ATTR_LOCK = "disperse_lock"
 ATTR_REST = "rest_position"
 ATTR_ARRIVAL = "disperse_arrival"
 ATTR_HOLO = "disperse_holo"
+ATTR_LAUNCH = "disperse_launch"  # where each vertex of the old outfit was when it broke off (leave behind)
+ATTR_AGE = "mmdd_age"  # written by the probe while the launch positions are recorded
 ATTR_NORMAL = "mmdd_normal"  # scratch attribute of the particle emitters, removed again
 
 # Wing angles (degrees) of the poses a butterfly cycles through.
@@ -74,6 +77,15 @@ TARGET_INPUTS = FIELD_INPUTS + (
     ("Fly Distance", "NodeSocketFloat", 5.0, 0.0, 10000.0, "DISTANCE"),
     ("Fly Range", "NodeSocketFloat", 1.6, 0.0, 10000.0, "DISTANCE"),
     ("Spin", "NodeSocketFloat", 4.0, -1000.0, 1000.0, "ANGLE"),
+    ("Finale", "NodeSocketBool", False, None, None, None),
+    ("Finale Start", "NodeSocketFloat", 1000.0, 0.0, 1e9, "DISTANCE"),
+    ("Finale Length", "NodeSocketFloat", 3.0, 0.0, 1e9, "DISTANCE"),
+    ("Finale Glow", "NodeSocketFloat", 0.5, 0.0, 1000.0, None),
+    ("Sparkles", "NodeSocketBool", False, None, None, None),
+    ("Sparkle Object", "NodeSocketObject", None, None, None, None),
+    ("Sparkle Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Sparkle Size", "NodeSocketFloat", 0.35, 0.0, 10000.0, "DISTANCE"),
+    ("Sparkle Distance", "NodeSocketFloat", 3.0, 0.0, 10000.0, "DISTANCE"),
 )
 
 BASE_INPUTS = FIELD_INPUTS + (
@@ -100,6 +112,7 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Particle Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
     ("Particle Size", "NodeSocketFloat", 0.35, 0.0, 10000.0, "DISTANCE"),
     ("Particle Flight", "NodeSocketFloat", 5.0, 0.0, 10000.0, "DISTANCE"),
+    ("Leave Behind", "NodeSocketBool", False, None, None, None),
 )
 
 RIBBON_INPUTS = (
@@ -111,6 +124,9 @@ RIBBON_INPUTS = (
     ("Width", "NodeSocketFloat", 0.15, 0.0, 10000.0, "DISTANCE"),
     ("Material", "NodeSocketMaterial", None, None, None, None),
 )
+
+# Inputs measured in object space: the add-on's sizes are world units, divided by the object's scale.
+DISTANCE_INPUTS = frozenset(spec[0] for spec in FIELD_INPUTS + TARGET_INPUTS + BASE_INPUTS if spec[5] == "DISTANCE")
 
 # Blender 3.x has no socket subtypes on group interfaces; the subtype is part of the socket type.
 _TYPED_3X = {
@@ -457,6 +473,17 @@ def build_target_group(field_group):
     rim = b.switch("FLOAT", b.compare("GREATER_THAN", d, radius, x=150, y=-50), edge, 0.0, x=300, y=-50)
     rim = b.switch("FLOAT", gi.outputs["Edge Glow"], 0.0, rim, x=450, y=-50)
     rim = b.math("MAXIMUM", rim, field["Flash"], x=600, y=-50)
+    # Finale: once the outfit is complete all of it flashes (quick rise, slow fade). finale_t runs 0 -> 1
+    # while the mask grows from Finale Start over Finale Length. Stored as flash^(1/8) like the silhouette.
+    finale_t = b.math("DIVIDE", b.math("SUBTRACT", radius, gi.outputs["Finale Start"], x=-700, y=-1900),
+                      b.math("MAXIMUM", gi.outputs["Finale Length"], 1e-4, x=-700, y=-2050), x=-500, y=-1950)
+    attack = b.math("DIVIDE", finale_t, 0.1, x=-300, y=-1900, clamp=True)
+    decay = b.math("POWER", b.math("SUBTRACT", 1.0, finale_t, x=-300, y=-2050, clamp=True), 2.0, x=-100, y=-2050)
+    flash = b.math("MULTIPLY", b.math("MULTIPLY", attack, decay, x=100, y=-1950), gi.outputs["Finale Glow"],
+                   x=300, y=-1950)
+    flash = b.switch("FLOAT", gi.outputs["Finale"], 0.0, b.math("POWER", flash, 0.125, x=500, y=-1950),
+                     x=700, y=-1950)
+    rim = b.math("MAXIMUM", rim, flash, x=750, y=-50)
     suit = b.store(suit, ATTR_EDGE, rim, x=400, y=350)
     # 0 at the edge .. 1 at the front of the hologram (materials draw a scan ring there).
     holo = b.math("DIVIDE", b.math("SUBTRACT", d, radius, x=150, y=-650),
@@ -541,9 +568,67 @@ def build_target_group(field_group):
     b.feed(mat.inputs["Material"], gi.outputs["Wire Material"])
     wire = b.switch("GEOMETRY", gi.outputs["Wire"], None, mat.outputs["Geometry"], x=1950, y=-150)
 
+    # --- Sparkle burst with the finale: stars shoot out of the whole outfit, twinkle and fade. The
+    # switch condition is a single value, so none of this is evaluated outside the flash.
+    burst_t = b.math("MULTIPLY", finale_t, 1.0, x=900, y=-2300, clamp=True)
+    window = b.boolean("AND", b.compare("GREATER_THAN", finale_t, 0.0, x=900, y=-2450),
+                       b.compare("LESS_THAN", finale_t, 1.0, x=900, y=-2600), x=1100, y=-2500)
+    bursting = b.boolean("AND", b.boolean("AND", gi.outputs["Finale"], gi.outputs["Sparkles"], x=1100, y=-2350),
+                         window, x=1300, y=-2400)
+    chance = b.math("MULTIPLY", b.node("GeometryNodeInputMeshFaceArea", 900, -2800).outputs[0],
+                    gi.outputs["Sparkle Density"], x=1100, y=-2800)
+    face_seed = b.on_domain(anchor, "FACE", "FLOAT_VECTOR", x=900, y=-3000)
+    lottery = b.white_noise(b.vmath("ADD", b.vmath("SCALE", face_seed, scale=2.93, x=1100, y=-3000),
+                                    (5.0, 11.0, 23.0), x=1300, y=-3000), x=1500, y=-3000)[0]
+    src = b.store(geo, ATTR_NORMAL, normal, "FLOAT_VECTOR", "FACE", x=1300, y=-2700)
+    to_points = b.node("GeometryNodeMeshToPoints", 1700, -2700, mode="FACES")
+    b.feed(to_points.inputs["Mesh"], src)
+    b.feed(to_points.inputs["Selection"], b.compare("LESS_THAN", lottery, chance, x=1700, y=-3000))
+    # On the points: rest position and the stored normal came along from the faces.
+    point_normal = b.named_attribute(ATTR_NORMAL, "FLOAT_VECTOR", x=1700, y=-3200)[0]
+    srnd, srnd_color = b.white_noise(b.vmath("SCALE", anchor, scale=4.17, x=1700, y=-3400), x=1900, y=-3400)
+    spread = b.vmath("SCALE", b.vmath("SUBTRACT", srnd_color, (0.5, 0.5, 0.5), x=2100, y=-3400), scale=1.4,
+                     x=2300, y=-3400)
+    heading = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("ADD", point_normal, spread, x=2500, y=-3300),
+                                           (0.0, 0.0, 0.35), x=2700, y=-3300), x=2900, y=-3300)
+    shot = b.math("SUBTRACT", 1.0, b.math("POWER", b.math("SUBTRACT", 1.0, burst_t, x=2100, y=-3600), 3.0,
+                                          x=2300, y=-3600), x=2500, y=-3600)
+    travel = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Sparkle Distance"], shot, x=2700, y=-3600),
+                    b.math("ADD", srnd, 0.5, x=2700, y=-3750), x=2900, y=-3650)
+    pts = b.set_position(to_points.outputs["Points"], b.vmath("SCALE", heading, scale=travel, x=3100, y=-3400),
+                         x=3300, y=-2700)
+    remove = b.node("GeometryNodeRemoveAttribute", 3500, -2700)
+    b.feed(remove.inputs["Geometry"], pts)
+    remove.inputs["Name"].default_value = ATTR_NORMAL
+    # Stars face the front (MMD models and cameras look along Y), each spun on its own.
+    cx, cy, _cz = b.split_xyz(srnd_color, x=2900, y=-3900)
+    rotation = b.combine(b.math("MULTIPLY_ADD", cx, 0.6, math.pi / 2 - 0.3, x=3100, y=-3850),
+                         b.math("MULTIPLY_ADD", srnd, 2.0 * math.pi, b.math("MULTIPLY", burst_t, 3.0, x=2900, y=-4100),
+                                x=3100, y=-4000),
+                         b.math("MULTIPLY_ADD", cy, 0.6, -0.3, x=3100, y=-4150), x=3300, y=-3950)
+    frame = b.node("GeometryNodeInputSceneTime", 2900, -4300).outputs["Frame"]
+    phase = b.math("MULTIPLY_ADD", frame, 1.1, b.math("MULTIPLY", srnd, 2.0 * math.pi, x=2900, y=-4450),
+                   x=3100, y=-4350)
+    twinkle = b.math("MULTIPLY_ADD", b.math("SINE", phase, x=3300, y=-4350), 0.3, 0.7, x=3500, y=-4350)
+    grow = b.math("MULTIPLY", b.map_range(burst_t, 0.0, 0.06, x=3300, y=-4550),
+                  b.math("POWER", b.math("SUBTRACT", 1.0, burst_t, x=3300, y=-4750), 1.5, x=3500, y=-4750),
+                  x=3700, y=-4600)
+    size = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Sparkle Size"], grow, x=3700, y=-4400), twinkle,
+                  x=3900, y=-4400)
+    size = b.math("MULTIPLY", size, b.math("MULTIPLY_ADD", srnd, 0.8, 0.6, x=3900, y=-4600), x=4100, y=-4450)
+    info = b.node("GeometryNodeObjectInfo", 3500, -3000, transform_space="ORIGINAL")
+    b.feed(info.inputs["Object"], gi.outputs["Sparkle Object"])
+    on_points = b.node("GeometryNodeInstanceOnPoints", 3800, -2700)
+    b.feed(on_points.inputs["Points"], remove.outputs["Geometry"])
+    b.feed(on_points.inputs["Instance"], info.outputs["Geometry"])
+    b.feed(on_points.inputs["Rotation"], rotation)
+    b.feed(on_points.inputs["Scale"], size)
+    sparkles = b.switch("GEOMETRY", bursting, None, on_points.outputs["Instances"], x=4100, y=-2500)
+
     join = b.node("GeometryNodeJoinGeometry", 2000, 250)
     b.feed(join.inputs["Geometry"], wire)
     b.feed(join.inputs["Geometry"], suit)
+    b.feed(join.inputs["Geometry"], sparkles)
     b.feed(go.inputs["Geometry"], join.outputs["Geometry"])
     return ng
 
@@ -625,6 +710,13 @@ def build_base_group(field_group):
     # Rest position seeds the per-piece random numbers, so they do not flicker while the body moves.
     rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=-1700, y=-1100)
     anchor = b.switch("VECTOR", has_rest, position, rest, x=-1500, y=-1100)
+    # Leave behind: flakes and particles start from where the body was when they broke off (recorded at
+    # build time, see launch.py) instead of riding along with the dancing body.
+    launch, has_launch = b.named_attribute(ATTR_LAUNCH, "FLOAT_VECTOR", x=-1700, y=-1300)
+
+    def left_behind(geo, x, y):
+        moved = b.set_position(geo, selection=has_launch, position=launch, x=x, y=y - 150)
+        return b.switch("GEOMETRY", gi.outputs["Leave Behind"], geo, moved, x=x + 200, y=y)
 
     # --- Shrink away (tutorial): sink under the new outfit, then delete behind the edge.
     inside = b.compare("LESS_EQUAL", d, radius, x=-1200, y=600)
@@ -657,6 +749,7 @@ def build_base_group(field_group):
     b.feed(sub.inputs["Level"], gi.outputs["Flake Subdivide"])
     split = b.node("GeometryNodeSplitEdges", 800, 0)
     b.feed(split.inputs["Mesh"], sub.outputs["Mesh"])
+    split_mesh = left_behind(split.outputs["Mesh"], 800, 250)
 
     # Everything below is per flake: face averages on the split mesh.
     tf = b.on_domain(t, "FACE", x=600, y=-500)
@@ -666,7 +759,7 @@ def build_base_group(field_group):
     rnd, rnd_color = b.white_noise(b.vmath("SCALE", seed, scale=7.31, x=800, y=-950), x=1000, y=-950)
 
     scale = b.node("GeometryNodeScaleElements", 1000, 0, domain="FACE")
-    b.feed(scale.inputs["Geometry"], split.outputs["Mesh"])
+    b.feed(scale.inputs["Geometry"], split_mesh)
     shrinking = b.math("POWER", b.math("SUBTRACT", 1.0, tf, x=800, y=-300), 0.6, x=1000, y=-300)
     b.feed(scale.inputs["Scale"], b.math("MULTIPLY", gi.outputs["Flake Size"], shrinking, x=1200, y=-300))
     b.feed(scale.inputs["Center"], center)
@@ -740,7 +833,7 @@ def build_base_group(field_group):
     alive = b.compare("LESS_THAN", b.on_domain(tp, "FACE", x=-400, y=-1800), 0.999, x=-200, y=-1800)
     emit = b.boolean("AND", b.boolean("AND", started, alive, x=0, y=-1900),
                      b.compare("LESS_THAN", lottery, chance, x=0, y=-2100), x=200, y=-2000)
-    src = b.store(geometry, ATTR_NORMAL, normal, "FLOAT_VECTOR", "FACE", x=0, y=-1600)
+    src = b.store(left_behind(geometry, -400, -1500), ATTR_NORMAL, normal, "FLOAT_VECTOR", "FACE", x=0, y=-1600)
     to_points = b.node("GeometryNodeMeshToPoints", 400, -1600, mode="FACES")
     b.feed(to_points.inputs["Mesh"], src)
     b.feed(to_points.inputs["Selection"], emit)
@@ -808,7 +901,11 @@ def build_base_group(field_group):
 
     # --- Silhouette: ahead of the edge the old outfit turns into glowing light (magical-girl style);
     # brightest right at the edge. Stored as glow^(1/8) because the material raises it to the 8th power.
-    lit = b.map_range(d, b.math("ADD", radius, gi.outputs["Silhouette Width"], x=3600, y=-300), radius,
+    # The zone grows in with the radius (like the hologram), so nothing glows at the very start.
+    sil_width = b.math("MINIMUM", gi.outputs["Silhouette Width"],
+                       b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=3200, y=-150), 2.0, x=3400, y=-150),
+                       x=3600, y=-150)
+    lit = b.map_range(d, b.math("ADD", radius, sil_width, x=3600, y=-300), radius,
                       x=3800, y=-300, smooth=True)
     lit = b.switch("FLOAT", gi.outputs["Silhouette"], 0.0, b.math("POWER", lit, 0.125, x=4000, y=-300),
                    x=4200, y=-300)
@@ -870,6 +967,30 @@ def ensure_ribbon_group():
     if not _is_current(RIBBON_GROUP):
         build_ribbon_group()
     return bpy.data.node_groups[RIBBON_GROUP]
+
+
+def build_probe_group(field_group):
+    """Modifier used while the launch positions are recorded (leave behind): stores the age the Base group
+    sees (mask radius minus the noisy distance) on every vertex, so Python can tell when each breaks off."""
+    ng = _new_group(PROBE_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in FIELD_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -600, 0)
+    go = b.node("NodeGroupOutput", 400, 0)
+    field = _field_node(b, field_group, gi, -300, -200)
+    age = b.math("SUBTRACT", field["Radius"], field["Distance"], x=0, y=-200)
+    b.feed(go.inputs["Geometry"], b.store(gi.outputs["Geometry"], ATTR_AGE, age, x=200, y=0))
+    return ng
+
+
+def ensure_probe_group():
+    ensure_node_groups()
+    if not _is_current(PROBE_GROUP):
+        build_probe_group(bpy.data.node_groups[FIELD_GROUP])
+    return bpy.data.node_groups[PROBE_GROUP]
 
 
 def _is_current(name):

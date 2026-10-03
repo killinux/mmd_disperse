@@ -5,19 +5,21 @@ blender -b "Tifa Gantz 18 V2.blend" --factory-startup --python tests/test_api.py
 """
 
 import argparse
+import math
 import os
 import sys
 import traceback
 
 import bpy
 import numpy as np
+from mathutils import Matrix
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
-from mmd_disperse import compositor, effect, materials, particles, presets, ribbons  # noqa: E402
+from mmd_disperse import compositor, effect, launch, materials, particles, presets, ribbons  # noqa: E402
 from mmd_disperse.arrival import limb_points  # noqa: E402
 from mmd_disperse.model import resolve, rest_points_world  # noqa: E402
 from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_EDGE, ATTR_HOLO, ATTR_LOCK, BASE_GROUP,  # noqa: E402
@@ -136,6 +138,37 @@ def evaluated_faces_and_edge(ob, name=ATTR_EDGE):
         ev.to_mesh_clear()
 
 
+def evaluated_values(ob, name):
+    """Values of attribute `name` on the evaluated mesh (None when it is missing)."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = ob.evaluated_get(deps)
+    me = ev.to_mesh()
+    try:
+        attr = me.attributes.get(name)
+        if attr is None:
+            return None
+        values = np.zeros(len(attr.data), dtype=np.float32)
+        attr.data.foreach_get("value", values)
+        return values
+    finally:
+        ev.to_mesh_clear()
+
+
+def flake_positions(ob):
+    """Object-space positions of the evaluated vertices and which of them glow (the flakes in the air)."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = ob.evaluated_get(deps)
+    me = ev.to_mesh()
+    try:
+        glow = np.zeros(len(me.vertices), dtype=np.float32)
+        me.attributes[ATTR_EDGE].data.foreach_get("value", glow)
+        co = np.zeros(len(me.vertices) * 3, dtype=np.float32)
+        me.vertices.foreach_get("co", co)
+        return co.reshape(-1, 3), glow > 0.0
+    finally:
+        ev.to_mesh_clear()
+
+
 def instance_count(ob):
     deps = bpy.context.evaluated_depsgraph_get()
     return sum(1 for inst in deps.object_instances
@@ -161,6 +194,37 @@ def locked_faces(ob):
 def our_modifiers(ob):
     return [m for m in ob.modifiers if m.type == "NODES" and m.node_group
             and m.node_group.name in (TARGET_GROUP, BASE_GROUP)]
+
+
+def skinned(ob):
+    """Vertex positions after skinning only (our node modifier switched off)."""
+    mods = our_modifiers(ob)
+    for m in mods:
+        m.show_viewport = False
+    try:
+        deps = bpy.context.evaluated_depsgraph_get()
+        ev = ob.evaluated_get(deps)
+        me = ev.to_mesh()
+        co = np.zeros(len(me.vertices) * 3, dtype=np.float32)
+        me.vertices.foreach_get("co", co)
+        ev.to_mesh_clear()
+        return co.reshape(-1, 3)
+    finally:
+        for m in mods:
+            m.show_viewport = True
+
+
+def arm_swing(base, target):
+    """How far the old and the new outfit move when the old armature lifts the left arm."""
+    pb = base.armature.pose.bones.get("腕.L") or base.armature.pose.bones.get("左腕")
+    meshes = (base.meshes[0], target.meshes[0])
+    before = [skinned(ob) for ob in meshes]
+    pb.matrix_basis = Matrix.Rotation(math.radians(60.0), 4, "X")
+    bpy.context.view_layer.update()
+    after = [skinned(ob) for ob in meshes]
+    pb.matrix_basis = Matrix.Identity(4)
+    bpy.context.view_layer.update()
+    return [float(np.linalg.norm(a - b, axis=1).max()) for a, b in zip(after, before)]
 
 
 def run():
@@ -192,9 +256,9 @@ def run():
         names = [m.type for m in ob.modifiers]
         check(names.index("NODES") == names.index("ARMATURE") + 1, "modifier right after armature on " + ob.name)
         check(ob.data.attributes.get(ATTR_LOCK) is not None, "lock attribute on " + ob.name)
-    for ob in target.meshes:
-        arms = [m.object for m in ob.modifiers if m.type == "ARMATURE"]
-        check(arms == [base.armature], "new outfit bound to the old armature")
+    old_move, new_move = arm_swing(base, target)
+    check(old_move > 0.02 * effect.model_height(base_root) and new_move > 0.5 * old_move,
+          "new outfit follows the old armature (arm lifted: old %.2f, new %.2f)" % (old_move, new_move))
     glow = [s_.material for ob in target.meshes for s_ in ob.material_slots
             if s_.material and s_.material.get(materials.P_GLOW)]
     check(len(glow) > 0, "edge glow injected into %d materials" % len(glow))
@@ -249,6 +313,8 @@ def run():
     for key_ in before:
         check(before[key_] == after[key_], "restored " + key_)
     check(not any(o.name.startswith(effect.MASK_NAME) for o in bpy.data.objects), "mask deleted")
+    check(not any(c.name.startswith(effect.FOLLOW) for pb in target.armature.pose.bones for c in pb.constraints),
+          "no pose-copy constraints left on the new armature")
 
     # --- new outfit only (materialises from nothing)
     s.base = None
@@ -394,6 +460,49 @@ def run():
           "cast-off: only the shared parts left")
     s.entrance, s.exit_style = "GROW", "SHRINK"
 
+    # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
+    # broke off, the others ride along
+    arm = base.armature
+    centre = arm.pose.bones.get("センター") or next(pb for pb in arm.pose.bones if pb.parent is None)
+    old_action = arm.animation_data.action if arm.animation_data else None
+    centre.location = (0.0, 0.0, 0.0)
+    centre.keyframe_insert("location", frame=1)
+    centre.location = (0.5 * height, 0.0, 0.0)
+    centre.keyframe_insert("location", frame=100)
+    to_mesh = base.meshes[0].matrix_world.inverted() @ arm.matrix_world
+    scene.frame_set(30)
+    head30 = to_mesh @ centre.head
+    scene.frame_set(60)
+    slide = (to_mesh @ centre.head) - head30
+    direction = np.array(slide.normalized())
+    s.exit_style, s.particles = "FRAGMENTS", "PETAL"
+    shots = {}
+    for keep in (False, True):
+        s.leave_behind = keep
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with leave behind = %s" % keep)
+        scene.frame_set(60)
+        shots[keep] = flake_positions(base.meshes[0])
+    check(launch.has_launch(base.meshes[0]), "launch positions recorded")
+    check(not draw_panels(bpy.context), "panels draw with leave behind")
+    # Same flakes in both builds; recorded ones trail the riding ones by the slide since they broke off
+    # (flakes live a few frames), and none is ahead of where the body was.
+    (riding, flying), (left, flying_left) = shots[False], shots[True]
+    same = riding.shape == left.shape and bool((flying == flying_left).all()) and bool(flying.any())
+    lag = (riding[flying] - left[flying]) @ direction if same else np.zeros(1)
+    per_frame = slide.length / 30.0
+    check(same and np.percentile(lag, 90) > per_frame and lag.min() > -0.01 * height,
+          "flakes left behind: 10%% trail by over %.2f (body slides %.2f per frame), none ahead (%.3f)"
+          % (np.percentile(lag, 90), per_frame, lag.min()))
+    s.particle_life = s.particle_life + 0.05  # the petals set the tail: the mask keys change
+    check(not launch.has_launch(base.meshes[0]), "recording dropped when the timing changes")
+    s.particle_life = s.particle_life - 0.05
+    s.leave_behind, s.exit_style, s.particles = False, "SHRINK", "NONE"
+    centre.location = (0.0, 0.0, 0.0)
+    if old_action is None:
+        arm.animation_data_clear()
+    else:
+        arm.animation_data.action = old_action
+
     # --- presets; the magical girl adds light ribbons, sparkles and the glowing silhouette
     for key, _label, _desc in presets.ITEMS:
         check(bpy.ops.mmd_disperse.apply_preset(preset=key) == {"FINISHED"}, "preset " + key)
@@ -414,6 +523,45 @@ def run():
     scene.frame_set(100)
     check(evaluated_faces_and_edge(base.meshes[0])[0] == locked_faces(base.meshes[0]),
           "magical girl: only the shared parts of the old outfit left")
+
+    # --- finale: once the new outfit is complete all of it flashes and stars burst out, then it settles
+    check(s.finale, "magical girl preset has the finale")
+    wave = float(s.mask[effect.P_WAVE])
+    before_flash = flash_frame = None
+    for f in range(1, 101):
+        scene.frame_set(f)
+        progress = (s.mask.scale[0] - wave) / (s.finale_length * wave)
+        if progress < -0.05:
+            before_flash = f
+        elif 0.1 <= progress <= 0.4:
+            flash_frame = f
+            break
+    check(flash_frame is not None and before_flash is not None,
+          "finale inside the frame range (frame %s)" % flash_frame)
+    if flash_frame is not None and before_flash is not None:
+        scene.frame_set(before_flash)
+        glow = evaluated_values(target.meshes[0], ATTR_EDGE)
+        check(float(np.median(glow)) == 0.0 and instance_count(target.meshes[0]) == 0,
+              "no flash and no stars before the outfit is complete (frame %d)" % before_flash)
+        scene.frame_set(flash_frame)
+        glow = evaluated_values(target.meshes[0], ATTR_EDGE)
+        stars = instance_count(target.meshes[0])
+        check(float(np.median(glow)) > 0.5, "the whole new outfit flashes at frame %d (median %.2f)"
+              % (flash_frame, float(np.median(glow))))
+        check(stars > 50, "stars burst out with the flash (%d)" % stars)
+    scene.frame_set(100)
+    glow = evaluated_values(target.meshes[0], ATTR_EDGE)
+    check(float(glow.max()) == 0.0 and instance_count(target.meshes[0]) == 0, "flash and stars over at the end")
+
+    # --- the tail follows the panel: without the sparkles the mask stops sooner (the flakes and finale fit)
+    reach = float(s.mask[effect.P_REACH])
+    s.particles = "NONE"
+    radius = wave * (1.0 + max(s.frag_life, s.finale_length))
+    scene.frame_set(100)
+    check(abs(float(s.mask[effect.P_REACH]) - radius) < 1e-4 * radius and abs(s.mask.scale[0] - radius) < 1e-3 * radius,
+          "mask keys retimed live (%.3f -> %.3f)" % (reach, s.mask.scale[0]))
+    s.particles = "STAR"
+    check(abs(float(s.mask[effect.P_REACH]) - reach) < 1e-4 * reach, "and stretched again with the sparkles")
     s.ribbon_enable = False
     check(not ribbons.ribbon_objects(s.mask), "ribbons removed when switched off")
     s.ribbon_enable = True
@@ -428,6 +576,34 @@ def run():
     check(all(before[k] == after[k] for k in before), "models restored after flakes, sweeps and petals")
     check(not any(bpy.data.objects.get(n) for n in particles.NAMES.values()), "particle shapes removed")
     check(not any(o.name.startswith(ribbons.NAME) for o in bpy.data.objects), "ribbons removed")
+
+    # --- a scaled model transforms the same way: sizes are converted to object space
+    s.exit_style, s.particles = "FRAGMENTS", "PETAL"
+
+    def picture(path):
+        s.path = path
+        bpy.ops.mmd_disperse.build()
+        seen = []
+        for f in (35, 65):
+            scene.frame_set(f)
+            seen.append((evaluated_faces_and_edge(target.meshes[0])[0], evaluated_faces_and_edge(base.meshes[0])[0],
+                         instance_count(base.meshes[0])))
+        bpy.ops.mmd_disperse.remove()
+        return seen
+
+    def close(a, b):
+        return all(abs(x - y) <= 0.01 * max(x, y) + 2 for x, y in zip(a, b))
+
+    for path in ("SPHERE", "SURFACE"):
+        plain = picture(path)
+        base_root.scale = [v * 0.5 for v in base_root.scale]
+        bpy.context.view_layer.update()
+        scaled = picture(path)
+        base_root.scale = [v * 2.0 for v in base_root.scale]
+        bpy.context.view_layer.update()
+        check(all(close(a, b) for a, b in zip(plain, scaled)),
+              "half-size model, %s: same faces and petals (%s vs %s)" % (path, plain, scaled))
+    s.path, s.exit_style, s.particles = "SPHERE", "SHRINK", "NONE"
 
     # --- old outfit only: the whole model disintegrates
     s.target, s.use_lock, s.particles = None, False, "NONE"

@@ -7,6 +7,8 @@ a 1080x1920 sequence.
 blender -b "Tifa Gantz 18 V2.blend" --factory-startup --python demo/render_hd.py -- \
     --target-blend "Tifa Gantz 18 V1.blend" --target-root "Tifa Gantz 18 V1" \
     --base-root "Tifa Gantz 18 V2" --out test_output/hd --frames 1,100,200
+
+Add --vmd dance.vmd to let the model dance (mmd_tools must be installed).
 """
 
 import argparse
@@ -26,7 +28,7 @@ sys.path.insert(0, os.path.join(REPO, "tests"))
 import mmd_disperse  # noqa: E402
 from mmd_disperse import compositor, presets  # noqa: E402
 from mmd_disperse.model import resolve, rest_bounds  # noqa: E402
-from scene_setup import add_model_args, apply_settings, load_models  # noqa: E402
+from scene_setup import add_model_args, apply_settings, load_dance, load_models  # noqa: E402
 
 TIFA_LOCK = "Face*;Hair*;Eye*;*Brows*;Eyelashes*;Mouth*;*Teeth*;Inners*"
 NORMAL_NAME = re.compile(r"n(or)?m|nrm|[ _]n[ _.]|n_ao|mapn")  # CSuit_Body_norm, Arms_N, Tifa Head N_AO ...
@@ -291,6 +293,8 @@ def main():
 
     base_root, target_root = load_models(args)
     base, target = resolve(base_root), resolve(target_root)
+    if args.vmd:
+        load_dance(base.armature, args.vmd, args.vmd_scale)
     kinds = upgrade_materials(base.meshes + target.meshes)
     print("HD MATERIALS", kinds)
 

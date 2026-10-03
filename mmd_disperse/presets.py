@@ -3,7 +3,7 @@ build-time settings, so an effect that is already built gets rebuilt with them."
 
 _OFF = dict(
     entrance="GROW", exit_style="SHRINK", particles="NONE", wire_enable=False, holo_enable=False,
-    glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True,
+    glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True, finale=False,
 )
 
 PRESETS = (
@@ -22,9 +22,9 @@ PRESETS = (
      dict(_OFF, path="SURFACE", seeds="ORIGIN", entrance="ASSEMBLE", exit_style="CHUNKS", frag_glow=True,
           glow_color=(1.0, 0.55, 0.1))),
     ("MAGICAL", "Magical Girl", "Hands and feet first: the body lights up, ribbons of light wrap the limbs, "
-                                "the old outfit bursts into sparkles",
+                                "the old outfit bursts into sparkles and the new one flashes when it is complete",
      dict(_OFF, path="SURFACE", seeds="LIMBS", exit_style="FRAGMENTS", frag_glow=True, silhouette=True,
-          frag_glow_strength=1.5, ribbon_enable=True, ribbon_strength=2.5, particles="STAR",
+          frag_glow_strength=1.5, ribbon_enable=True, ribbon_strength=2.5, particles="STAR", finale=True,
           particle_color=(1.0, 0.85, 0.55), particle_glow=4.0,
           glow_color=(1.0, 0.45, 0.8), frag_wind_dir=(0.0, 0.2, 1.0))),
 )

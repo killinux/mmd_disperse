@@ -1,5 +1,6 @@
 import bpy
 
+from . import effect, launch
 from .model import find_armature
 
 
@@ -199,6 +200,32 @@ class MMDDISPERSE_PT_ribbons(_Panel, bpy.types.Panel):
         layout.label(text="Uses the glow color of the wire layer", icon="INFO")
 
 
+class MMDDISPERSE_PT_finale(_Panel, bpy.types.Panel):
+    bl_label = "Finale Flash"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "finale", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.finale
+        col = layout.column(align=True)
+        col.prop(s, "finale_length")
+        col.prop(s, "finale_glow")
+        col = layout.column(align=True)
+        col.prop(s, "finale_sparkles")
+        col.prop(s, "finale_distance")
+        col.prop(s, "particle_size")
+        col = layout.column()
+        col.prop(s, "particle_color")
+        col.prop(s, "particle_glow")
+
+
 class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
     bl_label = "Old Outfit Cleanup"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -231,6 +258,12 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
             col.prop(s, "frag_wind_dir")
             col.prop(s, "frag_turbulence")
             col.prop(s, "frag_spin")
+        if s.exit_style == "FRAGMENTS" or s.particles != "NONE":
+            col = layout.column()
+            col.prop(s, "leave_behind")
+            if s.leave_behind and s.mask is not None and not any(
+                    launch.has_launch(ob) for ob in effect.effect_objects(s.mask)):
+                col.label(text="Rebuild to record the motion", icon="INFO")
         col = layout.column(align=True)
         if s.exit_style != "SHRINK":
             col.prop(s, "frag_glow")
@@ -282,6 +315,7 @@ classes = (
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_ribbons,
+    MMDDISPERSE_PT_finale,
     MMDDISPERSE_PT_old,
     MMDDISPERSE_PT_particles,
 )

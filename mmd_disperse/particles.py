@@ -4,6 +4,8 @@ They are ordinary mesh objects in a hidden collection, so they can be edited (or
 object with the "Custom Object" option); the node tree only reads their geometry.
 """
 
+import math
+
 import bpy
 
 from . import materials
@@ -11,7 +13,8 @@ from . import materials
 COLLECTION = "MMD Disperse Particles"
 PETAL = "MMD Disperse Petal"
 BUTTERFLY = "MMD Disperse Butterfly"
-NAMES = {"PETAL": PETAL, "BUTTERFLY": BUTTERFLY}
+STAR = "MMD Disperse Star"
+NAMES = {"PETAL": PETAL, "BUTTERFLY": BUTTERFLY, "STAR": STAR}
 
 
 def _petal():
@@ -53,6 +56,19 @@ def _butterfly():
     return verts, faces, uvs
 
 
+def _star():
+    """Four-pointed sparkle, 1 unit across, in the XY plane; brightest in the middle (UV x = 1 - radius)."""
+    verts, uvs = [(0.0, 0.0, 0.0)], [(1.0, 0.5)]
+    points = 8
+    for i in range(points):
+        angle = math.pi * 2.0 * i / points
+        r = 0.5 if i % 2 == 0 else 0.12
+        verts.append((r * math.cos(angle), r * math.sin(angle), 0.0))
+        uvs.append((1.0 - r * 2.0, 0.5))
+    faces = [(0, 1 + i, 1 + (i + 1) % points) for i in range(points)]
+    return verts, faces, uvs
+
+
 def _collection(scene):
     coll = bpy.data.collections.get(COLLECTION)
     if coll is None:
@@ -70,7 +86,7 @@ def ensure_asset(kind, scene):
     ob = bpy.data.objects.get(name)
     if ob is not None and ob.type == "MESH":
         return ob
-    verts, faces, uvs = _petal() if kind == "PETAL" else _butterfly()
+    verts, faces, uvs = {"PETAL": _petal, "BUTTERFLY": _butterfly, "STAR": _star}[kind]()
     me = bpy.data.meshes.new(name)
     me.from_pydata(verts, [], faces)
     layer = me.uv_layers.new(name="UVMap")

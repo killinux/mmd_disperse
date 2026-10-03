@@ -11,23 +11,27 @@ Mirrors the Hell FX "Spider-Man suit-up" tutorial:
 * the old outfit is shrunk inwards and then deleted behind the boundary.
 
 Beyond the tutorial, the distance can come from a precomputed arrival field (the wave flows over the body
-or sweeps up / down, see arrival.py), and the old outfit can break into flakes and particles instead.
+or sweeps up / down, see arrival.py), the old outfit can break into flakes and particles instead, the new
+outfit can show up as a hologram ahead of the edge, and the edge can glitch: horizontal slices flicker
+between the two outfits.
 """
 
 import math
 
 import bpy
 
-VERSION = 3
+VERSION = 7
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
 BASE_GROUP = "MMDDisperse Base"
+RIBBON_GROUP = "MMDDisperse Ribbon"
 
 ATTR_EDGE = "disperse_edge"
 ATTR_LOCK = "disperse_lock"
 ATTR_REST = "rest_position"
 ATTR_ARRIVAL = "disperse_arrival"
+ATTR_HOLO = "disperse_holo"
 ATTR_NORMAL = "mmdd_normal"  # scratch attribute of the particle emitters, removed again
 
 # Wing angles (degrees) of the poses a butterfly cycles through.
@@ -41,6 +45,13 @@ FIELD_INPUTS = (
     ("Noise Scale", "NodeSocketFloat", 0.3, 0.0, 10000.0, None),
     ("Noise Detail", "NodeSocketFloat", 2.0, 0.0, 15.0, None),
     ("Noise Amount", "NodeSocketFloat", 1.0, 0.0, 10000.0, "DISTANCE"),
+    ("Reach", "NodeSocketFloat", 1000.0, 0.0, 1e9, "DISTANCE"),
+    ("Glitch", "NodeSocketBool", False, None, None, None),
+    ("Glitch Width", "NodeSocketFloat", 3.0, 0.0, 10000.0, "DISTANCE"),
+    ("Slice Height", "NodeSocketFloat", 0.25, 0.0, 10000.0, "DISTANCE"),
+    ("Glitch Rate", "NodeSocketFloat", 0.5, 0.0, 100.0, None),
+    ("Glitch Shift", "NodeSocketFloat", 0.4, 0.0, 10000.0, "DISTANCE"),
+    ("Glitch Flash", "NodeSocketBool", True, None, None, None),
 )
 
 TARGET_INPUTS = FIELD_INPUTS + (
@@ -55,13 +66,25 @@ TARGET_INPUTS = FIELD_INPUTS + (
     ("Wire Lift", "NodeSocketFloat", 0.04, -10000.0, 10000.0, "DISTANCE"),
     ("Wire Resolution", "NodeSocketInt", 4, 3, 32, None),
     ("Wire Material", "NodeSocketMaterial", None, None, None, None),
+    ("Edge Glow", "NodeSocketBool", True, None, None, None),
+    ("Hologram", "NodeSocketBool", False, None, None, None),
+    ("Hologram Width", "NodeSocketFloat", 2.5, 0.0, 10000.0, "DISTANCE"),
+    ("Assemble", "NodeSocketBool", False, None, None, None),
+    ("Piece Size", "NodeSocketFloat", 1.2, 0.0, 10000.0, "DISTANCE"),
+    ("Fly Distance", "NodeSocketFloat", 5.0, 0.0, 10000.0, "DISTANCE"),
+    ("Fly Range", "NodeSocketFloat", 1.6, 0.0, 10000.0, "DISTANCE"),
+    ("Spin", "NodeSocketFloat", 4.0, -1000.0, 1000.0, "ANGLE"),
 )
 
 BASE_INPUTS = FIELD_INPUTS + (
     ("Shrink", "NodeSocketFloat", 0.08, -10000.0, 10000.0, "DISTANCE"),
     ("Delete Offset", "NodeSocketFloat", 0.6, 0.0, 10000.0, "DISTANCE"),
     ("Fragments", "NodeSocketBool", False, None, None, None),
-    ("Reach", "NodeSocketFloat", 1000.0, 0.0, 1e9, "DISTANCE"),
+    ("Chunks", "NodeSocketBool", False, None, None, None),
+    ("Piece Size", "NodeSocketFloat", 1.2, 0.0, 10000.0, "DISTANCE"),
+    ("Chunk Force", "NodeSocketFloat", 3.0, 0.0, 10000.0, "DISTANCE"),
+    ("Silhouette", "NodeSocketBool", False, None, None, None),
+    ("Silhouette Width", "NodeSocketFloat", 3.0, 0.0, 10000.0, "DISTANCE"),
     ("Flake Size", "NodeSocketFloat", 0.85, 0.0, 1.0, "FACTOR"),
     ("Flake Subdivide", "NodeSocketInt", 0, 0, 2, None),
     ("Flight", "NodeSocketFloat", 2.5, 0.0, 10000.0, "DISTANCE"),
@@ -77,6 +100,16 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Particle Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
     ("Particle Size", "NodeSocketFloat", 0.35, 0.0, 10000.0, "DISTANCE"),
     ("Particle Flight", "NodeSocketFloat", 5.0, 0.0, 10000.0, "DISTANCE"),
+)
+
+RIBBON_INPUTS = (
+    ("Mask", "NodeSocketObject", None, None, None, None),
+    ("Start", "NodeSocketFloat", 0.0, -1e9, 1e9, "DISTANCE"),
+    ("End", "NodeSocketFloat", 1.0, -1e9, 1e9, "DISTANCE"),
+    ("Lead", "NodeSocketFloat", 1.0, 0.0, 10000.0, "DISTANCE"),
+    ("Linger", "NodeSocketFloat", 2.0, 0.0, 10000.0, "DISTANCE"),
+    ("Width", "NodeSocketFloat", 0.15, 0.0, 10000.0, "DISTANCE"),
+    ("Material", "NodeSocketMaterial", None, None, None, None),
 )
 
 # Blender 3.x has no socket subtypes on group interfaces; the subtype is part of the socket type.
@@ -252,6 +285,24 @@ class _Builder:
         self.feed(n.inputs["Vector"], vector)
         return n.outputs[0], n.outputs[1]
 
+    def accumulate(self, value, group, data_type="FLOAT", x=0, y=0):
+        """Per-group total of a point field (Accumulate Field)."""
+        n = self.node("GeometryNodeAccumulateField", x, y, data_type=data_type, domain="POINT")
+        self.feed(_enabled(n.inputs, "Value")[0], value)
+        self.feed(n.inputs["Group ID"], group)
+        return _enabled(n.outputs, "Total")[0]
+
+    def curve_to_mesh(self, curve, profile, x=0, y=0):
+        """Curve to Mesh scaled by the curve radius. Blender 4.2+ has a Scale input and no longer uses the
+        radius by itself; 3.x always does."""
+        n = self.node("GeometryNodeCurveToMesh", x, y)
+        self.feed(n.inputs["Curve"], curve)
+        self.feed(n.inputs["Profile Curve"], profile)
+        scale = n.inputs.get("Scale")
+        if scale is not None:
+            self.feed(scale, self.node("GeometryNodeInputRadius", x - 200, y - 250).outputs[0])
+        return n.outputs["Mesh"]
+
     def rotate(self, vector, center, axis, angle, x=0, y=0):
         n = self.node("ShaderNodeVectorRotate", x, y, rotation_type="AXIS_ANGLE")
         for name, value in (("Vector", vector), ("Center", center), ("Axis", axis), ("Angle", angle)):
@@ -260,12 +311,17 @@ class _Builder:
 
 
 def build_field_group():
-    """Distance to the (noisy) sphere mask - or the precomputed arrival distance - and the mask radius."""
+    """Distance to the (noisy) sphere mask - or the precomputed arrival distance - and the mask radius,
+    plus the glitch fields both outfits share (so a slice shows exactly one of them)."""
     ng = _new_group(FIELD_GROUP, is_modifier=False)
     for spec in FIELD_INPUTS:
         _add_socket(ng, spec[0], "INPUT", *spec[1:])
     _add_socket(ng, "Distance", "OUTPUT", "NodeSocketFloat")
     _add_socket(ng, "Radius", "OUTPUT", "NodeSocketFloat")
+    _add_socket(ng, "Glitching", "OUTPUT", "NodeSocketBool")
+    _add_socket(ng, "New Side", "OUTPUT", "NodeSocketBool")
+    _add_socket(ng, "Glitch Offset", "OUTPUT", "NodeSocketVector")
+    _add_socket(ng, "Flash", "OUTPUT", "NodeSocketFloat")
 
     b = _Builder(ng)
     gi = b.node("NodeGroupInput", -1100, 0)
@@ -304,17 +360,53 @@ def build_field_group():
     amp = b.math("MULTIPLY", amount, ramp, x=350, y=-450)
     distance = b.math("MULTIPLY_ADD", signed, amp, dist, x=600, y=-150)
 
+    # --- Glitch: in a band around the front, horizontal slices flicker between the outfits. The band
+    # opens after the start and closes before the mask stops, so nothing flickers at either end.
+    half = b.math("MINIMUM", b.math("MULTIPLY", gi.outputs["Glitch Width"], 0.5, x=-100, y=-800),
+                  b.math("MAXIMUM", radius, 0.0, x=-100, y=-950), x=100, y=-850)
+    left = b.math("MAXIMUM", b.math("SUBTRACT", gi.outputs["Reach"], radius, x=-100, y=-1100), 0.0,
+                  x=100, y=-1100)
+    half = b.math("MINIMUM", half, left, x=300, y=-950)
+    ahead = b.math("SUBTRACT", distance, radius, x=300, y=-750)
+    in_band = b.compare("LESS_THAN", b.math("ABSOLUTE", ahead, x=500, y=-750), half, x=700, y=-800)
+    glitching = b.boolean("AND", gi.outputs["Glitch"], in_band, x=900, y=-800)
+    # Chance that a slice shows the new outfit: 1 at the inner side of the band, 0 at the outer side.
+    share = b.math("DIVIDE", b.math("SUBTRACT", half, ahead, x=500, y=-950),
+                   b.math("MAXIMUM", b.math("MULTIPLY", half, 2.0, x=500, y=-1100), 1e-4, x=700, y=-1100),
+                   x=900, y=-1000, clamp=True)
+    height = b.split_xyz(position, x=-100, y=-1300)[2]
+    row = b.math("FLOOR", b.math("DIVIDE", height, b.math("MAXIMUM", gi.outputs["Slice Height"], 1e-4,
+                                                           x=-100, y=-1450), x=100, y=-1350), x=300, y=-1350)
+    frame = b.node("GeometryNodeInputSceneTime", -100, -1600).outputs["Frame"]
+    tick = b.math("FLOOR", b.math("MULTIPLY", frame, gi.outputs["Glitch Rate"], x=100, y=-1550), x=300, y=-1550)
+    dice, dice_color = b.white_noise(b.combine(row, tick, 0.37, x=500, y=-1400), x=700, y=-1400)
+    new_side = b.compare("LESS_THAN", dice, share, x=1100, y=-1000)
+    jump_x, jump_y, glow_z = b.split_xyz(dice_color, x=900, y=-1400)
+    jumping = b.boolean("AND", glitching, b.compare("LESS_THAN", jump_x, 0.35, x=1100, y=-1350), x=1300, y=-1300)
+    shift = b.math("MULTIPLY", b.math("MULTIPLY_ADD", jump_y, 2.0, -1.0, x=1100, y=-1500),
+                   gi.outputs["Glitch Shift"], x=1300, y=-1500)
+    offset = b.combine(b.switch("FLOAT", jumping, 0.0, shift, x=1500, y=-1400), 0.0, 0.0, x=1700, y=-1400)
+    flashing = b.boolean("AND", glitching, b.compare("GREATER_THAN", glow_z, 0.85, x=1100, y=-1650),
+                         x=1300, y=-1650)
+    flashing = b.boolean("AND", flashing, gi.outputs["Glitch Flash"], x=1400, y=-1700)
+    flash = b.switch("FLOAT", flashing, 0.0, 1.0, x=1500, y=-1650)
+
     b.feed(go.inputs["Distance"], distance)
     b.feed(go.inputs["Radius"], radius)
+    b.feed(go.inputs["Glitching"], glitching)
+    b.feed(go.inputs["New Side"], new_side)
+    b.feed(go.inputs["Glitch Offset"], offset)
+    b.feed(go.inputs["Flash"], flash)
     return ng
 
 
 def _field_node(b, field_group, gi, x, y):
+    """Outputs of the shared Field group: Distance, Radius, Glitching, New Side, Glitch Offset, Flash."""
     n = b.node("GeometryNodeGroup", x, y)
     n.node_tree = field_group
     for spec in FIELD_INPUTS:
         b.feed(n.inputs[spec[0]], gi.outputs[spec[0]])
-    return n.outputs["Distance"], n.outputs["Radius"]
+    return n.outputs
 
 
 def build_target_group(field_group):
@@ -333,24 +425,84 @@ def build_target_group(field_group):
     b.feed(sub.inputs["Mesh"], gi.outputs["Geometry"])
     b.feed(sub.inputs["Level"], gi.outputs["Subdivide"])
 
-    d, radius = _field_node(b, field_group, gi, -1300, -300)
+    field = _field_node(b, field_group, gi, -1300, -300)
+    d, radius = field["Distance"], field["Radius"]
 
     # Parts locked to the old model (face, hair ...) never come from the new one.
     lock = b.named_attribute(ATTR_LOCK, "BOOLEAN", x=-1300, y=500)[0]
     geo = b.delete(sub.outputs["Mesh"], lock, "FACE", x=-1000, y=300)
 
     # --- Suit: 0 keep / 1 delete, then push the edge out along the normals.
-    outside = b.compare("GREATER_THAN", d, radius, x=-700, y=150)
-    suit = b.delete(geo, outside, "POINT", x=-450, y=350)
+    # With the hologram on, the new outfit already shows this far ahead of the edge (growing in from
+    # nothing, so it is not there at radius 0).
+    holo_width = b.math("MINIMUM", gi.outputs["Hologram Width"],
+                        b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=-1000, y=-550), 2.0, x=-850, y=-550),
+                        x=-700, y=-500)
+    holo_width = b.switch("FLOAT", gi.outputs["Hologram"], 0.0, holo_width, x=-550, y=-500)
+    front = b.math("ADD", radius, holo_width, x=-400, y=-500)
+    shown = b.compare("LESS_EQUAL", d, front, x=-700, y=150)
+    # Glitching slices show whichever outfit the dice picked.
+    shown = b.switch("BOOLEAN", field["Glitching"], shown, field["New Side"], x=-550, y=150)
+    suit = b.delete(geo, b.boolean("NOT", shown, x=-450, y=150), "POINT", x=-450, y=350)
     edge_start = b.math("SUBTRACT", radius, gi.outputs["Edge Width"], x=-700, y=-50)
     edge = b.map_range(d, edge_start, radius, x=-450, y=-50)
     grad = b.map_range(edge, 0.0, 1.0, x=-450, y=-200, smooth=True)
     normal = b.node("GeometryNodeInputNormal", -450, -350).outputs[0]
     push = b.vmath("SCALE", normal, scale=b.math("MULTIPLY", grad, gi.outputs["Edge Push"], x=-250, y=-150),
                    x=-50, y=-150)
+    push = b.vmath("ADD", push, field["Glitch Offset"], x=50, y=-250)
     suit = b.set_position(suit, push, x=150, y=350)
-    # Linear 0..1 towards the boundary; materials turn it into a thin glowing rim.
-    suit = b.store(suit, ATTR_EDGE, edge, x=400, y=350)
+    # Linear 0..1 towards the boundary; materials turn it into a thin glowing rim. Nothing glows ahead of
+    # the edge (hologram) except the glitch flashes.
+    rim = b.switch("FLOAT", b.compare("GREATER_THAN", d, radius, x=150, y=-50), edge, 0.0, x=300, y=-50)
+    rim = b.switch("FLOAT", gi.outputs["Edge Glow"], 0.0, rim, x=450, y=-50)
+    rim = b.math("MAXIMUM", rim, field["Flash"], x=600, y=-50)
+    suit = b.store(suit, ATTR_EDGE, rim, x=400, y=350)
+    # 0 at the edge .. 1 at the front of the hologram (materials draw a scan ring there).
+    holo = b.math("DIVIDE", b.math("SUBTRACT", d, radius, x=150, y=-650),
+                  b.math("MAXIMUM", holo_width, 1e-4, x=150, y=-800), x=350, y=-700, clamp=True)
+    holo = b.switch("FLOAT", gi.outputs["Hologram"], 0.0, holo, x=550, y=-700)
+    suit = b.store(suit, ATTR_HOLO, holo, x=600, y=350)
+
+    # --- Assemble: the new outfit arrives in pieces that fly in from around the body and click into
+    # place where the front passes (instead of growing at the front).
+    rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=-1300, y=1200)
+    position = b.node("GeometryNodeInputPosition", -1300, 1050).outputs[0]
+    anchor = b.switch("VECTOR", has_rest, position, rest, x=-1100, y=1100)
+    pieces, island, count, center, rest_center, piece_normal = _pieces(
+        b, geo, anchor, gi.outputs["Piece Size"], 0.0, -1000, 1500)
+    piece_d = b.math("DIVIDE", b.accumulate(d, island, x=1200, y=1200), count, x=1400, y=1200)
+    lead = b.math("MINIMUM", gi.outputs["Fly Range"], b.math("MAXIMUM", radius, 0.0, x=1200, y=1050),
+                  x=1400, y=1050)
+    # 0 when a piece shows up (lead ahead of the front) .. 1 once it is in place
+    landed = b.math("DIVIDE", b.math("ADD", b.math("SUBTRACT", radius, piece_d, x=1600, y=1200), lead,
+                                     x=1800, y=1200),
+                    b.math("MAXIMUM", lead, 1e-4, x=1600, y=1050), x=2000, y=1150, clamp=True)
+    pieces = b.delete(pieces, b.compare("LESS_EQUAL", landed, 0.0, x=2000, y=1350), "POINT", x=2200, y=1500)
+    flying = b.math("SUBTRACT", 1.0, landed, x=2200, y=1150)
+    rnd, rnd_color = b.white_noise(b.vmath("SCALE", rest_center, scale=5.31, x=2200, y=900), x=2400, y=900)
+    jitter = b.vmath("SCALE", b.vmath("SUBTRACT", rnd_color, (0.5, 0.5, 0.5), x=2600, y=900), scale=1.2,
+                     x=2800, y=900)
+    heading = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("ADD", piece_normal, jitter, x=3000, y=950),
+                                           (0.0, 0.0, 0.5), x=3200, y=950), x=3400, y=950)
+    away = b.vmath("SCALE", heading, scale=b.math("MULTIPLY", gi.outputs["Fly Distance"],
+                                                   b.math("MULTIPLY", flying, flying, x=2400, y=1100),
+                                                   x=2600, y=1100), x=3600, y=1000)
+    turn = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Spin"], flying, x=2600, y=750),
+                  b.math("MULTIPLY_ADD", rnd, 2.0, -1.0, x=2600, y=600), x=2800, y=700)
+    turned = b.rotate(position, center, b.vmath("SUBTRACT", rnd_color, (0.5, 0.5, 0.5), x=2800, y=550), turn,
+                      x=3000, y=650)
+    grow = b.math("MULTIPLY_ADD", landed, 0.75, 0.25, x=3000, y=500)
+    placed = b.vmath("ADD", center, b.vmath("SCALE", b.vmath("SUBTRACT", turned, center, x=3200, y=650),
+                                            scale=grow, x=3400, y=650), x=3600, y=650)
+    pieces = b.set_position(pieces, position=b.vmath("ADD", placed, away, x=3800, y=800), x=4000, y=1500)
+    # Pieces glow softly while flying (0.9^8 in the material, the texture still shows); landed ones get
+    # the usual rim at the front.
+    piece_rim = b.math("MAXIMUM", rim, b.switch("FLOAT", b.compare("GREATER_THAN", flying, 0.001,
+                                                                     x=3800, y=400), 0.0, 0.9, x=4000, y=400),
+                       x=4200, y=400)
+    pieces = b.store(pieces, ATTR_EDGE, piece_rim, x=4200, y=1500)
+    suit = b.switch("GEOMETRY", gi.outputs["Assemble"], suit, pieces, x=4400, y=1000)
 
     # --- Wire layer: keep a band around the boundary.
     t = b.math("SUBTRACT", d, radius, x=-700, y=-500)
@@ -383,11 +535,9 @@ def build_target_group(field_group):
     profile = b.node("GeometryNodeCurvePrimitiveCircle", 1550, -750, mode="RADIUS")
     b.feed(profile.inputs["Resolution"], gi.outputs["Wire Resolution"])
     b.feed(profile.inputs["Radius"], gi.outputs["Wire Radius"])
-    tube = b.node("GeometryNodeCurveToMesh", 1750, -450)
-    b.feed(tube.inputs["Curve"], curve_out)
-    b.feed(tube.inputs["Profile Curve"], profile.outputs["Curve"])
+    tube = b.curve_to_mesh(curve_out, profile.outputs["Curve"], x=1750, y=-450)
     mat = b.node("GeometryNodeSetMaterial", 1950, -450)
-    b.feed(mat.inputs["Geometry"], tube.outputs["Mesh"])
+    b.feed(mat.inputs["Geometry"], tube)
     b.feed(mat.inputs["Material"], gi.outputs["Wire Material"])
     wire = b.switch("GEOMETRY", gi.outputs["Wire"], None, mat.outputs["Geometry"], x=1950, y=-150)
 
@@ -421,6 +571,38 @@ def _fly(b, gi, t, normal, seed, rnd, x, y):
     return b.vmath("ADD", b.vmath("ADD", burst, gust, x=x + 800, y=y - 100), swirl, x=x + 1000, y=y - 250)
 
 
+def _pieces(b, geometry, anchor, size, extra_key, x, y):
+    """Cut a mesh into chunks about `size` across: 3D Voronoi cells in rest space (so the cuts stick to
+    the body) plus the mesh's own islands. Returns the split mesh and per-piece fields
+    (island, count, centre, rest centre, normal); pieces never mix faces with a different `extra_key`."""
+    cell = b.node("ShaderNodeTexVoronoi", x, y, voronoi_dimensions="3D", feature="F1")
+    b.feed(cell.inputs["Vector"], anchor)
+    b.feed(cell.inputs["Scale"], b.math("DIVIDE", 1.0, b.math("MAXIMUM", size, 1e-4, x=x - 200, y=y - 200),
+                                        x=x - 100, y=y - 150))
+    key = b.vmath("DOT_PRODUCT", cell.outputs["Color"], (1.0, 0.618, 0.381), x=x + 200, y=y)
+    key = b.math("MULTIPLY_ADD", extra_key, 3.0, key, x=x + 400, y=y)
+    face_key = b.on_domain(key, "FACE", x=x + 600, y=y)
+    face_sq = b.on_domain(b.math("MULTIPLY", key, key, x=x + 600, y=y - 150), "FACE", x=x + 800, y=y - 150)
+    # An edge is a cut when its faces disagree: mean(key^2) - mean(key)^2 > 0 over the faces of the edge.
+    mean = b.on_domain(face_key, "EDGE", x=x + 800, y=y)
+    spread = b.math("SUBTRACT", b.on_domain(face_sq, "EDGE", x=x + 1000, y=y - 150),
+                    b.math("MULTIPLY", mean, mean, x=x + 1000, y=y), x=x + 1200, y=y)
+    split = b.node("GeometryNodeSplitEdges", x + 1400, y)
+    b.feed(split.inputs["Mesh"], geometry)
+    b.feed(split.inputs["Selection"], b.compare("GREATER_THAN", spread, 1e-7, x=x + 1400, y=y - 200))
+    island = b.node("GeometryNodeInputMeshIsland", x + 1400, y - 400).outputs["Island Index"]
+    count = b.accumulate(1.0, island, x=x + 1600, y=y - 300)
+    center = b.vmath("SCALE", b.accumulate(b.node("GeometryNodeInputPosition", x + 1400, y - 600).outputs[0],
+                                           island, "FLOAT_VECTOR", x=x + 1600, y=y - 500),
+                     scale=b.math("DIVIDE", 1.0, count, x=x + 1800, y=y - 300), x=x + 2000, y=y - 500)
+    rest_center = b.vmath("SCALE", b.accumulate(anchor, island, "FLOAT_VECTOR", x=x + 1600, y=y - 700),
+                          scale=b.math("DIVIDE", 1.0, count, x=x + 1800, y=y - 750), x=x + 2000, y=y - 700)
+    normal = b.vmath("NORMALIZE", b.accumulate(b.node("GeometryNodeInputNormal", x + 1400, y - 900).outputs[0],
+                                               island, "FLOAT_VECTOR", x=x + 1600, y=y - 900),
+                     x=x + 2000, y=y - 900)
+    return split.outputs["Mesh"], island, count, center, rest_center, normal
+
+
 def build_base_group(field_group):
     """Modifier for the OLD outfit: shrink away under the new one, or break into flakes and particles."""
     ng = _new_group(BASE_GROUP, is_modifier=True)
@@ -434,7 +616,8 @@ def build_base_group(field_group):
     go = b.node("NodeGroupOutput", 3600, 0)
     geometry = gi.outputs["Geometry"]
 
-    d, radius = _field_node(b, field_group, gi, -1700, -300)
+    field = _field_node(b, field_group, gi, -1700, -300)
+    d, radius = field["Distance"], field["Radius"]
     lock = b.named_attribute(ATTR_LOCK, "BOOLEAN", x=-1700, y=-600)[0]
     free = b.boolean("NOT", lock, x=-1500, y=-600)
     normal = b.node("GeometryNodeInputNormal", -1500, -800).outputs[0]
@@ -500,6 +683,51 @@ def build_base_group(field_group):
                      x=3000, y=0)
     broken = b.join([intact, flakes], x=3200, y=200)
     old = b.switch("GEOMETRY", gi.outputs["Fragments"], shrunk, broken, x=3400, y=400)
+
+    # --- Cast off: behind the front the old outfit breaks into armour-like chunks that are thrown out
+    # along their normals, tumble, fall and shrink away (locked parts never break).
+    chunks, c_island, c_count, c_center, c_rest, c_normal = _pieces(b, geometry, anchor, gi.outputs["Piece Size"],
+                                                                     lock, -1200, 2200)
+    chunk_d = b.math("DIVIDE", b.accumulate(d, c_island, x=1000, y=2000), c_count, x=1200, y=2000)
+    chunk_age = b.math("SUBTRACT", radius, chunk_d, x=1400, y=2000)
+    chunk_span = b.math("MINIMUM", gi.outputs["Flight"],
+                        b.math("MAXIMUM", b.math("SUBTRACT", gi.outputs["Reach"], chunk_d, x=1400, y=1850), 1e-4,
+                               x=1600, y=1850), x=1800, y=1850)
+    ct = b.math("DIVIDE", chunk_age, chunk_span, x=2000, y=1950, clamp=True)
+    moving = b.boolean("AND", b.compare("GREATER_THAN", chunk_age, 0.0, x=1600, y=2150), free, x=1800, y=2150)
+    crnd, crnd_color = b.white_noise(b.vmath("SCALE", c_rest, scale=4.77, x=1600, y=2350), x=1800, y=2350)
+    thrown = b.math("SUBTRACT", 1.0, b.math("POWER", b.math("SUBTRACT", 1.0, ct, x=2000, y=2300), 2.0,
+                                            x=2200, y=2300), x=2400, y=2300)
+    blast = b.vmath("SCALE", c_normal, scale=b.math("MULTIPLY", gi.outputs["Chunk Force"], thrown, x=2600, y=2300),
+                    x=2800, y=2300)
+    drop = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Chunk Force"], -1.5, x=2600, y=2500),
+                  b.math("MULTIPLY", ct, ct, x=2600, y=2650), x=2800, y=2550)
+    chunk_turn = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Spin"], ct, x=2400, y=2700),
+                        b.math("MULTIPLY_ADD", crnd, 2.0, -1.0, x=2400, y=2850), x=2600, y=2800)
+    chunk_turned = b.rotate(position, c_center, b.vmath("SUBTRACT", crnd_color, (0.5, 0.5, 0.5), x=2600, y=2950),
+                            chunk_turn, x=2800, y=2800)
+    shrinking = b.math("SUBTRACT", 1.0, b.math("POWER", ct, 3.0, x=2800, y=3000), x=3000, y=3000)
+    chunk_pos = b.vmath("ADD", c_center, b.vmath("SCALE", b.vmath("SUBTRACT", chunk_turned, c_center, x=3000, y=2850),
+                                                 scale=shrinking, x=3200, y=2850), x=3400, y=2850)
+    chunk_pos = b.vmath("ADD", b.vmath("ADD", chunk_pos, blast, x=3600, y=2600),
+                        b.combine(0.0, 0.0, drop, x=3400, y=2500), x=3800, y=2600)
+    chunks = b.set_position(chunks, selection=moving, position=chunk_pos, x=4000, y=2200)
+    chunks = b.delete(chunks, b.boolean("AND", b.compare("GREATER_EQUAL", ct, 0.999, x=3800, y=2100), free,
+                                        x=4000, y=2050), "POINT", x=4200, y=2200)
+    chunk_glow = b.math("POWER", b.math("SUBTRACT", 1.0, ct, x=3800, y=1900), 0.25, x=4000, y=1900)
+    chunk_glow = b.switch("FLOAT", moving, 0.0, chunk_glow, x=4200, y=1900)
+    chunks = b.store(chunks, ATTR_EDGE, b.switch("FLOAT", gi.outputs["Flake Glow"], 0.0, chunk_glow, x=4400, y=1900),
+                     x=4400, y=2200)
+    old = b.switch("GEOMETRY", gi.outputs["Chunks"], old, chunks, x=4600, y=600)
+
+    # --- Glitch: outside the band the old outfit is simply gone behind the edge; inside it, a slice
+    # shows the old outfit whenever the dice did not pick the new one. Slices jump and flash together.
+    hidden = b.switch("BOOLEAN", field["Glitching"], b.compare("LESS_EQUAL", d, radius, x=2800, y=900),
+                      field["New Side"], x=3000, y=900)
+    glitched = b.delete(geometry, b.boolean("AND", hidden, free, x=3000, y=750), "POINT", x=3200, y=900)
+    glitched = b.set_position(glitched, field["Glitch Offset"], x=3400, y=900)
+    glitched = b.store(glitched, ATTR_EDGE, field["Flash"], x=3600, y=900)
+    old = b.switch("GEOMETRY", gi.outputs["Glitch"], old, glitched, x=3600, y=500)
 
     # --- Particles: some faces release a petal / butterfly / custom object where the front passes.
     tp = lifetime(gi.outputs["Particle Flight"], -1800)
@@ -578,8 +806,70 @@ def build_base_group(field_group):
     particles = b.switch("GEOMETRY", gi.outputs["Particles"], None, on_points.outputs["Instances"],
                          x=3400, y=-1400)
 
-    b.feed(go.inputs["Geometry"], b.join([old, particles], x=3500, y=0))
+    # --- Silhouette: ahead of the edge the old outfit turns into glowing light (magical-girl style);
+    # brightest right at the edge. Stored as glow^(1/8) because the material raises it to the 8th power.
+    lit = b.map_range(d, b.math("ADD", radius, gi.outputs["Silhouette Width"], x=3600, y=-300), radius,
+                      x=3800, y=-300, smooth=True)
+    lit = b.switch("FLOAT", gi.outputs["Silhouette"], 0.0, b.math("POWER", lit, 0.125, x=4000, y=-300),
+                   x=4200, y=-300)
+    current = b.named_attribute(ATTR_EDGE, "FLOAT", x=3800, y=-500)[0]
+    old = b.store(old, ATTR_EDGE, b.math("MAXIMUM", current, lit, x=4200, y=-500), x=4400, y=0)
+    b.feed(go.inputs["Geometry"], b.join([old, particles], x=4600, y=0))
     return ng
+
+
+def build_ribbon_group():
+    """Modifier for a ribbon curve (a helix around one limb): draw it along the limb as the transformation
+    passes from Start to End (mask radius), then let it thin out and vanish."""
+    ng = _new_group(RIBBON_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in RIBBON_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -1200, 0)
+    go = b.node("NodeGroupOutput", 1400, 0)
+    info = b.node("GeometryNodeObjectInfo", -1000, 300, transform_space="ORIGINAL")
+    b.feed(info.inputs["Object"], gi.outputs["Mask"])
+    radius = b.vmath("DOT_PRODUCT", info.outputs["Scale"], (1 / 3, 1 / 3, 1 / 3), x=-800, y=300)
+    span = b.math("MAXIMUM", b.math("SUBTRACT", gi.outputs["End"], gi.outputs["Start"], x=-800, y=100), 1e-4,
+                  x=-600, y=100)
+    grow = b.math("DIVIDE", b.math("SUBTRACT", b.math("ADD", radius, gi.outputs["Lead"], x=-600, y=300),
+                                   gi.outputs["Start"], x=-400, y=300), span, x=-200, y=250, clamp=True)
+    gone = b.math("DIVIDE", b.math("SUBTRACT", radius, gi.outputs["End"], x=-600, y=-100),
+                  b.math("MAXIMUM", gi.outputs["Linger"], 1e-4, x=-600, y=-250), x=-400, y=-150, clamp=True)
+    fade = b.math("SUBTRACT", 1.0, gone, x=-200, y=-150)
+
+    trim = b.node("GeometryNodeTrimCurve", -200, 0, mode="FACTOR")
+    b.feed(trim.inputs["Curve"], gi.outputs["Geometry"])
+    b.feed(_enabled(trim.inputs, "Start")[0], 0.0)
+    b.feed(_enabled(trim.inputs, "End")[0], grow)
+    # Soft ends along the drawn part.
+    along = b.node("GeometryNodeSplineParameter", 0, -300).outputs["Factor"]
+    taper = b.math("MINIMUM", b.map_range(along, 0.0, 0.12, x=200, y=-250),
+                   b.map_range(along, 0.88, 1.0, 1.0, 0.0, x=200, y=-450), x=400, y=-350)
+    width = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Width"], fade, x=400, y=-150), taper, x=600, y=-200)
+    set_radius = b.node("GeometryNodeSetCurveRadius", 200, 0)
+    b.feed(set_radius.inputs["Curve"], trim.outputs["Curve"])
+    b.feed(set_radius.inputs["Radius"], width)
+    profile = b.node("GeometryNodeCurvePrimitiveLine", 400, 250)
+    profile.inputs["Start"].default_value = (-0.5, 0.0, 0.0)
+    profile.inputs["End"].default_value = (0.5, 0.0, 0.0)
+    strip = b.curve_to_mesh(set_radius.outputs["Curve"], profile.outputs["Curve"], x=600, y=0)
+    material = b.node("GeometryNodeSetMaterial", 800, 0)
+    b.feed(material.inputs["Geometry"], strip)
+    b.feed(material.inputs["Material"], gi.outputs["Material"])
+    shown = b.boolean("AND", b.compare("GREATER_THAN", grow, 0.001, x=800, y=300),
+                      b.compare("GREATER_THAN", fade, 0.001, x=800, y=450), x=1000, y=350)
+    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", shown, None, material.outputs["Geometry"], x=1200, y=0))
+    return ng
+
+
+def ensure_ribbon_group():
+    if not _is_current(RIBBON_GROUP):
+        build_ribbon_group()
+    return bpy.data.node_groups[RIBBON_GROUP]
 
 
 def _is_current(name):

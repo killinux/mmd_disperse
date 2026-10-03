@@ -1,7 +1,7 @@
 import bpy
 from bpy.props import EnumProperty
 
-from . import compositor, effect
+from . import compositor, effect, presets
 
 
 class MMDDISPERSE_OT_assign(bpy.types.Operator):
@@ -110,10 +110,51 @@ class MMDDISPERSE_OT_bloom(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class MMDDISPERSE_OT_preset(bpy.types.Operator):
+    """Set all options for a style (rebuilds the effect when one is already built)"""
+
+    bl_idname = "mmd_disperse.apply_preset"
+    bl_label = "Apply Preset"
+    bl_options = {"REGISTER", "UNDO"}
+
+    preset: EnumProperty(name="Preset", items=presets.ITEMS)
+
+    def execute(self, context):
+        settings = context.scene.mmd_disperse
+        presets.apply(settings, self.preset)
+        if settings.mask is not None:
+            try:
+                effect.build(context, settings)
+            except effect.EffectError as err:
+                self.report({"ERROR"}, str(err))
+                return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class MMDDISPERSE_OT_glitch_fx(bpy.types.Operator):
+    """RGB split that flickers in the compositor while the transformation runs (Lens Distortion dispersion)"""
+
+    bl_idname = "mmd_disperse.add_glitch_fx"
+    bl_label = "Add RGB Split"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        settings = context.scene.mmd_disperse
+        try:
+            compositor.add_glitch(context.scene, settings.frame_start, settings.frame_end, settings.glitch_rate)
+        except RuntimeError as err:
+            self.report({"ERROR"}, str(err))
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Lens Distortion added to the compositor")
+        return {"FINISHED"}
+
+
 classes = (
     MMDDISPERSE_OT_assign,
     MMDDISPERSE_OT_build,
     MMDDISPERSE_OT_remove,
     MMDDISPERSE_OT_fit,
     MMDDISPERSE_OT_bloom,
+    MMDDISPERSE_OT_glitch_fx,
+    MMDDISPERSE_OT_preset,
 )

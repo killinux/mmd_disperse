@@ -2,12 +2,16 @@
 
 import bpy
 
-from .node_groups import ATTR_EDGE
+from .node_groups import ATTR_EDGE, ATTR_HOLO
 
 WIRE_MATERIAL = "MMD Disperse Wire"
+RIBBON_MATERIAL = "MMD Disperse Ribbon"
 PARTICLE_MATERIAL = "MMD Disperse Particle"
 GLOW = "MMDD Edge"  # prefix of every node we add to a user material
 P_GLOW = "mmd_disperse_glow"
+HOLO = "MMDD Holo"
+P_HOLO = "mmd_disperse_holo"
+P_BLEND = "mmd_disperse_blend"  # blend mode to restore (legacy EEVEE needs Hashed for the hologram)
 
 
 def _set_input(node, names, value):
@@ -85,6 +89,43 @@ def update_wire_material(mat, settings):
     strength = nodes.get("MMDD_Strength")
     if strength is not None:
         strength.outputs[0].default_value = settings.glow_strength
+    mat.diffuse_color = tuple(settings.glow_color) + (1.0,)
+
+
+def ensure_ribbon_material():
+    """Light ribbons: pure glow in the glow colour, invisible to shadow rays."""
+    mat = bpy.data.materials.get(RIBBON_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(RIBBON_MATERIAL)
+    if mat.node_tree is None:
+        mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = _new(nt, "ShaderNodeOutputMaterial", "Output", 600, 0)
+    emission = _new(nt, "ShaderNodeEmission", "MMDD_Emission", 100, 0)
+    light_path = _new(nt, "ShaderNodeLightPath", "Light Path", 100, 300)
+    clear = _new(nt, "ShaderNodeBsdfTransparent", "Shadow Clear", 100, 150)
+    mix = _new(nt, "ShaderNodeMixShader", "No Shadow", 350, 0)
+    nt.links.new(light_path.outputs["Is Shadow Ray"], mix.inputs[0])
+    nt.links.new(emission.outputs[0], mix.inputs[1])
+    nt.links.new(clear.outputs[0], mix.inputs[2])
+    nt.links.new(mix.outputs[0], out.inputs["Surface"])
+    if hasattr(mat, "use_transparent_shadow"):
+        mat.use_transparent_shadow = True
+    if bpy.app.version < (4, 2, 0):
+        mat.shadow_method = "NONE"
+    return mat
+
+
+def update_ribbon_material(settings):
+    mat = bpy.data.materials.get(RIBBON_MATERIAL)
+    if mat is None or mat.node_tree is None:
+        return
+    emission = mat.node_tree.nodes.get("MMDD_Emission")
+    if emission is not None:
+        emission.inputs["Color"].default_value = tuple(settings.glow_color) + (1.0,)
+        emission.inputs["Strength"].default_value = settings.ribbon_strength
     mat.diffuse_color = tuple(settings.glow_color) + (1.0,)
 
 
@@ -206,3 +247,128 @@ def remove_edge_glow(mat):
     for node in [n for n in nt.nodes if n.name.startswith(GLOW)]:
         nt.nodes.remove(node)
     del mat[P_GLOW]
+
+
+def _outputs(nt):
+    return [n for n in nt.nodes if n.bl_idname == "ShaderNodeOutputMaterial" and n.inputs["Surface"].links]
+
+
+def add_hologram(mat):
+    """Where `disperse_holo` > 0 (ahead of the edge) the surface turns into a see-through, glowing hologram
+    with horizontal scan lines, a bright rim and a scan ring at the hologram's front."""
+    nt = mat.node_tree
+    if nt is None or mat.get(P_HOLO):
+        return
+    outputs = _outputs(nt)
+    if not outputs:
+        return
+    x = min(n.location.x for n in outputs) - 250
+    y = min(n.location.y for n in outputs) - 700
+    attr = _new(nt, "ShaderNodeAttribute", HOLO + " Attribute", x - 1300, y,
+                attribute_type="GEOMETRY", attribute_name=ATTR_HOLO)
+    # outputs[2] is "Fac" before Blender 5.0 and "Factor" after.
+    switch = _new(nt, "ShaderNodeMath", HOLO + " On", x - 1100, y + 200, operation="MULTIPLY", use_clamp=True)
+    switch.inputs[1].default_value = 50.0
+    nt.links.new(attr.outputs[2], switch.inputs[0])
+    ring = _new(nt, "ShaderNodeMath", HOLO + " Ring", x - 1100, y, operation="POWER")
+    ring.inputs[1].default_value = 24.0
+    nt.links.new(attr.outputs[2], ring.inputs[0])
+
+    geometry = _new(nt, "ShaderNodeNewGeometry", HOLO + " Geometry", x - 1300, y - 300)
+    lines = _new(nt, "ShaderNodeTexWave", HOLO + " Lines", x - 1100, y - 300, wave_type="BANDS",
+                 bands_direction="Z")
+    nt.links.new(geometry.outputs["Position"], lines.inputs["Vector"])
+    sharp = _new(nt, "ShaderNodeMath", HOLO + " Sharpen", x - 900, y - 300, operation="POWER")
+    sharp.inputs[1].default_value = 4.0
+    nt.links.new(lines.outputs[1], sharp.inputs[0])  # "Fac" / "Factor"
+    level = _new(nt, "ShaderNodeMath", HOLO + " Level", x - 700, y - 300, operation="MULTIPLY_ADD")
+    level.inputs[1].default_value = 0.7
+    level.inputs[2].default_value = 0.3
+    nt.links.new(sharp.outputs[0], level.inputs[0])
+    rim = _new(nt, "ShaderNodeLayerWeight", HOLO + " Rim", x - 900, y - 550)
+    rim.inputs["Blend"].default_value = 0.35
+    strength = _new(nt, "ShaderNodeValue", HOLO + " Strength", x - 700, y - 750)
+    opacity = _new(nt, "ShaderNodeValue", HOLO + " Opacity", x - 700, y - 900)
+
+    # Light: (lines + 1.5 * rim) * strength + ring * 6 * strength
+    lit = _new(nt, "ShaderNodeMath", HOLO + " Lit", x - 500, y - 400, operation="MULTIPLY_ADD")
+    lit.inputs[1].default_value = 1.5
+    nt.links.new(rim.outputs["Facing"], lit.inputs[0])
+    nt.links.new(level.outputs[0], lit.inputs[2])
+    ring_lit = _new(nt, "ShaderNodeMath", HOLO + " Ring Lit", x - 500, y - 150, operation="MULTIPLY_ADD")
+    ring_lit.inputs[1].default_value = 6.0
+    nt.links.new(ring.outputs[0], ring_lit.inputs[0])
+    nt.links.new(lit.outputs[0], ring_lit.inputs[2])
+    glow = _new(nt, "ShaderNodeMath", HOLO + " Glow", x - 300, y - 200, operation="MULTIPLY")
+    nt.links.new(ring_lit.outputs[0], glow.inputs[0])
+    nt.links.new(strength.outputs[0], glow.inputs[1])
+    emission = _new(nt, "ShaderNodeEmission", HOLO + " Emission", x - 100, y - 200)
+    nt.links.new(glow.outputs[0], emission.inputs["Strength"])
+
+    # Cover: opacity * lines + 0.4 * rim + ring, times the texture alpha (lace stays see-through).
+    cover = _new(nt, "ShaderNodeMath", HOLO + " Cover", x - 500, y - 700, operation="MULTIPLY")
+    nt.links.new(level.outputs[0], cover.inputs[0])
+    nt.links.new(opacity.outputs[0], cover.inputs[1])
+    cover_rim = _new(nt, "ShaderNodeMath", HOLO + " Cover Rim", x - 300, y - 650, operation="MULTIPLY_ADD")
+    cover_rim.inputs[1].default_value = 0.4
+    nt.links.new(rim.outputs["Facing"], cover_rim.inputs[0])
+    nt.links.new(cover.outputs[0], cover_rim.inputs[2])
+    cover_ring = _new(nt, "ShaderNodeMath", HOLO + " Cover Ring", x - 100, y - 650, operation="ADD", use_clamp=True)
+    nt.links.new(cover_rim.outputs[0], cover_ring.inputs[0])
+    nt.links.new(ring.outputs[0], cover_ring.inputs[1])
+    alpha = cover_ring
+    texture_alpha = _alpha_source(nt)
+    if texture_alpha is not None:
+        alpha = _new(nt, "ShaderNodeMath", HOLO + " Alpha", x + 50, y - 650, operation="MULTIPLY")
+        nt.links.new(cover_ring.outputs[0], alpha.inputs[0])
+        nt.links.new(texture_alpha, alpha.inputs[1])
+    clear = _new(nt, "ShaderNodeBsdfTransparent", HOLO + " Clear", x + 50, y - 400)
+    hologram = _new(nt, "ShaderNodeMixShader", HOLO + " Shader", x + 200, y - 300)
+    nt.links.new(alpha.outputs[0], hologram.inputs[0])
+    nt.links.new(clear.outputs[0], hologram.inputs[1])
+    nt.links.new(emission.outputs[0], hologram.inputs[2])
+
+    for i, out in enumerate(outputs):
+        source = out.inputs["Surface"].links[0].from_socket
+        mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (HOLO, i), out.location.x - 180, out.location.y + 150)
+        nt.links.new(switch.outputs[0], mix.inputs[0])
+        nt.links.new(source, mix.inputs[1])
+        nt.links.new(hologram.outputs[0], mix.inputs[2])
+        nt.links.new(mix.outputs[0], out.inputs["Surface"])
+    if bpy.app.version < (4, 2, 0) and mat.blend_method == "OPAQUE":  # legacy EEVEE ignores transparency
+        mat[P_BLEND] = mat.blend_method
+        mat.blend_method = "HASHED"
+    mat[P_HOLO] = 1
+
+
+def update_hologram(mat, color, strength, opacity, line_spacing):
+    nodes = mat.node_tree.nodes if mat.node_tree else {}
+    emission = nodes.get(HOLO + " Emission")
+    if emission is not None:
+        emission.inputs["Color"].default_value = tuple(color) + (1.0,)
+    for name, value in ((" Strength", strength), (" Opacity", opacity)):
+        node = nodes.get(HOLO + name)
+        if node is not None:
+            node.outputs[0].default_value = value
+    lines = nodes.get(HOLO + " Lines")
+    if lines is not None:  # bands repeat every 2*pi/20 texture units
+        lines.inputs["Scale"].default_value = 0.31416 / max(line_spacing, 1e-6)
+
+
+def remove_hologram(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_HOLO):
+        return
+    for node in [n for n in nt.nodes if n.name.startswith(HOLO + " Mix")]:
+        source = node.inputs[1].links[0].from_socket if node.inputs[1].links else None
+        targets = [link.to_socket for link in node.outputs[0].links]
+        nt.nodes.remove(node)
+        if source is not None:
+            for socket in targets:
+                nt.links.new(source, socket)
+    for node in [n for n in nt.nodes if n.name.startswith(HOLO)]:
+        nt.nodes.remove(node)
+    if P_BLEND in mat:
+        mat.blend_method = mat[P_BLEND]
+        del mat[P_BLEND]
+    del mat[P_HOLO]

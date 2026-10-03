@@ -7,7 +7,7 @@ import time
 import bpy
 from mathutils import Matrix, Vector
 
-from . import arrival, materials, particles
+from . import arrival, materials, particles, ribbons
 from . import model as mdl
 from .node_groups import BASE_GROUP, TARGET_GROUP, ensure_node_groups, input_identifiers
 
@@ -43,7 +43,19 @@ SIZE_RATIOS = {
     "frag_wind": 0.3,
     "frag_turbulence": 0.05,
     "particle_size": 0.018,
+    "holo_width": 0.12,
+    "glitch_width": 0.15,
+    "glitch_slice": 0.012,
+    "glitch_shift": 0.02,
+    "piece_size": 0.06,
+    "fly_distance": 0.25,
+    "fly_range": 0.08,
+    "chunk_force": 0.15,
+    "silhouette_width": 0.1,
+    "ribbon_width": 0.004,
+    "ribbon_linger": 0.12,
 }
+HOLO_LINE_SPACING = 0.006  # scan line spacing of the hologram, fraction of the model height
 NOISE_CELLS_PER_HEIGHT = 6.0
 
 
@@ -182,6 +194,7 @@ def _cleanup_mesh(ob):
         for slot in ob.material_slots:
             if slot.material is not None:
                 materials.remove_edge_glow(slot.material)
+                materials.remove_hologram(slot.material)
     saved = ob.get(P_ARM)
     if saved:
         for mod_name, arm_name in saved.to_dict().items():
@@ -217,6 +230,7 @@ def remove_effect(mask):
         root = bpy.data.objects.get(root_name)
         if root is not None:
             _restore_root(root)
+    ribbons.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
     bpy.data.objects.remove(mask)
     if action is not None and action.users == 0:
@@ -248,6 +262,33 @@ def _update_glow(ob, settings, enabled, strength):
             materials.remove_edge_glow(mat)
 
 
+def _update_hologram(ob, settings):
+    spacing = HOLO_LINE_SPACING * max(settings.size_reference, 1e-3)
+    for mat in _glow_materials(ob, settings):
+        if settings.holo_enable:
+            materials.add_hologram(mat)
+            materials.update_hologram(mat, settings.glow_color, settings.holo_strength, settings.holo_opacity,
+                                      spacing)
+        else:
+            materials.remove_hologram(mat)
+
+
+def _update_ribbons(settings, mask):
+    """Create / recreate / remove the limb ribbons to match the panel (they need the built effect)."""
+    current = ribbons.ribbon_objects(mask)
+    stale = [ob for ob in current if abs(ob.get(ribbons.P_TURNS, 0.0) - settings.ribbon_turns) > 1e-6]
+    if not settings.ribbon_enable or stale:
+        ribbons.remove(mask)
+        current = []
+    if settings.ribbon_enable and not current:
+        meshes = [ob for ob in effect_objects(mask) if ob.type == "MESH"]
+        owner = next((ob for ob in meshes if ob.get(P_ROLE) == "BASE"), meshes[0] if meshes else None)
+        armature = mdl.find_armature(owner)
+        collection = mask.users_collection[0] if mask.users_collection else settings.id_data.collection
+        ribbons.create(settings, mask, meshes, armature, max(settings.size_reference, 1e-3), collection)
+    ribbons.sync(settings, mask)
+
+
 def _particle_object(settings):
     """Object the old outfit's particles are made of (built-in petal / butterfly, or the user's)."""
     if settings.particles == "OBJECT":
@@ -266,6 +307,7 @@ def sync(settings):
     materials.update_wire_material(wire, settings)
     shape = _particle_object(settings)
     materials.update_particle_material(settings)
+    _update_ribbons(settings, mask)
     common = {
         "Mask": mask,
         "Use Rest Position": settings.space == "REST",
@@ -273,6 +315,12 @@ def sync(settings):
         "Noise Scale": settings.noise_scale,
         "Noise Detail": settings.noise_detail,
         "Noise Amount": settings.noise_amount,
+        "Glitch": settings.glitch_enable,
+        "Glitch Width": settings.glitch_width,
+        "Slice Height": settings.glitch_slice,
+        "Glitch Rate": settings.glitch_rate,
+        "Glitch Shift": settings.glitch_shift,
+        "Glitch Flash": settings.glitch_flash,
     }
     values = {
         TARGET_GROUP: dict(common, **{
@@ -287,11 +335,24 @@ def sync(settings):
             "Wire Lift": settings.wire_lift,
             "Wire Resolution": settings.wire_resolution,
             "Wire Material": wire,
+            "Edge Glow": settings.edge_glow,
+            "Hologram": settings.holo_enable,
+            "Hologram Width": settings.holo_width,
+            "Assemble": settings.entrance == "ASSEMBLE",
+            "Piece Size": settings.piece_size,
+            "Fly Distance": settings.fly_distance,
+            "Fly Range": settings.fly_range,
+            "Spin": settings.frag_spin,
         }),
         BASE_GROUP: dict(common, **{
             "Shrink": settings.base_shrink,
             "Delete Offset": settings.base_delete_offset,
             "Fragments": settings.exit_style == "FRAGMENTS",
+            "Chunks": settings.exit_style == "CHUNKS",
+            "Piece Size": settings.piece_size,
+            "Chunk Force": settings.chunk_force,
+            "Silhouette": settings.silhouette,
+            "Silhouette Width": settings.silhouette_width,
             "Flake Size": settings.frag_size,
             "Flake Subdivide": settings.frag_subdivide,
             "Burst": settings.frag_burst,
@@ -313,16 +374,15 @@ def sync(settings):
     wind = wind.normalized() * settings.frag_wind if wind.length > 1e-9 else Vector((0.0, 0.0, 0.0))
     for ob in effect_objects(mask):
         role = ob.get(P_ROLE)
-        own = {}
-        if role == "BASE":  # node trees work in object space
-            s = _object_scale(ob)
-            own = {
-                "Reach": reach / s,
+        s = _object_scale(ob)  # node trees work in object space
+        own = {"Reach": reach / s}
+        if role == "BASE":
+            own.update({
                 "Flight": settings.frag_life * wave / s,
                 "Particle Flight": settings.particle_life * wave / s,
                 "Wind": tuple(ob.matrix_world.inverted_safe().to_3x3() @ wind),
                 "Particle Density": density * s * s,
-            }
+            })
         for mod in ob.modifiers:
             group = mod.node_group if mod.type == "NODES" else None
             if group is None or group.name not in values:
@@ -333,11 +393,14 @@ def sync(settings):
                 if key is not None and value is not None:
                     mod[key] = value
             ob.update_tag()
+        flashes = settings.glitch_enable and settings.glitch_flash
         if role == "TARGET":
-            _update_glow(ob, settings, settings.edge_glow, settings.edge_glow_strength)
+            _update_glow(ob, settings, settings.edge_glow or flashes, settings.edge_glow_strength)
+            _update_hologram(ob, settings)
         elif role == "BASE":
-            _update_glow(ob, settings, settings.exit_style == "FRAGMENTS" and settings.frag_glow,
-                         settings.frag_glow_strength)
+            flakes = settings.exit_style in ("FRAGMENTS", "CHUNKS") and settings.frag_glow
+            _update_glow(ob, settings, flakes or flashes or settings.silhouette,
+                         settings.frag_glow_strength if flakes or settings.silhouette else settings.edge_glow_strength)
 
 
 def _seeds(settings, location, model):
@@ -409,7 +472,7 @@ def build(context, settings):
     wave = reach + margin
     tail = 0.0
     if base:
-        if settings.exit_style == "FRAGMENTS":
+        if settings.exit_style in ("FRAGMENTS", "CHUNKS"):
             tail = settings.frag_life
         if settings.particles != "NONE":
             tail = max(tail, settings.particle_life)

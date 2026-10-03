@@ -17,11 +17,11 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
-from mmd_disperse import effect, materials, particles  # noqa: E402
+from mmd_disperse import compositor, effect, materials, particles, presets, ribbons  # noqa: E402
 from mmd_disperse.arrival import limb_points  # noqa: E402
 from mmd_disperse.model import resolve, rest_points_world  # noqa: E402
-from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_EDGE, ATTR_LOCK, BASE_GROUP, TARGET_GROUP,  # noqa: E402
-                                      input_identifiers)
+from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_EDGE, ATTR_HOLO, ATTR_LOCK, BASE_GROUP,  # noqa: E402
+                                      TARGET_GROUP, input_identifiers)
 from scene_setup import add_model_args, load_models  # noqa: E402
 
 FAILURES = []
@@ -85,6 +85,9 @@ class FakeLayout:
         if search_name not in search_data.bl_rna.properties:
             self.errors.append("search " + search_name)
 
+    def operator_menu_enum(self, idname, prop, **_kw):
+        self.operator(idname)
+
     def operator(self, idname, **_kw):
         module, name = idname.split(".")
         try:
@@ -116,13 +119,13 @@ def evaluated_counts(ob):
         ev.to_mesh_clear()
 
 
-def evaluated_faces_and_edge(ob):
-    """Face count of the evaluated mesh and the largest disperse_edge value on it (glowing flakes)."""
+def evaluated_faces_and_edge(ob, name=ATTR_EDGE):
+    """Face count of the evaluated mesh and the largest value of attribute `name` on it (glowing flakes ...)."""
     deps = bpy.context.evaluated_depsgraph_get()
     ev = ob.evaluated_get(deps)
     me = ev.to_mesh()
     try:
-        attr = me.attributes.get(ATTR_EDGE)
+        attr = me.attributes.get(name)
         top = 0.0
         if attr is not None and len(attr.data):
             values = np.zeros(len(attr.data), dtype=np.float32)
@@ -332,11 +335,99 @@ def run():
     check(evaluated_counts(base.meshes[0]) == len(base.meshes[0].data.vertices), "suit down: old outfit re-formed")
     s.direction = "GROW"
 
+    # --- hologram ahead of the edge, then the glitch
+    s.exit_style, s.holo_enable = "SHRINK", True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the hologram")
+    target_mats = [s_.material for ob in target.meshes for s_ in ob.material_slots if s_.material]
+    check(any(m.get(materials.P_HOLO) for m in target_mats), "hologram added to the new outfit materials")
+    scene.frame_set(1)
+    check(evaluated_counts(target.meshes[0]) == 0, "hologram: nothing of the new outfit at frame 1")
+    scene.frame_set(50)
+    check(evaluated_faces_and_edge(target.meshes[0], ATTR_HOLO)[1] > 0.5, "hologram ahead of the edge at frame 50")
+    s.holo_enable = False
+    check(not any(m.get(materials.P_HOLO) for m in target_mats), "hologram removed when switched off")
+    scene.frame_set(50)
+    smooth_new, smooth_old = evaluated_counts(target.meshes[0]), evaluated_counts(base.meshes[0])
+    scene.frame_set(100)
+    end_new, end_old = evaluated_counts(target.meshes[0]), evaluated_counts(base.meshes[0])
+    s.glitch_enable = True
+    scene.frame_set(1)
+    check(evaluated_counts(target.meshes[0]) == 0 and
+          evaluated_counts(base.meshes[0]) == len(base.meshes[0].data.vertices), "glitch: untouched at frame 1")
+    scene.frame_set(50)
+    glitch_new, glitch_old = evaluated_counts(target.meshes[0]), evaluated_counts(base.meshes[0])
+    check((glitch_new, glitch_old) != (smooth_new, smooth_old), "glitch slices change frame 50 (%d/%d vs %d/%d)"
+          % (glitch_new, glitch_old, smooth_new, smooth_old))
+    scene.frame_set(51)
+    scene.frame_set(50)
+    check((evaluated_counts(target.meshes[0]), evaluated_counts(base.meshes[0])) == (glitch_new, glitch_old),
+          "glitch is the same every time frame 50 is shown")
+    scene.frame_set(100)
+    check((evaluated_counts(target.meshes[0]), evaluated_counts(base.meshes[0])) == (end_new, end_old),
+          "glitch: same end state as without it")
+    check(bpy.ops.mmd_disperse.add_glitch_fx() == {"FINISHED"}, "RGB split added")
+    check(bpy.ops.mmd_disperse.add_glitch_fx() == {"FINISHED"}, "RGB split idempotent")
+    tree = scene.compositing_node_group if hasattr(scene, "compositing_node_group") else scene.node_tree
+    lens = [n for n in tree.nodes if n.name.startswith(compositor.GLITCH_NAME)]
+    drivers = tree.animation_data.drivers if tree.animation_data else []
+    check(len(lens) == 1 and len(drivers) == 1 and drivers[0].driver.is_valid, "one lens node driven by the frame")
+    check(not draw_panels(bpy.context), "panels draw with hologram and glitch")
+    s.glitch_enable = False
+    scene.frame_set(100)
+    grown_faces = evaluated_faces_and_edge(target.meshes[0])[0]
+
+    # --- pieces: the new outfit flies in, the old one is cast off in chunks
+    s.entrance, s.exit_style = "ASSEMBLE", "CHUNKS"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build fly-in + cast-off")
+    check(not draw_panels(bpy.context), "panels draw with fly-in and cast-off")
+    scene.frame_set(1)
+    check(evaluated_faces_and_edge(target.meshes[0])[0] == 0, "fly-in: no pieces at frame 1")
+    check(evaluated_faces_and_edge(base.meshes[0])[0] == len(base.meshes[0].data.polygons),
+          "cast-off: old outfit whole at frame 1")
+    scene.frame_set(40)
+    faces, glow_top = evaluated_faces_and_edge(base.meshes[0])
+    check(0 < faces < len(base.meshes[0].data.polygons) and glow_top > 0.0, "cast-off: chunks flying at frame 40")
+    scene.frame_set(100)
+    check(evaluated_faces_and_edge(target.meshes[0])[0] == grown_faces,
+          "fly-in: every piece landed (%d faces)" % grown_faces)
+    check(evaluated_faces_and_edge(base.meshes[0])[0] == locked_faces(base.meshes[0]),
+          "cast-off: only the shared parts left")
+    s.entrance, s.exit_style = "GROW", "SHRINK"
+
+    # --- presets; the magical girl adds light ribbons, sparkles and the glowing silhouette
+    for key, _label, _desc in presets.ITEMS:
+        check(bpy.ops.mmd_disperse.apply_preset(preset=key) == {"FINISHED"}, "preset " + key)
+    check(s.path == "SURFACE" and s.seeds == "LIMBS" and s.ribbon_enable and s.particles == "STAR",
+          "magical girl preset applied (and rebuilt)")
+    strands = ribbons.ribbon_objects(s.mask)
+    check(len(strands) == 8, "a ribbon around each arm and leg segment (%d)" % len(strands))
+    check(bpy.data.objects.get(particles.STAR) is not None, "sparkle shape created")
+    check(any(m.get(materials.P_GLOW) for m in base_mats), "old outfit glows for the silhouette")
+    scene.frame_set(30)
+    deps = bpy.context.evaluated_depsgraph_get()
+    drawn = 0
+    for ob in strands:
+        me = ob.evaluated_get(deps).to_mesh()
+        drawn += bool(me is not None and len(me.polygons))
+        ob.evaluated_get(deps).to_mesh_clear()
+    check(drawn > 0, "ribbons drawn at frame 30 (%d of %d)" % (drawn, len(strands)))
+    scene.frame_set(100)
+    check(evaluated_faces_and_edge(base.meshes[0])[0] == locked_faces(base.meshes[0]),
+          "magical girl: only the shared parts of the old outfit left")
+    s.ribbon_enable = False
+    check(not ribbons.ribbon_objects(s.mask), "ribbons removed when switched off")
+    s.ribbon_enable = True
+    check(len(ribbons.ribbon_objects(s.mask)) == 8, "ribbons back when switched on")
+    check(not draw_panels(bpy.context), "panels draw with the magical girl preset")
+    bpy.ops.mmd_disperse.apply_preset(preset="NANOTECH")
+    check(not ribbons.ribbon_objects(s.mask) and s.path == "SPHERE", "back to the nanotech suit")
+
     # --- remove restores everything (attributes, materials, particle shapes)
     check(bpy.ops.mmd_disperse.remove() == {"FINISHED"}, "remove after the new paths")
     after = snapshot([base, target])
     check(all(before[k] == after[k] for k in before), "models restored after flakes, sweeps and petals")
     check(not any(bpy.data.objects.get(n) for n in particles.NAMES.values()), "particle shapes removed")
+    check(not any(o.name.startswith(ribbons.NAME) for o in bpy.data.objects), "ribbons removed")
 
     # --- old outfit only: the whole model disintegrates
     s.target, s.use_lock, s.particles = None, False, "NONE"

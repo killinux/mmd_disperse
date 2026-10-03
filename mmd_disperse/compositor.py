@@ -1,4 +1,4 @@
-"""Optional bloom so the emissive wires glow.
+"""Optional compositor effects: bloom so the emissive wires glow, and an RGB split for the glitch.
 
 Legacy EEVEE (before 4.2) has its own bloom; newer EEVEE and Cycles need a compositor Glare node."""
 
@@ -6,6 +6,7 @@ import bpy
 
 GROUP_NAME = "MMD Disperse Compositing"
 GLARE_NAME = "MMD Disperse Bloom"
+GLITCH_NAME = "MMD Disperse Glitch"
 
 
 def _set_socket(node, name, value):
@@ -51,17 +52,13 @@ def _tree_and_output(scene):
     return tree, out
 
 
-def add_bloom(scene, threshold=0.8, strength=0.6):
-    """Turn on bloom; returns "EEVEE" or "COMPOSITOR" depending on how it was done."""
-    if bpy.app.version < (4, 2, 0) and scene.render.engine == "BLENDER_EEVEE":
-        scene.eevee.use_bloom = True
-        scene.eevee.bloom_threshold = threshold
-        return "EEVEE"
+def _insert_before_output(scene, name, idname):
+    """Our compositor node `name`, spliced in once between the image and the output."""
     tree, out = _tree_and_output(scene)
     if out is None or not out.inputs:
         raise RuntimeError("Compositor has no output node")
-    glare = tree.nodes.get(GLARE_NAME)
-    if glare is None:
+    node = tree.nodes.get(name)
+    if node is None:
         target = out.inputs[0]
         if target.links:
             source = target.links[0].from_socket
@@ -70,11 +67,39 @@ def add_bloom(scene, threshold=0.8, strength=0.6):
             if layers is None:
                 layers = tree.nodes.new("CompositorNodeRLayers")
             source = layers.outputs["Image"]
-        glare = tree.nodes.new("CompositorNodeGlare")
-        glare.name = GLARE_NAME
-        glare.location = (out.location.x - 250, out.location.y)
-        tree.links.new(source, glare.inputs["Image"])
-        tree.links.new(glare.outputs["Image"], target)
-    _configure(glare, threshold, strength)
+        node = tree.nodes.new(idname)
+        node.name = name
+        node.location = (out.location.x - 250, out.location.y - 250 * sum(n.name.startswith("MMD Disperse")
+                                                                           for n in tree.nodes))
+        tree.links.new(source, node.inputs["Image"])
+        tree.links.new(node.outputs["Image"], target)
     scene.render.use_compositing = True
+    return node
+
+
+def add_bloom(scene, threshold=0.8, strength=0.6):
+    """Turn on bloom; returns "EEVEE" or "COMPOSITOR" depending on how it was done."""
+    if bpy.app.version < (4, 2, 0) and scene.render.engine == "BLENDER_EEVEE":
+        scene.eevee.use_bloom = True
+        scene.eevee.bloom_threshold = threshold
+        return "EEVEE"
+    _configure(_insert_before_output(scene, GLARE_NAME, "CompositorNodeGlare"), threshold, strength)
     return "COMPOSITOR"
+
+
+def glitch_expression(start, end, rate, amount):
+    """Driver expression: random RGB-split spikes between `start` and `end`, changing `rate` times per frame.
+    Only built-in math on `frame`, so Blender runs it as a simple expression even with Python scripts off."""
+    return ("{a:.4f} * max(0.0, fmod(abs(sin(floor(frame * {r:.4f}) * 12.9898) * 43758.5453), 1.0) - 0.55) / 0.45"
+            " * (frame >= {s}) * (frame <= {e})").format(a=amount, r=rate, s=int(start), e=int(end))
+
+
+def add_glitch(scene, start, end, rate=0.5, amount=0.06):
+    """Lens Distortion with a flickering dispersion (RGB split) while the transformation runs."""
+    node = _insert_before_output(scene, GLITCH_NAME, "CompositorNodeLensdist")
+    socket = node.inputs["Dispersion"]
+    socket.driver_remove("default_value")
+    fcurve = socket.driver_add("default_value")
+    fcurve.driver.type = "SCRIPTED"
+    fcurve.driver.expression = glitch_expression(start, end, rate, amount)
+    return node

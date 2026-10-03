@@ -1,7 +1,9 @@
 # mmd_disperse
 
 Blender 插件：用几何节点给 MMD 模型做「纳米战衣」式变身／换装。
-变身可以从球形扩散、沿身体表面流动或上下扫描，旧服装可以收缩消失，也可以碎成光尘、花瓣、蝴蝶飞走。
+变身可以从球形扩散、沿身体表面流动或上下扫描，旧服装可以收缩消失，也可以碎成光尘、花瓣、蝴蝶飞走；
+新服装可以先以全息投影出现或一块块飞来装上，旧服装可以像装甲一样整块弹开，边界也可以做成闪烁错位的故障风，
+还有魔法少女式的光剪影和缠绕手脚的光带。主面板的「预设」一键套用七种风格。
 
 技术来自 B 站视频 [【中文配音】一秒换装？用blender几何节点制作蜘蛛侠变身动画](https://www.bilibili.com/video/BV1Yd4y1X7eR/)
 （李先生的元宇宙 配音，原作 Hell FX Learn，YouTube `-nAK7OidJFo`）。插件把视频里手搭的节点树用 Python 自动生成，并针对 MMD 模型做了适配。
@@ -32,6 +34,22 @@ Blender 插件：用几何节点给 MMD 模型做「纳米战衣」式变身／�
   还可以同时放出花瓣、扇翅膀的蝴蝶或任意物体。碎片和粒子的位置只由「变身前沿经过多久」决定，
   拖时间轴随时正确，不用烘焙；碎片保留衣服本来的贴图颜色。新服装可以留空，整个人直接化成灰。
 
+## 全息、故障、装甲、魔法少女（1.2）
+
+- **全息先行**：新服装先在边界前方以半透明全息出现（横向扫描线、轮廓光、最前端一圈扫描光环），边界扫过后变成实体。
+  几何节点只多存一个属性 `disperse_holo`（0 = 实体边界，1 = 全息最前端），外观在材质里注入的一层混合着色器里完成。
+- **故障风**：边界附近的一段里，身体切成水平切片，每条按「帧号 + 切片号」掷骰决定显示旧服装还是新服装，并横向错位、闪光。
+  随机数在共用的 Field 节点组里算，新旧服装同一条切片只出现一件；故障带在动画开头和结尾自动收窄成零，不会多闪。
+  合成器里可以再加一个按帧号驱动的镜头畸变节点做 RGB 色散（简单表达式驱动器，不需要开启 Python 自动运行）。
+- **零件飞入 / 装甲弹开**：服装按 3D Voronoi 单元（静止姿态里）切成零件——一条边两侧面的单元号不同就切开
+  （用「编号平方的平均 − 平均的平方 > 0」判断，靠几何节点的面→边自动插值，不需要循环）；再用 Mesh Island +
+  Accumulate Field 求每块的中心、平均到达距离和朝向。新服装的零件提前起飞、带旋转飞来装上；旧服装的零件整块甩出、翻滚、下落。
+- **魔法少女**：旧服装在边界到来前发光成剪影；每段手臂和腿生成一条双股螺旋曲线，按骨骼静止姿态的矩阵绑定到骨骼上（跟着跳舞），
+  由一个小几何节点组按遮罩半径修剪（Trim Curve）出生长和消失；粒子新增星光。
+- **一键预设**：纳米战衣 / 纳米流动 / 灰飞烟灭 / 全息扫描 / 故障风 / 装甲换装 / 魔法少女。
+- 修复：Blender 4.2 起 Curve to Mesh 不再自动按曲线半径缩放截面（新增了 Scale 输入），之前线框「边界最粗、两头变细」
+  在 4.2+ 上没有生效，现在把半径接到 Scale 上，和 3.6 一致。
+
 ## 针对 MMD 的改进
 
 - 自动识别 mmd_tools 模型（根空物体 / 骨架 / 网格都能选），跳过刚体和关节。
@@ -47,11 +65,11 @@ Blender 插件：用几何节点给 MMD 模型做「纳米战衣」式变身／�
 
 支持 Blender 3.6 及以上，已在 3.6.15、4.5.10、5.1.2 上测试。两种安装包（zip 不进 git）：
 
-- **Blender 4.2 及以上**：扩展包 `dist/mmd_disperse-1.1.0.zip`，
+- **Blender 4.2 及以上**：扩展包 `dist/mmd_disperse-1.2.0.zip`，
   用 `blender --command extension build --source-dir mmd_disperse --output-dir dist` 生成。
   安装：编辑 > 偏好设置 > 获取扩展 > 右上角下拉 > 从磁盘安装。
-- **Blender 3.6 ~ 4.1**：传统插件包 `dist/mmd_disperse-1.1.0-legacy.zip`（zip 里是 `mmd_disperse/` 文件夹），
-  用 `python -c "import shutil; shutil.make_archive('dist/mmd_disperse-1.1.0-legacy', 'zip', '.', 'mmd_disperse')"` 生成。
+- **Blender 3.6 ~ 4.1**：传统插件包 `dist/mmd_disperse-1.2.0-legacy.zip`（zip 里是 `mmd_disperse/` 文件夹），
+  用 `python -c "import shutil; shutil.make_archive('dist/mmd_disperse-1.2.0-legacy', 'zip', '.', 'mmd_disperse')"` 生成。
   安装：编辑 > 偏好设置 > 插件 > 安装，选这个 zip 后勾选启用。
 
 ## 使用
@@ -72,6 +90,9 @@ Blender 插件：用几何节点给 MMD 模型做「纳米战衣」式变身／�
    - 旧服装处理：退场方式（收缩消失 / 碎片飞散）、碎片大小、飞行时长、风力风向、湍流、旋转、碎片发光，
      保留共用部分（材质名通配符，用 `;` 分隔，改完需重新生成）
    - 粒子：花瓣 / 蝴蝶 / 自定义物体，数量、大小、飞行时长、颜色、扇动速度
+   - 全息先行：范围、不透明度、亮度；故障风：范围、切片高度、闪烁频率、错位、闪光、添加色散
+   - 新服装登场：边缘生长 / 零件飞入（零件大小、飞来距离、提前起飞）；旧服装还可以「装甲弹开」「光剪影」
+   - 光带：圈数、宽度、停留、亮度
 6. 点垃圾桶按钮移除效果并还原模型。
 
 线框层是最重的部分：边界扫过高面数区域时，单帧求值约 0.9 秒（4.5）；3.6 的几何节点更慢，测试里每帧 1.6～2.6 秒
@@ -98,6 +119,10 @@ blender -b --factory-startup "$D/Tifa Gantz 18 V2.blend" --python demo/render_hd
 --set path=SURFACE --set seeds=ORIGIN_LIMBS                                   # 从胸口和手脚流出
 --set path=UP --set exit_style=FRAGMENTS --set particles=PETAL                # 从下往上，化成光尘和花瓣
 --set path=DOWN --set exit_style=FRAGMENTS --set particles=BUTTERFLY --set particle_color=0.45,0.8,1.0  # 从上往下，化成蝴蝶
+--set path=UP --set holo_enable=1 --set wire_enable=0                         # 1.2：从下往上的全息扫描
+--set glitch_enable=1 --set wire_enable=0 --glitch-fx                         # 1.2：故障风 + 合成器色散
+--preset ARMOR                                                                # 1.2：装甲换装
+--preset MAGICAL                                                              # 1.2：魔法少女
 ```
 
 ## 测试（Tifa Gantz 18）
@@ -108,7 +133,8 @@ blender -b --factory-startup "$D/Tifa Gantz 18 V2.blend" --python demo/render_hd
 ```bash
 D="E:/Downloads/tifa_good/Tifa Gantz 18"
 # 功能测试：生成 / 重建 / 实时同步 / 脱下 / 只有新服装 / 动画姿态 / 辉光 / 移除还原 / 面板绘制 /
-# 沿体表和扫描路径 / 碎片、花瓣、蝴蝶 / 碎片倒放 / 只有旧服装
+# 沿体表和扫描路径 / 碎片、花瓣、蝴蝶 / 碎片倒放 / 只有旧服装 / 全息 / 故障风和色散 /
+# 零件飞入和装甲弹开 / 七个预设、光带、星光、光剪影
 blender -b --factory-startup "$D/Tifa Gantz 18 V2.blend" --python tests/test_api.py -- \
   --target-blend "$D/Tifa Gantz 18 V1.blend" --target-root "Tifa Gantz 18 V1" --base-root "Tifa Gantz 18 V2"
 # 渲染测试（--motion 给旧模型骨架加一段摆动动画；--anim 1:100:1 输出序列帧；--save 保存演示场景）

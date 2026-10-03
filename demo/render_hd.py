@@ -24,7 +24,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
-from mmd_disperse import compositor  # noqa: E402
+from mmd_disperse import compositor, presets  # noqa: E402
 from mmd_disperse.model import resolve, rest_bounds  # noqa: E402
 from scene_setup import add_model_args, apply_settings, load_models  # noqa: E402
 
@@ -56,6 +56,8 @@ def parse_args():
     p.add_argument("--orbit", type=float, default=12.0, help="camera orbit half-angle in degrees")
     p.add_argument("--save", default="")
     p.add_argument("--set", action="append", default=[], help="override a setting, e.g. path=SURFACE")
+    p.add_argument("--glitch-fx", action="store_true", help="add the compositor RGB split")
+    p.add_argument("--preset", default="", help="apply a preset first, e.g. MAGICAL")
     return p.parse_args(argv)
 
 
@@ -297,12 +299,16 @@ def main():
     s.frame_start, s.frame_end = (int(v) for v in args.wave.split(":"))
     s.use_lock = True
     s.lock_patterns = TIFA_LOCK
+    if args.preset:
+        presets.apply(s, args.preset)
     apply_settings(s, args.set)
     print("BUILD", bpy.ops.mmd_disperse.build())
     apply_settings(s, args.set)
 
     setup_stage(scene, rest_bounds(base.meshes), args)
     compositor.add_bloom(scene)
+    if args.glitch_fx:
+        compositor.add_glitch(scene, s.frame_start, s.frame_end, s.glitch_rate)
 
     frames = [int(f) for f in args.frames.split(",") if f]
     if args.anim:

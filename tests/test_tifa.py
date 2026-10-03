@@ -24,7 +24,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
-from mmd_disperse import compositor, effect  # noqa: E402
+from mmd_disperse import compositor, effect, presets  # noqa: E402
 from mmd_disperse.model import resolve, rest_bounds  # noqa: E402
 from scene_setup import add_model_args, apply_settings, load_models  # noqa: E402
 
@@ -44,6 +44,8 @@ def parse_args():
     p.add_argument("--lock", action="store_true")
     p.add_argument("--motion", action="store_true")
     p.add_argument("--bloom", action="store_true")
+    p.add_argument("--glitch-fx", action="store_true", help="add the compositor RGB split")
+    p.add_argument("--preset", default="", help="apply a preset first, e.g. MAGICAL")
     p.add_argument("--res", type=int, default=720)
     p.add_argument("--samples", type=int, default=16)
     p.add_argument("--anim", default="", help="render frames a:b:step to an image sequence")
@@ -154,6 +156,8 @@ def main():
     if args.lock:
         s.lock_patterns = TIFA_LOCK
 
+    if args.preset:
+        presets.apply(s, args.preset)
     apply_settings(s, args.set)  # build-time options (path, exit style ...)
     t0 = time.time()
     result = bpy.ops.mmd_disperse.build()
@@ -184,6 +188,8 @@ def main():
     cams = setup_render(scene, args.res, args.samples, bounds)
     if args.bloom:
         compositor.add_bloom(scene)
+    if args.glitch_fx:
+        compositor.add_glitch(scene, s.frame_start, s.frame_end, s.glitch_rate)
 
     for f in frames:
         scene.frame_set(f)

@@ -121,6 +121,40 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                     default=(0.1, 0.75, 1.0), update=_sync)
     glow_strength: FloatProperty(name="Glow Strength", default=4.0, min=0.0, soft_max=50.0, update=_sync)
 
+    # --- how the new outfit arrives
+    entrance: EnumProperty(
+        name="New Outfit Entrance",
+        items=(("GROW", "Grow at the Edge", "The new outfit grows where the edge passes (the tutorial's method)"),
+               ("ASSEMBLE", "Fly In", "The new outfit arrives in pieces that fly in and click into place")),
+        default="GROW", update=_sync)
+    piece_size: _distance("Piece Size", "Size of the pieces the outfits break into (fly in / cast off)", 1.2)
+    fly_distance: _distance("Fly Distance", "How far away the pieces start", 5.0, soft_max=50.0)
+    fly_range: _distance("Fly Range",
+                         "How far ahead of the edge a piece takes off: larger means a longer flight", 1.6)
+    chunk_force: _distance("Chunk Force", "How hard the old outfit's chunks are thrown off", 3.0, soft_max=50.0)
+
+    # --- hologram ahead of the edge
+    holo_enable: BoolProperty(name="Hologram", default=False, update=_sync,
+                              description="The new outfit first shows up as a see-through hologram ahead of the "
+                                          "edge, then turns solid")
+    holo_width: _distance("Hologram Width", "How far ahead of the edge the hologram reaches", 2.5)
+    holo_opacity: FloatProperty(name="Hologram Opacity", default=0.35, min=0.0, max=1.0, subtype="FACTOR",
+                                update=_sync)
+    holo_strength: FloatProperty(name="Hologram Glow", default=2.0, min=0.0, soft_max=20.0, update=_sync,
+                                 description="Brightness of the scan lines, the rim and the scan ring")
+
+    # --- glitch at the edge
+    glitch_enable: BoolProperty(name="Glitch", default=False, update=_sync,
+                                description="Near the edge, horizontal slices flicker between the old and the "
+                                            "new outfit")
+    glitch_width: _distance("Glitch Width", "Width of the flickering zone around the edge", 3.0)
+    glitch_slice: _distance("Slice Height", "Height of the flickering slices", 0.25, soft_max=2.0)
+    glitch_rate: FloatProperty(name="Flicker Rate", default=0.5, min=0.0, soft_max=2.0, update=_sync,
+                               description="How often the slices change, per frame")
+    glitch_shift: _distance("Slice Shift", "How far a slice jumps sideways", 0.4)
+    glitch_flash: BoolProperty(name="Flashes", default=True, update=_sync,
+                               description="Some slices flash in the glow color")
+
     # --- old outfit
     base_shrink: _distance("Shrink", "Pull the old outfit inwards where the new one has formed", 0.08,
                            soft_max=1.0, min_value=-10.0)
@@ -128,7 +162,8 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     exit_style: EnumProperty(
         name="Old Outfit Exit",
         items=(("SHRINK", "Shrink Away", "Sink under the new outfit and disappear (the tutorial's method)"),
-               ("FRAGMENTS", "Disintegrate", "Break into flakes that blow away")),
+               ("FRAGMENTS", "Disintegrate", "Break into flakes that blow away"),
+               ("CHUNKS", "Cast Off", "Break into armour-like chunks that are thrown off and fall")),
         default="SHRINK", update=_sync)
     frag_size: FloatProperty(name="Flake Size", default=0.85, min=0.05, max=1.0, subtype="FACTOR", update=_sync,
                              description="Size of each flake relative to the face it breaks from")
@@ -150,12 +185,28 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     frag_glow_strength: FloatProperty(name="Flake Glow Strength", default=3.0, min=0.0, soft_max=50.0,
                                       update=_sync)
 
+    silhouette: BoolProperty(name="Glowing Silhouette", default=False, update=_sync,
+                             description="The old outfit lights up just before the edge reaches it, so the body "
+                                         "turns into light before it changes (uses the flake glow strength)")
+    silhouette_width: _distance("Silhouette Width", "How far ahead of the edge the old outfit starts to glow", 3.0)
+
+    # --- light ribbons around the limbs
+    ribbon_enable: BoolProperty(name="Light Ribbons", default=False, update=_sync,
+                                description="Glowing ribbons spiral around the arms and legs as they transform "
+                                            "(needs an MMD skeleton; uses the glow color)")
+    ribbon_turns: FloatProperty(name="Ribbon Turns", default=2.5, min=0.5, soft_max=8.0, update=_sync,
+                                description="Turns of the helix around each arm or leg segment")
+    ribbon_width: _distance("Ribbon Width", "Width of the ribbons", 0.12, soft_max=1.0)
+    ribbon_linger: _distance("Ribbon Linger", "How far the wave moves on before a ribbon fades", 2.5)
+    ribbon_strength: FloatProperty(name="Ribbon Glow", default=2.5, min=0.0, soft_max=50.0, update=_sync)
+
     # --- particles released by the old outfit
     particles: EnumProperty(
         name="Particles",
         items=(("NONE", "None", "No particles"),
                ("PETAL", "Petals", "Cherry-blossom petals"),
                ("BUTTERFLY", "Butterflies", "Butterflies flapping their wings"),
+               ("STAR", "Sparkles", "Four-pointed glowing stars"),
                ("OBJECT", "Custom Object", "Copies of any mesh object")),
         default="NONE", update=_sync)
     particle_object: PointerProperty(name="Particle Object", type=bpy.types.Object, poll=_mesh_object,

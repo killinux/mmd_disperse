@@ -24,6 +24,7 @@ class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
 
+        layout.operator_menu_enum("mmd_disperse.apply_preset", "preset", icon="PRESET")
         col = layout.column()
         _model_row(col, s, "base", "BASE")
         _model_row(col, s, "target", "TARGET")
@@ -113,6 +114,91 @@ class MMDDISPERSE_PT_wire(_Panel, bpy.types.Panel):
         layout.operator("mmd_disperse.add_bloom", icon="LIGHT_SUN")
 
 
+class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
+    bl_label = "New Outfit Entrance"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "entrance")
+        if s.entrance == "ASSEMBLE":
+            col = layout.column(align=True)
+            col.prop(s, "piece_size")
+            col.prop(s, "fly_distance")
+            col.prop(s, "fly_range")
+            col.prop(s, "frag_spin")
+
+
+class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
+    bl_label = "Hologram"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "holo_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.holo_enable
+        col = layout.column(align=True)
+        col.prop(s, "holo_width")
+        col.prop(s, "holo_opacity")
+        col.prop(s, "holo_strength")
+        layout.label(text="Uses the glow color of the wire layer", icon="INFO")
+
+
+class MMDDISPERSE_PT_glitch(_Panel, bpy.types.Panel):
+    bl_label = "Glitch"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "glitch_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.glitch_enable
+        col = layout.column(align=True)
+        col.prop(s, "glitch_width")
+        col.prop(s, "glitch_slice")
+        col.prop(s, "glitch_rate")
+        col.prop(s, "glitch_shift")
+        layout.prop(s, "glitch_flash")
+        layout.operator("mmd_disperse.add_glitch_fx", icon="SEQ_CHROMA_SCOPE")
+
+
+class MMDDISPERSE_PT_ribbons(_Panel, bpy.types.Panel):
+    bl_label = "Light Ribbons"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "ribbon_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.ribbon_enable
+        col = layout.column(align=True)
+        col.prop(s, "ribbon_turns")
+        col.prop(s, "ribbon_width")
+        col.prop(s, "ribbon_linger")
+        col.prop(s, "ribbon_strength")
+        layout.label(text="Uses the glow color of the wire layer", icon="INFO")
+
+
 class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
     bl_label = "Old Outfit Cleanup"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -128,6 +214,12 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
             col = layout.column(align=True)
             col.prop(s, "base_shrink")
             col.prop(s, "base_delete_offset")
+        elif s.exit_style == "CHUNKS":
+            col = layout.column(align=True)
+            col.prop(s, "piece_size")
+            col.prop(s, "chunk_force")
+            col.prop(s, "frag_life")
+            col.prop(s, "frag_spin")
         else:
             col = layout.column(align=True)
             col.prop(s, "frag_size")
@@ -139,11 +231,16 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
             col.prop(s, "frag_wind_dir")
             col.prop(s, "frag_turbulence")
             col.prop(s, "frag_spin")
-            col = layout.column(align=True)
+        col = layout.column(align=True)
+        if s.exit_style != "SHRINK":
             col.prop(s, "frag_glow")
-            sub = col.column()
-            sub.active = s.frag_glow
-            sub.prop(s, "frag_glow_strength")
+        col.prop(s, "silhouette")
+        sub = col.column(align=True)
+        sub.active = s.silhouette
+        sub.prop(s, "silhouette_width")
+        sub = col.column()
+        sub.active = s.silhouette or (s.frag_glow and s.exit_style != "SHRINK")
+        sub.prop(s, "frag_glow_strength")
         layout.prop(s, "use_lock")
         col = layout.column()
         col.active = s.use_lock
@@ -181,6 +278,10 @@ classes = (
     MMDDISPERSE_PT_main,
     MMDDISPERSE_PT_edge,
     MMDDISPERSE_PT_wire,
+    MMDDISPERSE_PT_entrance,
+    MMDDISPERSE_PT_hologram,
+    MMDDISPERSE_PT_glitch,
+    MMDDISPERSE_PT_ribbons,
     MMDDISPERSE_PT_old,
     MMDDISPERSE_PT_particles,
 )

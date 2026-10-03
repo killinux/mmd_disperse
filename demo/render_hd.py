@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(REPO, "tests"))
 import mmd_disperse  # noqa: E402
 from mmd_disperse import compositor  # noqa: E402
 from mmd_disperse.model import resolve, rest_bounds  # noqa: E402
-from scene_setup import add_model_args, load_models  # noqa: E402
+from scene_setup import add_model_args, apply_settings, load_models  # noqa: E402
 
 TIFA_LOCK = "Face*;Hair*;Eye*;*Brows*;Eyelashes*;Mouth*;*Teeth*;Inners*"
 NORMAL_NAME = re.compile(r"n(or)?m|nrm|[ _]n[ _.]|n_ao|mapn")  # CSuit_Body_norm, Arms_N, Tifa Head N_AO ...
@@ -55,6 +55,7 @@ def parse_args():
     p.add_argument("--samples", type=int, default=64)
     p.add_argument("--orbit", type=float, default=12.0, help="camera orbit half-angle in degrees")
     p.add_argument("--save", default="")
+    p.add_argument("--set", action="append", default=[], help="override a setting, e.g. path=SURFACE")
     return p.parse_args(argv)
 
 
@@ -296,7 +297,9 @@ def main():
     s.frame_start, s.frame_end = (int(v) for v in args.wave.split(":"))
     s.use_lock = True
     s.lock_patterns = TIFA_LOCK
+    apply_settings(s, args.set)
     print("BUILD", bpy.ops.mmd_disperse.build())
+    apply_settings(s, args.set)
 
     setup_stage(scene, rest_bounds(base.meshes), args)
     compositor.add_bloom(scene)

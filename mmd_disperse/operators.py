@@ -36,7 +36,8 @@ class MMDDISPERSE_OT_build(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.scene.mmd_disperse.target is not None
+        settings = context.scene.mmd_disperse
+        return settings.target is not None or settings.base is not None
 
     def execute(self, context):
         settings = context.scene.mmd_disperse
@@ -49,8 +50,8 @@ class MMDDISPERSE_OT_build(bpy.types.Operator):
             self.report({"WARNING"}, "Bone names differ, not following the old armature: "
                         + ", ".join(info["unbound"]))
         else:
-            self.report({"INFO"}, "Built: {} new / {} old meshes, radius {:.2f}".format(
-                info["target_meshes"], info["base_meshes"], info["radius"]))
+            self.report({"INFO"}, "Built: {} new / {} old meshes, radius {:.2f}, path computed in {:.1f}s".format(
+                info["target_meshes"], info["base_meshes"], info["radius"], info["arrival_seconds"]))
         return {"FINISHED"}
 
 
@@ -71,7 +72,7 @@ class MMDDISPERSE_OT_remove(bpy.types.Operator):
 
 
 class MMDDISPERSE_OT_fit(bpy.types.Operator):
-    """Scale all sizes to the height of the new outfit"""
+    """Scale all sizes to the height of the new (or else the old) outfit"""
 
     bl_idname = "mmd_disperse.fit_size"
     bl_label = "Fit Sizes to Model"
@@ -79,13 +80,14 @@ class MMDDISPERSE_OT_fit(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.scene.mmd_disperse.target is not None
+        settings = context.scene.mmd_disperse
+        return settings.target is not None or settings.base is not None
 
     def execute(self, context):
         settings = context.scene.mmd_disperse
-        height = effect.model_height(settings.target)
+        height = effect.model_height(settings.target or settings.base)
         if height <= 0.0:
-            self.report({"ERROR"}, "New outfit has no meshes")
+            self.report({"ERROR"}, "The outfit has no meshes")
             return {"CANCELLED"}
         effect.fit_sizes(settings, height)
         return {"FINISHED"}

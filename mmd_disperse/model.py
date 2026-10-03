@@ -158,6 +158,20 @@ def write_lock_attribute(ob, patterns):
     return int(values.sum())
 
 
+def free_area(ob):
+    """World-space area of the faces that are not locked to the old model."""
+    me = ob.data
+    area = np.empty(len(me.polygons), dtype=np.float32)
+    me.polygons.foreach_get("area", area)
+    attr = me.attributes.get(ATTR_LOCK)
+    if attr is not None and attr.domain == "FACE":
+        lock = np.zeros(len(me.polygons), dtype=bool)
+        attr.data.foreach_get("value", lock)
+        area = area[~lock]
+    s = ob.matrix_world.to_scale()
+    return float(area.sum()) * abs(s.x * s.y * s.z) ** (2.0 / 3.0)
+
+
 def remove_lock_attribute(ob):
     attr = ob.data.attributes.get(ATTR_LOCK)
     if attr is not None:

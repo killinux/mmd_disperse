@@ -30,12 +30,17 @@ class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
         col.prop(s, "follow_base")
 
         col = layout.column()
-        col.prop(s, "origin_mode")
-        if s.origin_mode == "BONE":
-            arm = find_armature(s.base or s.target)
-            if arm is not None:
-                col.prop_search(s, "origin_bone", arm.data, "bones")
-        col.prop(s, "space")
+        col.prop(s, "path")
+        if s.path == "SURFACE":
+            col.prop(s, "seeds")
+        if s.path == "SPHERE" or (s.path == "SURFACE" and s.seeds != "LIMBS"):
+            col.prop(s, "origin_mode")
+            if s.origin_mode == "BONE":
+                arm = find_armature(s.base or s.target)
+                if arm is not None:
+                    col.prop_search(s, "origin_bone", arm.data, "bones")
+        if s.path == "SPHERE":
+            col.prop(s, "space")
 
         col = layout.column(align=True)
         col.prop(s, "frame_start")
@@ -118,9 +123,27 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
-        col = layout.column(align=True)
-        col.prop(s, "base_shrink")
-        col.prop(s, "base_delete_offset")
+        layout.prop(s, "exit_style")
+        if s.exit_style == "SHRINK":
+            col = layout.column(align=True)
+            col.prop(s, "base_shrink")
+            col.prop(s, "base_delete_offset")
+        else:
+            col = layout.column(align=True)
+            col.prop(s, "frag_size")
+            col.prop(s, "frag_subdivide")
+            col.prop(s, "frag_life")
+            col = layout.column(align=True)
+            col.prop(s, "frag_burst")
+            col.prop(s, "frag_wind")
+            col.prop(s, "frag_wind_dir")
+            col.prop(s, "frag_turbulence")
+            col.prop(s, "frag_spin")
+            col = layout.column(align=True)
+            col.prop(s, "frag_glow")
+            sub = col.column()
+            sub.active = s.frag_glow
+            sub.prop(s, "frag_glow_strength")
         layout.prop(s, "use_lock")
         col = layout.column()
         col.active = s.use_lock
@@ -128,9 +151,36 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
         col.label(text="Rebuild to apply the patterns", icon="INFO")
 
 
+class MMDDISPERSE_PT_particles(_Panel, bpy.types.Panel):
+    bl_label = "Particles"
+    bl_parent_id = "MMDDISPERSE_PT_old"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "particles")
+        if s.particles == "NONE":
+            return
+        col = layout.column(align=True)
+        if s.particles == "OBJECT":
+            col.prop(s, "particle_object")
+        col.prop(s, "particle_count")
+        col.prop(s, "particle_size")
+        col.prop(s, "particle_life")
+        if s.particles == "BUTTERFLY":
+            col.prop(s, "flap_speed")
+        if s.particles != "OBJECT":
+            col = layout.column()
+            col.prop(s, "particle_color")
+            col.prop(s, "particle_glow")
+
+
 classes = (
     MMDDISPERSE_PT_main,
     MMDDISPERSE_PT_edge,
     MMDDISPERSE_PT_wire,
     MMDDISPERSE_PT_old,
+    MMDDISPERSE_PT_particles,
 )

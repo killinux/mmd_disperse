@@ -1,11 +1,13 @@
 """Build, update and remove a suit-up effect (mask empty + modifiers + materials)."""
 
 import fnmatch
+import math
+import time
 
 import bpy
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
-from . import materials
+from . import arrival, materials, particles
 from . import model as mdl
 from .node_groups import BASE_GROUP, TARGET_GROUP, ensure_node_groups, input_identifiers
 
@@ -20,6 +22,11 @@ P_REST = "mmd_disperse_rest_attr"
 P_ARM = "mmd_disperse_armatures"
 P_MATRIX = "mmd_disperse_matrix"
 P_ROOTS = "mmd_disperse_roots"
+# What sync() needs to know about the built effect (stored on the mask).
+P_PATH = "mmd_disperse_path"
+P_REACH = "mmd_disperse_reach"
+P_WAVE = "mmd_disperse_wave"
+P_AREA = "mmd_disperse_area"
 
 # Sizes as a fraction of the model height (tuned on Tifa, ~20.7 MMD units tall).
 SIZE_RATIOS = {
@@ -32,6 +39,10 @@ SIZE_RATIOS = {
     "wire_lift": 0.0015,
     "base_shrink": 0.004,
     "base_delete_offset": 0.03,
+    "frag_burst": 0.012,
+    "frag_wind": 0.3,
+    "frag_turbulence": 0.05,
+    "particle_size": 0.018,
 }
 NOISE_CELLS_PER_HEIGHT = 6.0
 
@@ -54,6 +65,11 @@ def model_height(ob):
         return 0.0
     lo, hi = mdl.rest_bounds(model.meshes)
     return hi.z - lo.z
+
+
+def _object_scale(ob):
+    s = ob.matrix_world.to_scale()
+    return max((abs(s.x) + abs(s.y) + abs(s.z)) / 3.0, 1e-9)
 
 
 # --------------------------------------------------------------------------- mask
@@ -82,15 +98,18 @@ def _insert_scale_keys(mask, frames_values, interpolation):
         prefs.keyframe_new_interpolation_type = old
 
 
-def _create_mask(settings, location, armature, bone, collection, radius_max):
+def _create_mask(settings, location, armature, bone, collection, radius_max, path):
     mask = bpy.data.objects.new(MASK_NAME, None)
-    mask.empty_display_type = "SPHERE"
+    # The scale is how far the wave has travelled; for the sweeps an arrow shows the direction.
+    mask.empty_display_type = "SINGLE_ARROW" if path in ("UP", "DOWN") else "SPHERE"
+    if path == "DOWN":
+        mask.rotation_euler = (math.pi, 0.0, 0.0)
     mask.empty_display_size = 1.0
     mask.show_in_front = True
     mask.hide_render = True
     collection.objects.link(mask)
     mask.location = location
-    if settings.space == "POSED" and armature is not None and bone:
+    if path == "SPHERE" and settings.space == "POSED" and armature is not None and bone:
         con = mask.constraints.new("COPY_LOCATION")
         con.target = armature
         con.subtarget = bone
@@ -159,7 +178,7 @@ def _cleanup_mesh(ob):
     for mod in list(ob.modifiers):
         if mod.type == "NODES" and mod.node_group and mod.node_group.name in (TARGET_GROUP, BASE_GROUP):
             ob.modifiers.remove(mod)
-    if ob.get(P_ROLE) == "TARGET":
+    if ob.get(P_ROLE) in ("TARGET", "BASE"):
         for slot in ob.material_slots:
             if slot.material is not None:
                 materials.remove_edge_glow(slot.material)
@@ -173,6 +192,7 @@ def _cleanup_mesh(ob):
         ob.add_rest_position_attribute = bool(ob[P_REST])
     if ob.type == "MESH":
         mdl.remove_lock_attribute(ob)
+        arrival.remove(ob)
     for key in (P_MASK, P_ROLE, P_REST, P_ARM):
         if key in ob:
             del ob[key]
@@ -201,12 +221,14 @@ def remove_effect(mask):
     bpy.data.objects.remove(mask)
     if action is not None and action.users == 0:
         bpy.data.actions.remove(action)
+    if not any(ob.type == "EMPTY" and ob.name.startswith(MASK_NAME) for ob in bpy.data.objects):
+        particles.remove_assets()
 
 
 # --------------------------------------------------------------------------- settings -> scene
 
 def _glow_materials(ob, settings):
-    """Materials of a new-outfit mesh that get the glowing rim (locked parts never show)."""
+    """Materials of an outfit mesh that may glow (locked parts never break or show the rim)."""
     patterns = mdl.split_patterns(settings.lock_patterns) if settings.use_lock else []
     for slot in ob.material_slots:
         mat = slot.material
@@ -217,6 +239,24 @@ def _glow_materials(ob, settings):
             yield mat
 
 
+def _update_glow(ob, settings, enabled, strength):
+    for mat in _glow_materials(ob, settings):
+        if enabled:
+            materials.add_edge_glow(mat)
+            materials.update_edge_glow(mat, settings.glow_color, strength)
+        else:
+            materials.remove_edge_glow(mat)
+
+
+def _particle_object(settings):
+    """Object the old outfit's particles are made of (built-in petal / butterfly, or the user's)."""
+    if settings.particles == "OBJECT":
+        return settings.particle_object
+    if settings.particles in particles.NAMES:
+        return particles.ensure_asset(settings.particles, settings.id_data)
+    return None
+
+
 def sync(settings):
     """Push the panel values to every modifier and material of the current effect."""
     mask = settings.mask
@@ -224,9 +264,12 @@ def sync(settings):
         return
     wire = bpy.data.materials.get(WIRE_MATERIAL)
     materials.update_wire_material(wire, settings)
+    shape = _particle_object(settings)
+    materials.update_particle_material(settings)
     common = {
         "Mask": mask,
         "Use Rest Position": settings.space == "REST",
+        "Use Arrival": mask.get(P_PATH, "SPHERE") != "SPHERE",
         "Noise Scale": settings.noise_scale,
         "Noise Detail": settings.noise_detail,
         "Noise Amount": settings.noise_amount,
@@ -248,34 +291,68 @@ def sync(settings):
         BASE_GROUP: dict(common, **{
             "Shrink": settings.base_shrink,
             "Delete Offset": settings.base_delete_offset,
+            "Fragments": settings.exit_style == "FRAGMENTS",
+            "Flake Size": settings.frag_size,
+            "Flake Subdivide": settings.frag_subdivide,
+            "Burst": settings.frag_burst,
+            "Turbulence": settings.frag_turbulence,
+            "Spin": settings.frag_spin,
+            "Flake Glow": settings.frag_glow,
+            "Particles": shape is not None,
+            "Particle Object": shape,
+            "Flap": settings.particles == "BUTTERFLY",
+            "Flap Speed": settings.flap_speed,
+            "Particle Size": settings.particle_size,
         }),
     }
+    reach = float(mask.get(P_REACH, 0.0)) or 1e6
+    wave = float(mask.get(P_WAVE, 0.0)) or reach
+    area = float(mask.get(P_AREA, 0.0))
+    density = settings.particle_count / area if area > 0.0 else 0.0
+    wind = Vector(settings.frag_wind_dir)
+    wind = wind.normalized() * settings.frag_wind if wind.length > 1e-9 else Vector((0.0, 0.0, 0.0))
     for ob in effect_objects(mask):
+        role = ob.get(P_ROLE)
+        own = {}
+        if role == "BASE":  # node trees work in object space
+            s = _object_scale(ob)
+            own = {
+                "Reach": reach / s,
+                "Flight": settings.frag_life * wave / s,
+                "Particle Flight": settings.particle_life * wave / s,
+                "Wind": tuple(ob.matrix_world.inverted_safe().to_3x3() @ wind),
+                "Particle Density": density * s * s,
+            }
         for mod in ob.modifiers:
             group = mod.node_group if mod.type == "NODES" else None
             if group is None or group.name not in values:
                 continue
             ids = input_identifiers(group)
-            for name, value in values[group.name].items():
+            for name, value in list(values[group.name].items()) + list(own.items()):
                 key = ids.get(name)
-                if key is not None:
+                if key is not None and value is not None:
                     mod[key] = value
             ob.update_tag()
-        if ob.get(P_ROLE) == "TARGET":
-            for mat in _glow_materials(ob, settings):
-                if settings.edge_glow:
-                    materials.add_edge_glow(mat)
-                    materials.update_edge_glow(mat, settings)
-                else:
-                    materials.remove_edge_glow(mat)
+        if role == "TARGET":
+            _update_glow(ob, settings, settings.edge_glow, settings.edge_glow_strength)
+        elif role == "BASE":
+            _update_glow(ob, settings, settings.exit_style == "FRAGMENTS" and settings.frag_glow,
+                         settings.frag_glow_strength)
+
+
+def _seeds(settings, location, model):
+    seeds = [] if settings.seeds == "LIMBS" else [location]
+    if settings.seeds != "ORIGIN":
+        seeds += arrival.limb_points(model.armature)
+    return seeds or [location]
 
 
 def build(context, settings):
     context.view_layer.update()  # matrix_world must reflect recent transform edits
     target = mdl.resolve(settings.target)
-    if not target:
-        raise EffectError("Pick the new outfit (target model) first")
     base = mdl.resolve(settings.base) if settings.base else mdl.Model(None, None, [])
+    if not target and not base:
+        raise EffectError("Pick the old or the new outfit first")
     if base.root is not None and base.root == target.root:
         raise EffectError("Old and new outfit must be different models")
 
@@ -287,7 +364,7 @@ def build(context, settings):
         else:
             _cleanup_mesh(ob)
 
-    lo, hi = mdl.rest_bounds(target.meshes)
+    lo, hi = mdl.rest_bounds((target or base).meshes)
     height = hi.z - lo.z
     if settings.auto_size and abs(height - settings.size_reference) > 1e-4 * max(height, 1.0):
         fit_sizes(settings, height)
@@ -299,17 +376,51 @@ def build(context, settings):
             target.root[P_MATRIX] = [v for row in target.root.matrix_basis for v in row]
             target.root.matrix_world = base.root.matrix_world.copy()
             roots.append(target.root.name)
+            context.view_layer.update()  # the meshes' matrix_world now include the snap
         unbound = _bind_to_armature(target.meshes, base.armature)
 
     owner = base if base else target
+    meshes = target.meshes + base.meshes
+    path = settings.path
     location, bone = _origin(context, settings, owner)
-    reach = mdl.max_distance(target.meshes + base.meshes, location)
+    seeds = []
+    t0 = time.time()
+    if path == "SPHERE":
+        reach = mdl.max_distance(meshes, location)
+    else:
+        if path == "SURFACE":
+            seeds = _seeds(settings, location, owner)
+        # Start a little short of the surface so nothing (not even the wire ahead of the edge) shows at
+        # radius 0, like the sphere that starts inside the body.
+        lead = settings.wire_outer + 0.005 * height
+        values = [v + lead for v in arrival.compute(meshes, path, seeds, height)]
+        for ob, v in zip(meshes, values):
+            arrival.write(ob, v / _object_scale(ob))
+        reach = max(float(v.max()) for v in values)
+        if path != "SURFACE":
+            blo, bhi = mdl.rest_bounds(meshes)
+            location = Vector(((blo.x + bhi.x) / 2, (blo.y + bhi.y) / 2, blo.z if path == "UP" else bhi.z))
+    arrival_seconds = time.time() - t0
+
     margin = settings.noise_amount + max(settings.edge_width, settings.wire_outer) + 0.02 * height
-    if settings.space == "POSED":
+    if path == "SPHERE" and settings.space == "POSED":
         margin += 0.1 * height
-    collection = target.root.users_collection[0] if target.root.users_collection else context.scene.collection
-    mask = _create_mask(settings, location, owner.armature, bone, collection, reach + margin)
+    # Flakes and particles keep flying after the front has passed: leave them time to finish.
+    wave = reach + margin
+    tail = 0.0
+    if base:
+        if settings.exit_style == "FRAGMENTS":
+            tail = settings.frag_life
+        if settings.particles != "NONE":
+            tail = max(tail, settings.particle_life)
+    radius = wave * (1.0 + tail)
+    root = target.root or base.root
+    collection = root.users_collection[0] if root.users_collection else context.scene.collection
+    mask = _create_mask(settings, location, owner.armature, bone, collection, radius, path)
     mask[P_ROOTS] = roots
+    mask[P_PATH] = path
+    mask[P_REACH] = radius
+    mask[P_WAVE] = wave
 
     target_group, base_group = ensure_node_groups()
     settings.mask = mask
@@ -320,11 +431,15 @@ def build(context, settings):
         locked += _prepare_mesh(ob, "TARGET", mask, target_group, patterns)
     for ob in base.meshes:
         locked += _prepare_mesh(ob, "BASE", mask, base_group, patterns)
+    mask[P_AREA] = sum(mdl.free_area(ob) for ob in base.meshes)
     sync(settings)
     return {
         "mask": mask,
         "height": height,
-        "radius": reach + margin,
+        "radius": radius,
+        "path": path,
+        "seeds": len(seeds),
+        "arrival_seconds": arrival_seconds,
         "target_meshes": len(target.meshes),
         "base_meshes": len(base.meshes),
         "locked_faces": locked,

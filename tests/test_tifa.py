@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.join(REPO, "tests"))
 import mmd_disperse  # noqa: E402
 from mmd_disperse import compositor, effect  # noqa: E402
 from mmd_disperse.model import resolve, rest_bounds  # noqa: E402
-from scene_setup import add_model_args, load_models  # noqa: E402
+from scene_setup import add_model_args, apply_settings, load_models  # noqa: E402
 
 TIFA_LOCK = "Face*;Hair*;Eye*;*Brows*;Eyelashes*;Mouth*;*Teeth*;Inners*"
 
@@ -49,7 +49,7 @@ def parse_args():
     p.add_argument("--anim", default="", help="render frames a:b:step to an image sequence")
     p.add_argument("--anim-cam", default="full", choices=("full", "close"))
     p.add_argument("--save", default="")
-    p.add_argument("--set", action="append", default=[], help="override a setting, e.g. edge_push=0.5")
+    p.add_argument("--set", action="append", default=[], help="override a setting, e.g. edge_push=0.5 or path=SURFACE")
     return p.parse_args(argv)
 
 
@@ -154,13 +154,11 @@ def main():
     if args.lock:
         s.lock_patterns = TIFA_LOCK
 
+    apply_settings(s, args.set)  # build-time options (path, exit style ...)
     t0 = time.time()
     result = bpy.ops.mmd_disperse.build()
     print("BUILD", result, "in %.2fs" % (time.time() - t0))
-    for item in args.set:
-        key, value = item.split("=")
-        current = getattr(s, key)
-        setattr(s, key, type(current)(float(value)) if not isinstance(current, bool) else value == "1")
+    apply_settings(s, args.set)  # sizes again: the first build fits them to the model
     print("SETTINGS", {k: round(getattr(s, k), 4) for k in (
         "noise_scale", "noise_amount", "edge_width", "edge_push", "wire_inner", "wire_outer",
         "wire_radius", "wire_lift", "base_shrink", "base_delete_offset")})

@@ -12,6 +12,20 @@ def add_model_args(parser):
     parser.add_argument("--toon-dir", help="folder with MMD shared toons (toon01.bmp ...) when mmd_tools has none")
 
 
+def apply_settings(settings, items):
+    """--set key=value overrides: numbers, 0/1 for booleans, enum names, comma separated vectors."""
+    for item in items:
+        key, value = item.split("=", 1)
+        current = getattr(settings, key)
+        if isinstance(current, bool):
+            value = value in ("1", "true", "True")
+        elif isinstance(current, (int, float)):
+            value = type(current)(float(value))
+        elif not isinstance(current, str):
+            value = tuple(float(v) for v in value.split(","))
+        setattr(settings, key, value)
+
+
 def _has_pmx_import():
     try:  # bpy.ops proxies always exist; only a registered operator has an RNA type
         bpy.ops.mmd_tools.import_model.get_rna_type()

@@ -1,10 +1,11 @@
-"""Wire material and the optional glowing rim injected into the new outfit's materials."""
+"""Wire and particle materials, and the glowing rim injected into the outfits' own materials."""
 
 import bpy
 
 from .node_groups import ATTR_EDGE
 
 WIRE_MATERIAL = "MMD Disperse Wire"
+PARTICLE_MATERIAL = "MMD Disperse Particle"
 GLOW = "MMDD Edge"  # prefix of every node we add to a user material
 P_GLOW = "mmd_disperse_glow"
 
@@ -87,6 +88,49 @@ def update_wire_material(mat, settings):
     mat.diffuse_color = tuple(settings.glow_color) + (1.0,)
 
 
+def ensure_particle_material():
+    """Petals / butterflies: flat colour that glows, brighter towards the tips (UV x)."""
+    mat = bpy.data.materials.get(PARTICLE_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(PARTICLE_MATERIAL)
+    if mat.node_tree is None:
+        mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = _new(nt, "ShaderNodeOutputMaterial", "Output", 500, 0)
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", "MMDD_BSDF", 150, 0)
+    coord = _new(nt, "ShaderNodeTexCoord", "Coordinates", -650, -200)
+    xyz = _new(nt, "ShaderNodeSeparateXYZ", "UV", -450, -200)
+    tips = _new(nt, "ShaderNodeMapRange", "Tips", -250, -200)
+    tips.inputs[3].default_value = 0.3
+    strength = _new(nt, "ShaderNodeValue", "MMDD_Strength", -250, -450)
+    glow = _new(nt, "ShaderNodeMath", "Glow", -50, -250, operation="MULTIPLY")
+    nt.links.new(coord.outputs["UV"], xyz.inputs[0])
+    nt.links.new(xyz.outputs[0], tips.inputs[0])
+    nt.links.new(tips.outputs[0], glow.inputs[0])
+    nt.links.new(strength.outputs[0], glow.inputs[1])
+    nt.links.new(glow.outputs[0], bsdf.inputs["Emission Strength"])
+    nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
+    _set_input(bsdf, ("Roughness",), 0.45)
+    return mat
+
+
+def update_particle_material(settings):
+    mat = bpy.data.materials.get(PARTICLE_MATERIAL)
+    if mat is None or mat.node_tree is None:
+        return
+    color = tuple(settings.particle_color) + (1.0,)
+    bsdf = mat.node_tree.nodes.get("MMDD_BSDF")
+    if bsdf is not None:
+        _set_input(bsdf, ("Base Color",), color)
+        _set_input(bsdf, ("Emission Color", "Emission"), color)
+    strength = mat.node_tree.nodes.get("MMDD_Strength")
+    if strength is not None:
+        strength.outputs[0].default_value = settings.particle_glow
+    mat.diffuse_color = color
+
+
 def _alpha_source(nt):
     """Texture alpha of the material, so cut-out texels (lace, hair cards) do not glow."""
     tex = nt.nodes.get("mmd_base_tex")  # mmd_tools base texture
@@ -138,14 +182,14 @@ def add_edge_glow(mat):
     mat[P_GLOW] = 1
 
 
-def update_edge_glow(mat, settings):
+def update_edge_glow(mat, color, strength):
     nodes = mat.node_tree.nodes if mat.node_tree else {}
     emission = nodes.get(GLOW + " Emission")
     if emission is not None:
-        emission.inputs["Color"].default_value = tuple(settings.glow_color) + (1.0,)
-    strength = nodes.get(GLOW + " Strength")
-    if strength is not None:
-        strength.outputs[0].default_value = settings.edge_glow_strength
+        emission.inputs["Color"].default_value = tuple(color) + (1.0,)
+    value = nodes.get(GLOW + " Strength")
+    if value is not None:
+        value.outputs[0].default_value = strength
 
 
 def remove_edge_glow(mat):

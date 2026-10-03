@@ -21,6 +21,10 @@ def _not_effect_object(_self, ob):
     return ob.type in {"EMPTY", "ARMATURE", "MESH"} and not ob.name.startswith(effect.MASK_NAME)
 
 
+def _mesh_object(_self, ob):
+    return ob.type == "MESH"
+
+
 def _distance(name, description, default, soft_max=10.0, min_value=0.0):
     return FloatProperty(name=name, description=description, default=default, min=min_value,
                          soft_max=soft_max, subtype="DISTANCE", precision=3, update=_sync)
@@ -33,13 +37,29 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
         description="Model shown before the transformation (root, armature or mesh). Optional")
     target: PointerProperty(
         name="New Outfit", type=bpy.types.Object, poll=_not_effect_object,
-        description="Model revealed by the transformation (root, armature or mesh)")
+        description="Model revealed by the transformation (root, armature or mesh). "
+                    "Leave empty to make the old outfit vanish")
     follow_base: BoolProperty(
         name="Follow Old Armature", default=True,
         description="Bind the new outfit to the old model's armature so both move together "
                     "(needs the same MMD skeleton)")
 
     # --- mask / timing (used when building)
+    path: EnumProperty(
+        name="Wave Path",
+        items=(("SPHERE", "Sphere Growth", "A noisy sphere grows from the start point (the tutorial's method)"),
+               ("SURFACE", "Along the Body",
+                "The wave flows over the body from the start point(s), like a nanotech suit"),
+               ("UP", "Sweep Up", "Scan from the feet up to the head"),
+               ("DOWN", "Sweep Down", "Scan from the head down to the feet")),
+        default="SPHERE")
+    seeds: EnumProperty(
+        name="Flow From",
+        items=(("ORIGIN", "Start Point Only", "Flow from the start point only"),
+               ("ORIGIN_LIMBS", "Start + Hands & Feet",
+                "Flow from the start point and both wrists and ankles at the same time"),
+               ("LIMBS", "Hands & Feet Only", "Flow from both wrists and ankles; the chest and face change last")),
+        default="ORIGIN")
     origin_mode: EnumProperty(
         name="Start From",
         items=(("BONE", "Bone", "Start at a bone of the old model (upper body by default)"),
@@ -105,6 +125,52 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     base_shrink: _distance("Shrink", "Pull the old outfit inwards where the new one has formed", 0.08,
                            soft_max=1.0, min_value=-10.0)
     base_delete_offset: _distance("Delete Behind", "Delete the old outfit this far behind the boundary", 0.6)
+    exit_style: EnumProperty(
+        name="Old Outfit Exit",
+        items=(("SHRINK", "Shrink Away", "Sink under the new outfit and disappear (the tutorial's method)"),
+               ("FRAGMENTS", "Disintegrate", "Break into flakes that blow away")),
+        default="SHRINK", update=_sync)
+    frag_size: FloatProperty(name="Flake Size", default=0.85, min=0.05, max=1.0, subtype="FACTOR", update=_sync,
+                             description="Size of each flake relative to the face it breaks from")
+    frag_subdivide: IntProperty(name="Flake Subdivide", default=0, min=0, max=2, update=_sync,
+                                description="Cut big faces into smaller flakes (slower)")
+    frag_life: FloatProperty(name="Flight Time", default=0.2, min=0.01, max=1.0, subtype="FACTOR", update=_sync,
+                             description="How long a flake stays in the air, as a share of the transformation "
+                                         "(rebuild after a big change so the last flakes have time to finish)")
+    frag_burst: _distance("Burst", "How far the flakes pop out from the surface", 0.25, min_value=-10.0)
+    frag_wind_dir: FloatVectorProperty(name="Wind Direction", subtype="XYZ", size=3, default=(0.0, 0.4, 1.0),
+                                       update=_sync,
+                                       description="World direction the flakes drift in (MMD models face -Y)")
+    frag_wind: _distance("Wind", "How far the wind carries the flakes", 6.0, soft_max=50.0)
+    frag_turbulence: _distance("Turbulence", "How much the flakes swirl around", 1.0)
+    frag_spin: FloatProperty(name="Spin", default=4.0, min=0.0, soft_max=20.0, subtype="ANGLE", update=_sync,
+                             description="How far the flakes tumble during their flight")
+    frag_glow: BoolProperty(name="Glowing Flakes", default=True, update=_sync,
+                            description="Flakes light up in the glow color as they break off")
+    frag_glow_strength: FloatProperty(name="Flake Glow Strength", default=3.0, min=0.0, soft_max=50.0,
+                                      update=_sync)
+
+    # --- particles released by the old outfit
+    particles: EnumProperty(
+        name="Particles",
+        items=(("NONE", "None", "No particles"),
+               ("PETAL", "Petals", "Cherry-blossom petals"),
+               ("BUTTERFLY", "Butterflies", "Butterflies flapping their wings"),
+               ("OBJECT", "Custom Object", "Copies of any mesh object")),
+        default="NONE", update=_sync)
+    particle_object: PointerProperty(name="Particle Object", type=bpy.types.Object, poll=_mesh_object,
+                                     update=_sync, description="Mesh used for every particle")
+    particle_count: IntProperty(name="Count", default=600, min=0, soft_max=5000, update=_sync,
+                                description="About how many particles the whole old outfit releases")
+    particle_size: _distance("Particle Size", "Size of the particles", 0.35)
+    particle_life: FloatProperty(name="Particle Flight Time", default=0.35, min=0.01, max=1.0, subtype="FACTOR",
+                                 update=_sync,
+                                 description="How long a particle stays in the air, as a share of the transformation")
+    particle_color: FloatVectorProperty(name="Particle Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                        default=(1.0, 0.62, 0.78), update=_sync)
+    particle_glow: FloatProperty(name="Particle Glow", default=1.0, min=0.0, soft_max=20.0, update=_sync)
+    flap_speed: FloatProperty(name="Flap Speed", default=1.5, min=0.0, soft_max=6.0, update=_sync,
+                              description="Wing poses per frame")
 
     # --- shared parts
     use_lock: BoolProperty(

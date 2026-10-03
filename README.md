@@ -1,6 +1,7 @@
 # mmd_disperse
 
 Blender 插件：用几何节点给 MMD 模型做「纳米战衣」式变身／换装。
+变身可以从球形扩散、沿身体表面流动或上下扫描，旧服装可以收缩消失，也可以碎成光尘、花瓣、蝴蝶飞走。
 
 技术来自 B 站视频 [【中文配音】一秒换装？用blender几何节点制作蜘蛛侠变身动画](https://www.bilibili.com/video/BV1Yd4y1X7eR/)
 （李先生的元宇宙 配音，原作 Hell FX Learn，YouTube `-nAK7OidJFo`）。插件把视频里手搭的节点树用 Python 自动生成，并针对 MMD 模型做了适配。
@@ -19,6 +20,18 @@ Blender 插件：用几何节点给 MMD 模型做「纳米战衣」式变身／�
 | 原模型：`Less Than or Equal` + `Set Position(-Normal)` 收缩，再删除内部 | 节点组 `MMDDisperse Base`（旧服装处理） |
 | 头部另外处理（形态键缩小塞进头盔） | 「保留共用部分」：按材质名锁定脸、头发等，始终用旧模型的 |
 
+## 视频之外的变身方式（1.1）
+
+参考了业内的做法（钢铁侠 Mark 50、黑豹、灭霸响指等，见 [docs/research.md](docs/research.md)），新增两块：
+
+- **变身路径**：除了视频里的球形扩散，还能「沿体表流动」（从起点贴着身体走，可以同时从手腕、脚踝流出）、
+  「从下往上扫」「从上往下扫」。生成时在两套服装合并的体素网格上求最短路径，给每个顶点算出到达距离，
+  存为属性 `disperse_arrival`；遮罩空物体的缩放仍然是进度条，关键帧和调参方式不变。
+  用体素是因为 MMD 网格被 PMX 按 UV 接缝拆成了几千个不相连的小块（测试模型有 6250 块），没法直接沿网格边走。
+- **旧服装退场**：「碎片飞散」让旧服装在变身经过的地方碎成小片，弹出、被风吹走、打旋缩小。
+  还可以同时放出花瓣、扇翅膀的蝴蝶或任意物体。碎片和粒子的位置只由「变身前沿经过多久」决定，
+  拖时间轴随时正确，不用烘焙；碎片保留衣服本来的贴图颜色。新服装可以留空，整个人直接化成灰。
+
 ## 针对 MMD 的改进
 
 - 自动识别 mmd_tools 模型（根空物体 / 骨架 / 网格都能选），跳过刚体和关节。
@@ -34,32 +47,35 @@ Blender 插件：用几何节点给 MMD 模型做「纳米战衣」式变身／�
 
 支持 Blender 3.6 及以上，已在 3.6.15、4.5.10、5.1.2 上测试。两种安装包（zip 不进 git）：
 
-- **Blender 4.2 及以上**：扩展包 `dist/mmd_disperse-1.0.0.zip`，
+- **Blender 4.2 及以上**：扩展包 `dist/mmd_disperse-1.1.0.zip`，
   用 `blender --command extension build --source-dir mmd_disperse --output-dir dist` 生成。
   安装：编辑 > 偏好设置 > 获取扩展 > 右上角下拉 > 从磁盘安装。
-- **Blender 3.6 ~ 4.1**：传统插件包 `dist/mmd_disperse-1.0.0-legacy.zip`（zip 里是 `mmd_disperse/` 文件夹），
-  用 `python -c "import shutil; shutil.make_archive('dist/mmd_disperse-1.0.0-legacy', 'zip', '.', 'mmd_disperse')"` 生成。
+- **Blender 3.6 ~ 4.1**：传统插件包 `dist/mmd_disperse-1.1.0-legacy.zip`（zip 里是 `mmd_disperse/` 文件夹），
+  用 `python -c "import shutil; shutil.make_archive('dist/mmd_disperse-1.1.0-legacy', 'zip', '.', 'mmd_disperse')"` 生成。
   安装：编辑 > 偏好设置 > 插件 > 安装，选这个 zip 后勾选启用。
 
 ## 使用
 
-一步步的教程见 [docs/tutorial.md](docs/tutorial.md)，下面是简要步骤。
+一步步的教程见 [docs/tutorial.md](docs/tutorial.md)，下面是简要步骤。业内其他变身效果的调研和插件的后续路线见 [docs/research.md](docs/research.md)。
 
 3D 视图按 `N`，打开「MMD Disperse」标签页：
 
 1. **旧服装**：变身前的模型；**新服装**：变身后的模型。吸管按钮可以直接用当前选中的物体。
-   旧服装可以留空，那样新服装会从无到有地「长」出来。
-2. **起点**：骨骼（默认自动选「上半身2」）、3D 游标或模型中心。**测量空间**推荐用「静止姿态」。
+   旧服装可以留空，那样新服装会从无到有地「长」出来；新服装也可以留空，旧服装直接消失。
+2. **路径**：球形扩散 / 沿体表流动（出发点：只从起点 / 起点 + 手脚 / 只从手脚）/ 从下往上扫 / 从上往下扫。
+   **起点**：骨骼（默认自动选「上半身2」）、3D 游标或模型中心。球形扩散时**测量空间**推荐用「静止姿态」。
 3. 设置开始帧、结束帧和方向（穿上 / 脱下）。
 4. 点 **生成变身效果**，拖动时间轴预览。
 5. 下面的参数改了立即生效：
    - 边缘：噪波缩放 / 细节 / 强度、边缘渐变宽度、边缘外推、边缘发光
    - 线框层：六边形开关、边缘前后范围、线粗、抬升、颜色、发光强度、添加辉光
-   - 旧服装处理：向内收缩、边缘后删除距离、保留共用部分（材质名通配符，用 `;` 分隔，改完需重新生成）
+   - 旧服装处理：退场方式（收缩消失 / 碎片飞散）、碎片大小、飞行时长、风力风向、湍流、旋转、碎片发光，
+     保留共用部分（材质名通配符，用 `;` 分隔，改完需重新生成）
+   - 粒子：花瓣 / 蝴蝶 / 自定义物体，数量、大小、飞行时长、颜色、扇动速度
 6. 点垃圾桶按钮移除效果并还原模型。
 
 线框层是最重的部分：边界扫过高面数区域时，单帧求值约 0.9 秒（4.5）；3.6 的几何节点更慢，测试里每帧 1.6～2.6 秒
-（同时也在算两套模型的刚体物理）。在视口里调动画时可以先关掉线框层，渲染前再打开。
+（同时也在算两套模型的刚体物理）。碎片模式下旧服装每帧再多约 1 秒。在视口里调动画时可以先关掉线框层，渲染前再打开。
 
 Blender 3.6 的区别：辉光用 EEVEE 自带的泛光（Bloom），线框用材质的「阴影模式：无」不投阴影；4.2 以后用合成器 Glare 节点。
 
@@ -76,6 +92,13 @@ blender -b --factory-startup "$D/Tifa Gantz 18 V2.blend" --python demo/render_hd
 ```
 
 材质的对应关系是按贴图文件名猜的（`xxx_tex` → `xxx_rough` / `xxx_met`，球面贴图槽里放的是法线贴图），只针对这个模型调过。
+`--set 设置名=值` 可以换用新的路径和退场方式（生成前后各应用一次），例如 1.1 的三段演示：
+
+```bash
+--set path=SURFACE --set seeds=ORIGIN_LIMBS                                   # 从胸口和手脚流出
+--set path=UP --set exit_style=FRAGMENTS --set particles=PETAL                # 从下往上，化成光尘和花瓣
+--set path=DOWN --set exit_style=FRAGMENTS --set particles=BUTTERFLY --set particle_color=0.45,0.8,1.0  # 从上往下，化成蝴蝶
+```
 
 ## 测试（Tifa Gantz 18）
 
@@ -84,7 +107,8 @@ blender -b --factory-startup "$D/Tifa Gantz 18 V2.blend" --python demo/render_hd
 
 ```bash
 D="E:/Downloads/tifa_good/Tifa Gantz 18"
-# 功能测试：生成 / 重建 / 实时同步 / 脱下 / 只有新服装 / 动画姿态 / 辉光 / 移除还原 / 面板绘制
+# 功能测试：生成 / 重建 / 实时同步 / 脱下 / 只有新服装 / 动画姿态 / 辉光 / 移除还原 / 面板绘制 /
+# 沿体表和扫描路径 / 碎片、花瓣、蝴蝶 / 碎片倒放 / 只有旧服装
 blender -b --factory-startup "$D/Tifa Gantz 18 V2.blend" --python tests/test_api.py -- \
   --target-blend "$D/Tifa Gantz 18 V1.blend" --target-root "Tifa Gantz 18 V1" --base-root "Tifa Gantz 18 V2"
 # 渲染测试（--motion 给旧模型骨架加一段摆动动画；--anim 1:100:1 输出序列帧；--save 保存演示场景）
@@ -97,4 +121,5 @@ blender -b --factory-startup --python tests/test_api.py -- --pmx "$D/Tifa Gantz 
 ```
 
 结果：`test_api.py` 在 Blender 3.6.15（导入 PMX）、4.5.10、5.1.2 上全部通过；两种安装包在各自版本的独立配置目录里都能安装、启用。
+三个版本里碎片、花瓣、蝴蝶的位置和姿态完全一致（随机数来自静止姿态坐标，不依赖帧序）。
 渲染结果（`test_output/`，不进 git）：从胸口开始，发光的六边形线框带着全包战衣扫过躯干、手臂、腿，到第 75 帧左右覆盖到脚。

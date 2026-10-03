@@ -10,15 +10,18 @@ import sys
 import traceback
 
 import bpy
+import numpy as np
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
-from mmd_disperse import effect, materials  # noqa: E402
-from mmd_disperse.model import resolve  # noqa: E402
-from mmd_disperse.node_groups import ATTR_LOCK, BASE_GROUP, TARGET_GROUP, input_identifiers  # noqa: E402
+from mmd_disperse import effect, materials, particles  # noqa: E402
+from mmd_disperse.arrival import limb_points  # noqa: E402
+from mmd_disperse.model import resolve, rest_points_world  # noqa: E402
+from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_EDGE, ATTR_LOCK, BASE_GROUP, TARGET_GROUP,  # noqa: E402
+                                      input_identifiers)
 from scene_setup import add_model_args, load_models  # noqa: E402
 
 FAILURES = []
@@ -111,6 +114,45 @@ def evaluated_counts(ob):
         return len(me.vertices)
     finally:
         ev.to_mesh_clear()
+
+
+def evaluated_faces_and_edge(ob):
+    """Face count of the evaluated mesh and the largest disperse_edge value on it (glowing flakes)."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = ob.evaluated_get(deps)
+    me = ev.to_mesh()
+    try:
+        attr = me.attributes.get(ATTR_EDGE)
+        top = 0.0
+        if attr is not None and len(attr.data):
+            values = np.zeros(len(attr.data), dtype=np.float32)
+            attr.data.foreach_get("value", values)
+            top = float(values.max())
+        return len(me.polygons), top
+    finally:
+        ev.to_mesh_clear()
+
+
+def instance_count(ob):
+    deps = bpy.context.evaluated_depsgraph_get()
+    return sum(1 for inst in deps.object_instances
+               if inst.is_instance and inst.parent is not None and inst.parent.original == ob)
+
+
+def arrival_values(ob):
+    attr = ob.data.attributes.get(ATTR_ARRIVAL)
+    if attr is None:
+        return None
+    values = np.zeros(len(attr.data), dtype=np.float32)
+    attr.data.foreach_get("value", values)
+    return values
+
+
+def locked_faces(ob):
+    attr = ob.data.attributes.get(ATTR_LOCK)
+    values = np.zeros(len(attr.data), dtype=bool)
+    attr.data.foreach_get("value", values)
+    return int(values.sum())
 
 
 def our_modifiers(ob):
@@ -221,6 +263,86 @@ def run():
     check(any(c.type == "COPY_LOCATION" for c in s.mask.constraints), "mask follows the bone when posed")
     check(bpy.ops.mmd_disperse.add_bloom() == {"FINISHED"}, "bloom added")
     check(bpy.ops.mmd_disperse.add_bloom() == {"FINISHED"}, "bloom idempotent")
+    bpy.ops.mmd_disperse.remove()
+    s.space = "REST"
+    height = effect.model_height(base_root)
+
+    # --- along the body, from the chest and both hands and feet at once
+    s.path, s.seeds = "SURFACE", "ORIGIN_LIMBS"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build along the body")
+    values = {ob.name: arrival_values(ob) for ob in target.meshes + base.meshes}
+    check(all(v is not None and np.isfinite(v).all() and v.min() > 0 for v in values.values()),
+          "arrival distance on every mesh, finite and positive")
+    bv = values[base.meshes[0].name]
+    near = np.linalg.norm(rest_points_world(base.meshes[0]) - np.array(limb_points(base.armature)[0]), axis=1)
+    near = near < 0.03 * height
+    check(near.any() and float(np.median(bv[near])) < 0.15 * float(bv.max()),
+          "wave starts at the wrist (%.2f of %.2f)" % (float(np.median(bv[near])), float(bv.max())))
+    check(s.mask[effect.P_REACH] > float(bv.max()), "mask grows past the farthest vertex")
+    scene.frame_set(1)
+    check(evaluated_counts(target.meshes[0]) == 0, "along the body: nothing of the new outfit at frame 1")
+    scene.frame_set(100)
+    check(evaluated_counts(target.meshes[0]) > 0, "along the body: new outfit there at the end")
+    s.seeds = "LIMBS"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build from the hands and feet only")
+
+    # --- sweep up: arrival grows with height
+    s.path = "UP"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build sweep up")
+    z = rest_points_world(base.meshes[0])[:, 2]
+    check(float(np.corrcoef(arrival_values(base.meshes[0]), z)[0, 1]) > 0.999, "sweep up follows the height")
+    check(s.mask.empty_display_type == "SINGLE_ARROW", "arrow mask for sweeps")
+    s.path = "SPHERE"
+
+    # --- disintegrate into glowing flakes + petals (face, hair ... stay)
+    s.use_lock = True
+    s.exit_style, s.particles = "FRAGMENTS", "PETAL"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with flakes and petals")
+    check(not draw_panels(bpy.context), "panels draw with flakes and petals")
+    base_mats = [s_.material for ob in base.meshes for s_ in ob.material_slots if s_.material]
+    check(any(m.get(materials.P_GLOW) for m in base_mats), "old outfit materials glow for the flakes")
+    scene.frame_set(50)
+    faces, glow_top = evaluated_faces_and_edge(base.meshes[0])
+    check(glow_top > 0.0, "flakes in the air at frame 50 (glow %.2f)" % glow_top)
+    petals = instance_count(base.meshes[0])
+    check(petals > 0, "petals released at frame 50 (%d)" % petals)
+    scene.frame_set(100)
+    faces, _ = evaluated_faces_and_edge(base.meshes[0])
+    check(faces == locked_faces(base.meshes[0]), "only the shared parts of the old outfit left (%d faces)" % faces)
+    check(instance_count(base.meshes[0]) == 0, "every petal gone at the end")
+
+    # --- butterflies, then live switch back to shrinking
+    s.particles = "BUTTERFLY"
+    check(bpy.data.objects.get(particles.BUTTERFLY) is not None, "butterfly shape created")
+    scene.frame_set(50)
+    check(instance_count(base.meshes[0]) > 0, "butterflies released at frame 50")
+    s.particles = "OBJECT"
+    s.particle_object = bpy.data.objects.get(particles.PETAL)
+    check(not draw_panels(bpy.context), "panels draw with a custom particle object")
+    s.exit_style, s.particles = "SHRINK", "NONE"
+    check(not any(m.get(materials.P_GLOW) for m in base_mats), "flake glow removed when shrinking again")
+
+    # --- suit down with flakes: the old outfit re-forms from its pieces
+    s.exit_style, s.direction = "FRAGMENTS", "SHRINK"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build suit down with flakes")
+    scene.frame_set(1)
+    check(evaluated_faces_and_edge(base.meshes[0])[0] == locked_faces(base.meshes[0]),
+          "suit down: old outfit still in pieces at the start")
+    scene.frame_set(100)
+    check(evaluated_counts(base.meshes[0]) == len(base.meshes[0].data.vertices), "suit down: old outfit re-formed")
+    s.direction = "GROW"
+
+    # --- remove restores everything (attributes, materials, particle shapes)
+    check(bpy.ops.mmd_disperse.remove() == {"FINISHED"}, "remove after the new paths")
+    after = snapshot([base, target])
+    check(all(before[k] == after[k] for k in before), "models restored after flakes, sweeps and petals")
+    check(not any(bpy.data.objects.get(n) for n in particles.NAMES.values()), "particle shapes removed")
+
+    # --- old outfit only: the whole model disintegrates
+    s.target, s.use_lock, s.particles = None, False, "NONE"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with only the old outfit")
+    scene.frame_set(100)
+    check(evaluated_faces_and_edge(base.meshes[0])[0] == 0, "old outfit gone completely")
     bpy.ops.mmd_disperse.remove()
 
     mmd_disperse.unregister()

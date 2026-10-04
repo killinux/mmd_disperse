@@ -1,9 +1,11 @@
 """One-click looks. A preset only sets panel values (sizes stay fitted to the model); some of them are
-build-time settings, so an effect that is already built gets rebuilt with them."""
+build-time settings, so an effect that is already built gets rebuilt with them. Presets in WHITE_FLASH also want
+the compositor's white flash (the operator adds it)."""
 
 _OFF = dict(
     entrance="GROW", exit_style="SHRINK", particles="NONE", wire_enable=False, holo_enable=False,
     glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True, finale=False, finale_style="PULSE",
+    finale_length=0.15, layer_enable=False, inner_glow=False,
 )
 
 PRESETS = (
@@ -21,6 +23,12 @@ PRESETS = (
     ("ARMOR", "Armor Change", "The old armour is thrown off in chunks while the new one flies in piece by piece",
      dict(_OFF, path="SURFACE", seeds="ORIGIN", entrance="ASSEMBLE", exit_style="CHUNKS", frag_glow=True,
           glow_color=(1.0, 0.55, 0.1))),
+    ("NANO_FINALE", "Nanotech Finale", "A dark undersuit flows out from the chest under hexagon wires, the suit forms "
+                                       "behind it, then a band of light sweeps over it, stars burst out and the "
+                                       "picture flashes white",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", wire_enable=True, layer_enable=True, inner_glow=True, finale=True,
+          finale_style="SWEEP", finale_length=0.3, finale_white=0.8, particle_color=(0.6, 0.9, 1.0),
+          particle_glow=3.0, glow_color=(0.1, 0.75, 1.0))),
     ("MAGICAL", "Magical Girl", "Hands and feet first: the body lights up, ribbons of light wrap the limbs, "
                                 "the old outfit bursts into sparkles and the new one flashes when it is complete",
      dict(_OFF, path="SURFACE", seeds="LIMBS", exit_style="FRAGMENTS", frag_glow=True, silhouette=True,
@@ -31,6 +39,7 @@ PRESETS = (
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
 BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles"}
+WHITE_FLASH = {"NANO_FINALE"}
 
 
 def apply(settings, key):

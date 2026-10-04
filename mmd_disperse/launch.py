@@ -1,4 +1,4 @@
-"""Leave behind: record where the old outfit is at the moment it breaks apart.
+"""Leave behind: record where the outfits are at the moments their pieces leave the body.
 
 Flakes, chunks and particles are stateless: every frame the Base node group places them relative to the body's
 current pose, so on a dancing model they ride along with it. To let them stay where they broke off, the build
@@ -11,10 +11,17 @@ A chunk (Cast Off) breaks off whole when the average age of its vertices turns p
 recorded at that one moment, per face corner (`disperse_chunk_launch`): a vertex on a cut belongs to two chunks.
 The probe cuts the mesh once the way the Base group does, to know which corner belongs to which chunk.
 
+The new outfit is recorded the same way at its own moments: per vertex when its finale star is born (the stars
+then burst out of where the body was), per piece when it takes off to fly in (it then flies from a fixed point in
+the world to its place on the moving body).
+
 Positions are recorded in world space, so moving or turning the whole model (object animation, not only
 bones) leaves the pieces behind too. An empty (Launch Space) keeps the object's motion as it was recorded; the
 node group brings the positions back into object space through it. Moving the model afterwards without
 animating it (its world matrix changes the same way on every frame) carries the pieces along.
+
+A recording only holds for the settings it was made with besides the mask keys (piece size, the finale's sweep
+...): its signature, compared by effect.sync(), which drops a recording that no longer matches.
 """
 
 import bpy
@@ -22,13 +29,16 @@ import numpy as np
 from mathutils import Matrix
 
 from . import particles
-from .node_groups import (ATTR_AGE, ATTR_CHUNK_LAUNCH, ATTR_CORNER, ATTR_ISLAND, ATTR_LAUNCH, ATTR_VERTEX,
-                          BASE_GROUP, PROBE_INPUTS, ensure_probe_group, input_identifiers)
+from .node_groups import (ATTR_AGE, ATTR_CHUNK_LAUNCH, ATTR_CORNER, ATTR_ISLAND, ATTR_LAUNCH, ATTR_PIECE_AGE,
+                          ATTR_VERTEX, BASE_GROUP, PROBE_INPUTS, TARGET_GROUP, ensure_probe_group, input_identifiers)
 
 PROBE = "MMD Disperse Probe"
 SPACE = "MMD Disperse Motion"  # name of the empties holding the recorded object motion
 P_SPACE = "mmd_disperse_launch_space"  # on a recorded mesh: its motion empty
-P_PIECE = "mmd_disperse_launch_piece"  # on a recorded mesh: object-space piece size of the recorded chunks
+P_SIGNATURE = "mmd_disperse_launch_signature"  # ... the settings its vertex moments depend on
+P_CHUNK_SIGNATURE = "mmd_disperse_launch_chunk_signature"  # ... and its pieces'
+P_PIECE = "mmd_disperse_launch_piece"  # 1.4: piece size the chunks were recorded with (their signature then)
+GROUPS = (BASE_GROUP, TARGET_GROUP)
 
 
 def space(ob):
@@ -38,27 +48,48 @@ def space(ob):
 
 
 def has_launch(ob, chunks=False):
-    """True when the mesh has a recording (for its chunks with `chunks`)."""
+    """True when the mesh has a recording of its vertices (of its pieces with `chunks`)."""
     if ob.type != "MESH" or space(ob) is None:
         return False
     return ob.data.attributes.get(ATTR_CHUNK_LAUNCH if chunks else ATTR_LAUNCH) is not None
 
 
-def piece_size(ob):
-    return float(ob.get(P_PIECE, 0.0))
+def _encode(values):
+    return ";".join(repr(float(v)) for v in values)
 
 
-def remove(ob, chunks_only=False):
-    """Drop the recording of a mesh (or only that of its chunks)."""
+def signature(ob, chunks=False):
+    """Values the recording of the vertices (pieces) was made with; None when unknown."""
+    text = ob.get(P_CHUNK_SIGNATURE if chunks else P_SIGNATURE)
+    if text is None:  # recorded by 1.4: only the old outfit, its vertices depending on nothing else
+        if chunks:
+            return (float(ob[P_PIECE]),) if P_PIECE in ob else None
+        return ()
+    return tuple(float(v) for v in text.split(";")) if text else ()
+
+
+def matches(ob, chunks, wanted):
+    """True when the recording was made with the values `wanted`."""
+    have = signature(ob, chunks)
+    return have is not None and len(have) == len(wanted) and all(
+        abs(a - b) <= 1e-4 * max(abs(a), abs(b), 1e-3) for a, b in zip(have, wanted))
+
+
+def remove(ob, part=None):
+    """Drop the recording of a mesh, or only one `part` of it: "vertices" or "chunks"."""
     if ob.type != "MESH":
         return
-    for name in (ATTR_CHUNK_LAUNCH,) if chunks_only else (ATTR_LAUNCH, ATTR_CHUNK_LAUNCH):
-        attr = ob.data.attributes.get(name)
+    for key, attr_name, props in (("vertices", ATTR_LAUNCH, (P_SIGNATURE,)),
+                                  ("chunks", ATTR_CHUNK_LAUNCH, (P_CHUNK_SIGNATURE, P_PIECE))):
+        if part not in (None, key):
+            continue
+        attr = ob.data.attributes.get(attr_name)
         if attr is not None:
             ob.data.attributes.remove(attr)
-    if P_PIECE in ob:
-        del ob[P_PIECE]
-    if chunks_only:
+        for prop in props:
+            if prop in ob:
+                del ob[prop]
+    if part is not None and (has_launch(ob) or has_launch(ob, chunks=True)):
         return
     sp = space(ob)
     if sp is not None:
@@ -70,22 +101,36 @@ def remove(ob, chunks_only=False):
         del ob[P_SPACE]
 
 
+class Job:
+    """A mesh to record (built): the moments of its vertices with `vertices`, of its pieces with `chunks`, each
+    with the signature they depend on; `target` for the new outfit."""
+
+    def __init__(self, ob, target=False, vertices=True, chunks=False, signature=(), chunk_signature=()):
+        self.ob = ob
+        self.target = target
+        self.vertices = vertices
+        self.chunks = chunks
+        self.signature = tuple(signature)
+        self.chunk_signature = tuple(chunk_signature)
+
+
 def _read(ob, deps, count):
-    """(world positions, age, world matrix) of the evaluated mesh, or None when its vertices no longer match
-    the original."""
+    """(world positions, vertex age, piece age, world matrix) of the evaluated mesh, or None when its vertices no
+    longer match the original."""
     ev = ob.evaluated_get(deps)
     me = ev.to_mesh()
     try:
-        attr = me.attributes.get(ATTR_AGE)
-        if len(me.vertices) != count or attr is None:
+        ages = [me.attributes.get(name) for name in (ATTR_AGE, ATTR_PIECE_AGE)]
+        if len(me.vertices) != count or None in ages:
             return None
         pos = np.empty(count * 3, dtype=np.float32)
         me.vertices.foreach_get("co", pos)
-        age = np.empty(count, dtype=np.float32)
-        attr.data.foreach_get("value", age)
+        age, piece_age = np.empty(count, dtype=np.float32), np.empty(count, dtype=np.float32)
+        ages[0].data.foreach_get("value", age)
+        ages[1].data.foreach_get("value", piece_age)
         matrix = np.array(ev.matrix_world, dtype=np.float64)
         world = pos.reshape(-1, 3).astype(np.float64) @ matrix[:3, :3].T + matrix[:3, 3]
-        return world, age, matrix
+        return world, age, piece_age, matrix
     finally:
         ev.to_mesh_clear()
 
@@ -99,22 +144,26 @@ def _int_values(attributes, name, count):
     return values
 
 
-def _add_probe(ob, group):
-    """Probe modifier in front of our Base modifier, fed the same inputs; everything from the Base modifier
-    on is switched off. Returns (probe, {modifier: show_viewport} to restore)."""
+def _ours(mod):
+    return mod.type == "NODES" and mod.node_group is not None and mod.node_group.name in GROUPS
+
+
+def _add_probe(ob, group, target):
+    """Probe modifier in front of our Base / Target modifier, fed the same inputs; everything from that modifier on
+    is switched off. Returns (probe, {modifier: show_viewport} to restore)."""
     mods = list(ob.modifiers)
-    base = next(i for i, m in enumerate(mods) if m.type == "NODES" and m.node_group
-                and m.node_group.name == BASE_GROUP)
+    ours = next(i for i, m in enumerate(mods) if _ours(m))
     probe = ob.modifiers.new(PROBE, "NODES")
     probe.node_group = group
-    ob.modifiers.move(len(ob.modifiers) - 1, base)
-    src, dst = input_identifiers(mods[base].node_group), input_identifiers(group)
+    ob.modifiers.move(len(ob.modifiers) - 1, ours)
+    src, dst = input_identifiers(mods[ours].node_group), input_identifiers(group)
     for spec in PROBE_INPUTS:
         name = spec[0]
         if name in src and name in dst:
-            probe[dst[name]] = mods[base][src[name]]
+            probe[dst[name]] = mods[ours][src[name]]
+    probe[dst["Target"]] = target
     saved = {}
-    for mod in mods[base:]:
+    for mod in mods[ours:]:
         saved[mod] = mod.show_viewport
         mod.show_viewport = False
     return probe, saved
@@ -134,7 +183,7 @@ class _Chunks:
         self.last_age = None
 
     def age(self, age):
-        """Age of every chunk: the average over its vertices, as the Base group takes it."""
+        """Age of every chunk: the average over its vertices, as the node groups take it."""
         return np.bincount(self.island, weights=age[self.vertex], minlength=len(self.count)) / self.count
 
 
@@ -184,8 +233,9 @@ def _crossing(last, now, done):
 class _Track:
     """Recording of one mesh while the frames play."""
 
-    def __init__(self, ob, chunks):
-        self.ob = ob
+    def __init__(self, job, chunks):
+        self.job = job
+        self.ob = job.ob
         self.chunks = chunks
         self.launch = None
         self.done = None
@@ -193,10 +243,10 @@ class _Track:
         self.last_age = None
         self.matrices = []
 
-    def add(self, frame, pos, age, matrix):
+    def add(self, frame, pos, age, piece_age, matrix):
         self.matrices.append((frame, matrix))
         chunks = self.chunks
-        chunk_age = chunks.age(age) if chunks is not None else None
+        chunk_age = chunks.age(piece_age) if chunks is not None else None
         if self.launch is None:
             self.launch = pos.copy()
             self.done = np.zeros(len(age), dtype=bool)
@@ -204,13 +254,13 @@ class _Track:
                 chunks.launch = pos[chunks.corner_vertex]
                 chunks.last_age = chunk_age
         else:
-            # The edge passed the vertex between the last frame and this one: interpolate to age 0.
+            # The moment came for the vertex between the last frame and this one: interpolate to age 0.
             hit, frac = _crossing(self.last_age, age, self.done)
             if hit.any():
                 self.launch[hit] = self.last_pos[hit] + (pos[hit] - self.last_pos[hit]) * frac[:, None]
                 self.done |= hit
             if chunks is not None:
-                # ... and a chunk: all its corners at the same moment, so it stays in one piece.
+                # ... and for a chunk: all its corners at the same moment, so it stays in one piece.
                 hit, frac = _crossing(chunks.last_age, chunk_age, chunks.done)
                 if hit.any():
                     at = np.zeros(len(hit))
@@ -245,16 +295,18 @@ def _key_motion(sp, matrices):
         prefs.keyframe_new_interpolation_type = old
 
 
-def _write(track, scene, probe):
-    """Store the recording on the mesh and wire its motion empty into the Base modifier."""
-    ob = track.ob
+def _write(track, scene):
+    """Store the recording on the mesh and wire its motion empty into our modifier."""
+    ob, job = track.ob, track.job
     remove(ob)
-    attr = ob.data.attributes.new(ATTR_LAUNCH, "FLOAT_VECTOR", "POINT")
-    attr.data.foreach_set("vector", track.launch.astype(np.float32).ravel())
+    if job.vertices:
+        attr = ob.data.attributes.new(ATTR_LAUNCH, "FLOAT_VECTOR", "POINT")
+        attr.data.foreach_set("vector", track.launch.astype(np.float32).ravel())
+        ob[P_SIGNATURE] = _encode(job.signature)
     if track.chunks is not None:
         attr = ob.data.attributes.new(ATTR_CHUNK_LAUNCH, "FLOAT_VECTOR", "CORNER")
         attr.data.foreach_set("vector", track.chunks.launch.astype(np.float32).ravel())
-        ob[P_PIECE] = float(probe[input_identifiers(probe.node_group)["Piece Size"]])
+        ob[P_CHUNK_SIGNATURE] = _encode(job.chunk_signature)
     sp = bpy.data.objects.new(SPACE, None)
     sp.empty_display_size = 0.1
     sp.hide_render = True
@@ -262,22 +314,25 @@ def _write(track, scene, probe):
     _key_motion(sp, track.matrices)
     ob[P_SPACE] = sp
     for mod in ob.modifiers:
-        if mod.type == "NODES" and mod.node_group and mod.node_group.name == BASE_GROUP:
+        if _ours(mod):
             key = input_identifiers(mod.node_group).get("Launch Space")
             if key is not None:
                 mod[key] = sp
             ob.update_tag()
 
 
-def record(context, meshes, others, frames, warmup=None, chunks=False):
-    """Play `frames` and write the launch positions onto `meshes` (the old outfit, built); with `chunks` also
-    those of whole chunks. The node modifiers of `others` (new outfit, ribbons) are off meanwhile. `warmup` is
-    an earlier frame to start playing from so physics settles. Returns how many vertices broke off within the
-    frames."""
+def record(context, jobs, others, frames, warmup=None):
+    """Play `frames` and write the launch positions of every Job's mesh. The node modifiers of `others` (meshes
+    not recorded, ribbons) are off meanwhile. `warmup` is an earlier frame to start playing from so physics
+    settles. Returns how many vertices reached their moment within the frames."""
     frames = list(frames)
-    if not frames or not meshes:
+    if not frames or not jobs:
         return 0
     scene = context.scene
+    # Evaluate once with our modifiers on: Blender 3.6 never evaluates a hidden object our modifiers were the first
+    # to reference (the particle and star shapes just created) if they are off at that moment, and Object Info then
+    # keeps getting an empty geometry from it.
+    context.view_layer.update()
     group = ensure_probe_group()
     saved = {}
     probes = {}
@@ -286,15 +341,15 @@ def record(context, meshes, others, frames, warmup=None, chunks=False):
             if mod.type == "NODES" and mod.show_viewport:
                 saved[mod] = True
                 mod.show_viewport = False
-    tracks = []
-    for ob in meshes:
-        probe, off = _add_probe(ob, group)
-        probes[ob] = probe
+    for job in jobs:
+        probe, off = _add_probe(job.ob, group, job.target)
+        probes[job.ob] = probe
         saved.update(off)
+    tracks = []
     current = scene.frame_current
     try:
-        for ob in meshes:
-            tracks.append(_Track(ob, _cut(context, ob, probes[ob]) if chunks else None))
+        for job in jobs:
+            tracks.append(_Track(job, _cut(context, job.ob, probes[job.ob]) if job.chunks else None))
         if warmup is not None:
             for f in range(warmup, frames[0]):
                 scene.frame_set(f)
@@ -305,12 +360,11 @@ def record(context, meshes, others, frames, warmup=None, chunks=False):
                 seen = _read(track.ob, deps, len(track.ob.data.vertices))
                 if seen is not None:
                     track.add(f, *seen)
-        # Written while the probes still hold the inputs the recording was made with.
-        broken = 0
+        reached = 0
         for track in tracks:
-            if track.launch is not None:
-                _write(track, scene, probes[track.ob])
-                broken += int(track.done.sum())
+            if track.launch is not None and (track.job.vertices or track.chunks is not None):
+                _write(track, scene)
+                reached += int(track.done.sum()) if track.job.vertices else 0
             else:
                 remove(track.ob)
     finally:
@@ -319,4 +373,4 @@ def record(context, meshes, others, frames, warmup=None, chunks=False):
         for mod, shown in saved.items():
             mod.show_viewport = shown
         scene.frame_set(current)
-    return broken
+    return reached

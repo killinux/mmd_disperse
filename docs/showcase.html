@@ -210,11 +210,11 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.4：用 Blender 几何节点给 MMD 模型做换装变身。下面十三段视频都是插件生成的
+    <p>mmd_disperse 1.5：用 Blender 几何节点给 MMD 模型做换装变身。下面十六段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤。</p>
     <div class="stats">
-      <span><b>13</b> 段演示</span>
-      <span><b>7</b> 个一键预设</span>
+      <span><b>16</b> 段演示</span>
+      <span><b>8</b> 个一键预设</span>
       <span><b>120</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
@@ -243,9 +243,9 @@
     <p class="sub">每段视频都先做这几步，再按各自的设置调整。界面名称以中文 Blender 为准。</p>
     <div class="card">
       <ol class="setup">
-        <li><b>安装插件。</b>Blender 4.2 及以上：编辑 › 偏好设置 › 获取扩展 › 右上角下拉 › 从磁盘安装，选
-          <code>dist/mmd_disperse-1.4.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
-          <code>mmd_disperse-1.4.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
+        <li><b>安装插件。</b>安装包在 <a href="https://github.com/killinux/mmd_disperse/releases">GitHub Releases</a> 下载。Blender 4.2 及以上：编辑 › 偏好设置 › 获取扩展 › 右上角下拉 › 从磁盘安装，选
+          <code>dist/mmd_disperse-1.5.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
+          <code>mmd_disperse-1.5.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
         <li><b>导入两个模型。</b>用 mmd_tools（文件 › 导入 › MikuMikuDance 模型 (.pmd, .pmx)）导入
           旧服装（变身前，视频里是 V2）和新服装（变身后，V1）。位置随意，生成时新服装会自动对齐到旧服装上。</li>
         <li><b>跳舞的话先加载动作。</b>只给旧模型加载：选中旧模型脚下的根物体，文件 › 导入 ›
@@ -289,6 +289,9 @@
       <a href="#dance-armor"><img src="../test_output/posters/dance_armor.jpg" alt="" loading="lazy">跳舞·装甲留下</a>
       <a href="#spin"><img src="../test_output/posters/spin_magical.jpg" alt="" loading="lazy">转圈·魔法少女</a>
       <a href="#sweep"><img src="../test_output/posters/sweep_flash.jpg" alt="" loading="lazy">光扫 + 闪白</a>
+      <a href="#nano-finale"><img src="../test_output/posters/nano_finale.jpg" alt="" loading="lazy">纳米战衣收尾</a>
+      <a href="#spin-armor"><img src="../test_output/posters/spin_armor.jpg" alt="" loading="lazy">转圈·装甲换装</a>
+      <a href="#scan-layer"><img src="../test_output/posters/scan_layer.jpg" alt="" loading="lazy">内衬扫描·背面发光</a>
     </div>
 
     <article class="effect card" id="suitup">
@@ -596,6 +599,78 @@
         <p class="cmd">演示参数：<code>--preset NANOTECH --set finale=1 --set finale_style=SWEEP --set finale_length=0.3 --set particle_color=0.6,0.9,1.0 --set particle_glow=3 --white-flash</code></p>
       </div>
     </article>
+
+    <article class="effect card" id="nano-finale">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/nano_finale.jpg">
+          <source src="../test_output/demo_v7/tifa_nano_finale_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.5</span><span class="tag">沿体表流动</span><span class="tag">深色内衬</span><span class="tag">收尾光扫</span><span class="tag">全屏闪白</span></div>
+        <h3>纳米战衣收尾（新预设）</h3>
+        <p class="lead">从胸口流出一层带发光细网纹的深色内衬，六边形线框在最前面爬；战衣跟在内衬后面沿一道发光接缝成形。
+          全身长好的一刻画面闪白，一道光沿着流过来的路线扫过全身，光经过的地方迸出星星。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">纳米战衣收尾</span>：打开沿体表流动（只从起点）、线框层、
+            <span class="ui">深色内衬</span>、<span class="ui">背面发光</span>、收尾闪光（<span class="v">光扫</span>，时长 <span class="v">0.3</span>），
+            并自动在合成器里加上闪白。</li>
+          <li><span class="ui">深色内衬</span> 面板里 <span class="ui">内衬宽度</span> 决定战衣落后边界多远，
+            <span class="ui">内衬纹路亮度</span> 调细网纹（颜色用线框层的发光颜色）。</li>
+          <li>遮罩会自动多长出一个内衬宽度，收尾闪光和闪白等战衣完整以后才开始。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset NANO_FINALE --white-flash</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="spin-armor">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/spin_armor.jpg">
+          <source src="../test_output/demo_v7/tifa_spin_armor_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.5</span><span class="tag">物体动画</span><span class="tag">转圈</span><span class="tag">留在原地</span><span class="tag">零件飞入</span></div>
+        <h3>边转圈边换装甲</h3>
+        <p class="lead">整个人转一圈的同时换装甲：旧装甲整块弹开、留在空中往下落；新装甲的零件从空中固定的位置飞过来，
+          追着转动的身体装上去，不会跟着身体一起绕圈。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li>选中旧模型脚下的根物体，在第 <span class="v">10</span> 帧给 <span class="ui">旋转 Z</span> 打关键帧，
+            第 <span class="v">150</span> 帧改成 <span class="v">360°</span> 再打一个。</li>
+          <li><span class="ui">预设</span> 选 <span class="v">装甲换装</span>。</li>
+          <li>勾选主面板的 <span class="ui">留在原地</span>，点 <span class="ui">生成变身效果</span>：生成时记下旧装甲每块脱落、
+            新装甲每块起飞那一刻的位置。改了 <span class="ui">零件大小</span> 或 <span class="ui">提前起飞</span> 要重新生成。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset ARMOR --set leave_behind=1 --spin 360 --spin-frames 10:150</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="scan-layer">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/scan_layer.jpg">
+          <source src="../test_output/demo_v7/tifa_scan_layer_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.5</span><span class="tag">从下往上扫</span><span class="tag">只有新服装</span><span class="tag">深色内衬</span><span class="tag">背面发光</span></div>
+        <h3>从无到有 · 内衬扫描 + 背面发光</h3>
+        <p class="lead">没有旧服装，新服装从脚往上一层层「打印」出来：先是带网纹的深色内衬，战衣跟在后面。
+          镜头稍微俯视，能看进切口里，切口内部是发光的，不是空心的壳。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">旧服装</span> 留空，只设 <span class="ui">新服装</span>；不勾 <span class="ui">保留共用部分</span>（脸和头发也一起长出来）。</li>
+          <li><span class="ui">路径</span> 选 <span class="v">从下往上扫</span>。</li>
+          <li>展开 <span class="ui">深色内衬</span> 面板，标题栏勾上。</li>
+          <li><span class="ui">边缘</span> 面板勾选 <span class="ui">背面发光</span>（强度、深度可以调）。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--no-base --set use_lock=0 --set path=UP --set inner_glow=1 --set layer_enable=1</code></p>
+      </div>
+    </article>
   </div>
 </section>
 
@@ -621,17 +696,18 @@
         <ul><li>花瓣</li><li>蝴蝶（会扇翅膀）</li><li>星光</li><li>自定义物体</li><li>也可以不要</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>7</b></h3>
+        <h3>叠加开关 <b>9</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行</li><li>故障风</li><li>光剪影</li><li>光带</li>
-          <li>收尾闪光（整身闪光 / 光扫）</li><li>留在原地（碎片、装甲、粒子；跳舞或整个人移动、转圈）</li></ul>
+          <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬</li><li>背面发光</li>
+          <li>留在原地（碎片、装甲、粒子、新服装的零件和星星；跳舞或整个人移动、转圈）</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
         <ul><li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散、全屏闪白</li></ul>
       </div>
     </div>
-    <p class="sum">路径 × 登场 × 退场 × 粒子 = 4 × 2 × 3 × 5 = <b>120</b> 种基本组合；再叠加 7 个开关
-      （收尾闪光有两种方式），理论上有两万多种（「留在原地」在碎片飞散、装甲弹开或开了粒子时起作用）。</p>
+    <p class="sum">路径 × 登场 × 退场 × 粒子 = 4 × 2 × 3 × 5 = <b>120</b> 种基本组合；再叠加 9 个开关
+      （收尾闪光有两种方式），理论上有九万多种（「留在原地」在碎片飞散、装甲弹开、开了粒子、零件飞入或收尾星星时起作用）。</p>
   </div>
 </section>
 
@@ -649,6 +725,7 @@
           <tr><td>全息扫描</td><td>从下往上扫</td><td>边缘生长</td><td>收缩消失</td><td>全息先行，青色发光</td></tr>
           <tr><td>故障风</td><td>球形扩散</td><td>边缘生长</td><td>收缩消失</td><td>故障风 + 闪光，粉色发光</td></tr>
           <tr><td>装甲换装</td><td>沿体表流动（只从起点）</td><td>零件飞入</td><td>装甲弹开</td><td>碎片发光，橙色发光</td></tr>
+          <tr><td>纳米战衣收尾</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>六边形线框、深色内衬、背面发光、收尾光扫 + 星光、全屏闪白，青色发光</td></tr>
           <tr><td>魔法少女</td><td>沿体表流动（只从手脚）</td><td>边缘生长</td><td>碎片飞散</td><td>光剪影、光带、星光、收尾闪光，粉色发光</td></tr>
         </tbody>
       </table>
@@ -661,7 +738,7 @@
 <footer>
   <div class="wrap">
     本页在仓库的 <code>docs/</code> 里，用浏览器直接打开即可。视频和缩略图在 <code>test_output/</code>（渲染结果不进 git），
-    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.4.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
+    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.5.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
   </div>
 </footer>
 

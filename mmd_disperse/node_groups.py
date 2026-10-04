@@ -14,14 +14,16 @@ Beyond the tutorial, the distance can come from a precomputed arrival field (the
 or sweeps up / down, see arrival.py), the old outfit can break into flakes and particles instead, the new
 outfit can show up as a hologram ahead of the edge, and the edge can glitch: horizontal slices flicker
 between the two outfits. Once the new outfit is complete it can flash (all at once, or a band of light sweeps
-over it) and burst into sparkles (finale).
+over it) and burst into sparkles (finale). The new outfit can first form as a dark undersuit with its final look
+trailing behind, and both outfits mark how close each vertex is to the cut so materials can light up the inside
+seen through it.
 """
 
 import math
 
 import bpy
 
-VERSION = 9
+VERSION = 10
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
@@ -34,13 +36,23 @@ ATTR_LOCK = "disperse_lock"
 ATTR_REST = "rest_position"
 ATTR_ARRIVAL = "disperse_arrival"
 ATTR_HOLO = "disperse_holo"
-ATTR_LAUNCH = "disperse_launch"  # world position of each old-outfit vertex when it broke off (leave behind)
-ATTR_CHUNK_LAUNCH = "disperse_chunk_launch"  # the same per face corner, when its whole chunk broke off
+# Leave behind (see launch.py): world position of each vertex at its moment, when it broke off (old outfit) or when
+# its finale star was born (new outfit) ...
+ATTR_LAUNCH = "disperse_launch"
+# ... and per face corner when its whole piece broke off (old outfit) or took off to fly in (new outfit).
+ATTR_CHUNK_LAUNCH = "disperse_chunk_launch"
+ATTR_CUT = "disperse_cut"  # 1 at the edge, fading with the distance from it: back faces there glow (inner glow)
+ATTR_LAYER = "disperse_layer"  # new outfit: 1 where it still shows the dark undersuit
 ATTR_AGE = "mmdd_age"  # mask radius minus the noisy distance; scratch attribute of the Base group and the probe
+ATTR_PIECE_AGE = "mmdd_piece_age"  # probe: the age a whole piece is timed by
 ATTR_VERTEX = "mmdd_vertex"  # probe: original vertex index of a vertex of the cut mesh
 ATTR_CORNER = "mmdd_corner"  # probe: original face corner index
 ATTR_ISLAND = "mmdd_island"  # probe: chunk of a vertex of the cut mesh
 ATTR_NORMAL = "mmdd_normal"  # scratch attribute of the particle emitters, removed again
+ATTR_PICK = "mmdd_pick"  # scratch: faces that release a finale star
+ATTR_HELD = "mmdd_held"  # scratch: positions put aside while the recorded spots of the fly-in pieces are measured
+ATTR_START = "mmdd_start"  # scratch: centre of a fly-in piece where it took off ...
+ATTR_START_NORMAL = "mmdd_start_normal"  # ... and its normal there
 
 # Wing angles (degrees) of the poses a butterfly cycles through.
 FLAP_ANGLES = (70.0, 45.0, 15.0, -10.0, 15.0, 45.0)
@@ -95,6 +107,12 @@ TARGET_INPUTS = FIELD_INPUTS + (
     ("Sparkle Distance", "NodeSocketFloat", 3.0, 0.0, 10000.0, "DISTANCE"),
     ("Finale Sweep", "NodeSocketBool", False, None, None, None),
     ("Sweep Width", "NodeSocketFloat", 0.8, 0.0, 10000.0, "DISTANCE"),
+    ("Undersuit", "NodeSocketBool", False, None, None, None),
+    ("Undersuit Width", "NodeSocketFloat", 2.0, 0.0, 1e9, "DISTANCE"),
+    ("Inner Glow", "NodeSocketBool", False, None, None, None),
+    ("Inner Depth", "NodeSocketFloat", 2.0, 0.0, 1e9, "DISTANCE"),
+    ("Leave Behind", "NodeSocketBool", False, None, None, None),
+    ("Launch Space", "NodeSocketObject", None, None, None, None),
 )
 
 BASE_INPUTS = FIELD_INPUTS + (
@@ -123,11 +141,21 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Particle Flight", "NodeSocketFloat", 5.0, 0.0, 10000.0, "DISTANCE"),
     ("Leave Behind", "NodeSocketBool", False, None, None, None),
     ("Launch Space", "NodeSocketObject", None, None, None, None),
+    ("Inner Glow", "NodeSocketBool", False, None, None, None),
+    ("Inner Depth", "NodeSocketFloat", 2.0, 0.0, 1e9, "DISTANCE"),
 )
 
+# The probe takes these from the modifier it stands in for (the new outfit's finale and fly-in settings are
+# missing on the old outfit's, which does not use them).
 PROBE_INPUTS = FIELD_INPUTS + (
     ("Pieces", "NodeSocketBool", False, None, None, None),
     ("Piece Size", "NodeSocketFloat", 1.2, 0.0, 10000.0, "DISTANCE"),
+    ("Target", "NodeSocketBool", False, None, None, None),
+    ("Finale Start", "NodeSocketFloat", 1000.0, 0.0, 1e9, "DISTANCE"),
+    ("Finale Length", "NodeSocketFloat", 3.0, 0.0, 1e9, "DISTANCE"),
+    ("Finale Sweep", "NodeSocketBool", False, None, None, None),
+    ("Sweep Width", "NodeSocketFloat", 0.8, 0.0, 10000.0, "DISTANCE"),
+    ("Fly Range", "NodeSocketFloat", 1.6, 0.0, 10000.0, "DISTANCE"),
 )
 
 RIBBON_INPUTS = (
@@ -443,6 +471,64 @@ def _field_node(b, field_group, gi, x, y):
     return n.outputs
 
 
+def _self_info(b, x, y):
+    """Object Info of the modified object itself: its world rotation and scale, to work with world directions."""
+    info = b.node("GeometryNodeObjectInfo", x, y, transform_space="ORIGINAL")
+    b.feed(info.inputs["Object"], b.node("GeometryNodeSelfObject", x - 200, y).outputs[0])
+    return info
+
+
+def _unrotate(b, info, vector, x, y):
+    """A world direction in the object space of `info`'s object: its rotation undone (the length stays)."""
+    turn = b.node("ShaderNodeVectorRotate", x, y, rotation_type="EULER_XYZ", invert=True)
+    b.feed(turn.inputs["Vector"], vector)
+    b.feed(turn.inputs["Rotation"], info.outputs["Rotation"])
+    return turn.outputs[0]
+
+
+def _launch_space(b, gi, x, y):
+    """(Object Info of the Launch Space empty, whether one is set). The empty replays the object's motion as it was
+    recorded (launch.py), which brings recorded world positions back into object space."""
+    space = b.node("GeometryNodeObjectInfo", x, y, transform_space="ORIGINAL")
+    b.feed(space.inputs["Object"], gi.outputs["Launch Space"])
+    has_space = b.compare("GREATER_THAN", b.vmath("LENGTH", space.outputs["Scale"], x=x + 200, y=y - 150), 0.0,
+                          x=x + 400, y=y - 150)
+    return space, has_space
+
+
+def _recorded(b, space, has_space, name, x, y):
+    """(object-space position, exists) of a recorded world position attribute."""
+    world, exists = b.named_attribute(name, "FLOAT_VECTOR", x=x, y=y)
+    turned = _unrotate(b, space, b.vmath("SUBTRACT", world, space.outputs["Location"], x=x + 200, y=y), x + 400, y)
+    local = b.vmath("DIVIDE", turned, space.outputs["Scale"], x=x + 600, y=y)
+    return local, b.boolean("AND", exists, has_space, x=x + 600, y=y - 150)
+
+
+def _world_instances(b, instances, info, x, y):
+    """Instances turned back by the object's own rotation (Z, then Y, then X: the inverse of its XYZ Euler), each
+    about its own position, so they keep their orientation in the world when the whole model turns."""
+    angles = b.split_xyz(info.outputs["Rotation"], x, y - 250)
+    for i, axis in enumerate((2, 1, 0)):
+        turn = [0.0, 0.0, 0.0]
+        turn[axis] = b.math("MULTIPLY", angles[axis], -1.0, x=x + 200 + 200 * i, y=y - 400)
+        n = b.node("GeometryNodeRotateInstances", x + 200 + 200 * i, y)
+        b.feed(n.inputs["Instances"], instances)
+        b.feed(n.inputs["Rotation"], b.combine(*turn, x=x + 200 + 200 * i, y=y - 250))
+        b.feed(n.inputs["Pivot Point"], b.node("GeometryNodeInputPosition", x + 200 * i, y - 550).outputs[0])
+        n.inputs["Local Space"].default_value = False
+        instances = n.outputs["Instances"]
+    return instances
+
+
+def _remove_attributes(b, geometry, names, x, y):
+    for i, name in enumerate(names):
+        n = b.node("GeometryNodeRemoveAttribute", x + 200 * i, y)
+        b.feed(n.inputs["Geometry"], geometry)
+        n.inputs["Name"].default_value = name
+        geometry = n.outputs["Geometry"]
+    return geometry
+
+
 def build_target_group(field_group):
     """Modifier for the NEW outfit: reveal inside the sphere + glowing hex wire at the edge."""
     ng = _new_group(TARGET_GROUP, is_modifier=True)
@@ -465,6 +551,9 @@ def build_target_group(field_group):
     # Parts locked to the old model (face, hair ...) never come from the new one.
     lock = b.named_attribute(ATTR_LOCK, "BOOLEAN", x=-1300, y=500)[0]
     geo = b.delete(sub.outputs["Mesh"], lock, "FACE", x=-1000, y=300)
+    # The object's own rotation (world directions) and, with leave behind, the motion it was recorded with.
+    me = _self_info(b, -1300, -5000)
+    space, has_space = _launch_space(b, gi, -1300, -5300)
 
     # --- Suit: 0 keep / 1 delete, then push the edge out along the normals.
     # With the hologram on, the new outfit already shows this far ahead of the edge (growing in from
@@ -512,12 +601,41 @@ def build_target_group(field_group):
     flash = b.switch("FLOAT", gi.outputs["Finale"], 0.0, b.math("POWER", flash, 0.125, x=900, y=-2000),
                      x=1100, y=-2000)
     rim = b.math("MAXIMUM", rim, flash, x=750, y=-50)
+    # Dark undersuit (Mark 50 style): within Undersuit Width behind the edge the new outfit still shows as a dark
+    # undersuit (materials draw it from disperse_layer), its final look forms behind that along a second glowing seam.
+    layer_front = b.math("SUBTRACT", radius, gi.outputs["Undersuit Width"], x=-700, y=-2700)
+    soft = b.math("MAXIMUM", b.math("MULTIPLY", gi.outputs["Undersuit Width"], 0.3, x=-700, y=-2850), 1e-4,
+                  x=-500, y=-2850)
+    under = b.map_range(d, layer_front, b.math("ADD", layer_front, soft, x=-300, y=-2800), x=-100, y=-2750,
+                        smooth=True)
+    under = b.switch("FLOAT", gi.outputs["Undersuit"], 0.0, under, x=100, y=-2750)
+    # nothing ahead of the edge (the hologram shows there)
+    suit_layer = b.switch("FLOAT", b.compare("GREATER_THAN", d, radius, x=100, y=-2900), under, 0.0, x=300, y=-2800)
+    seam = b.map_range(d, b.math("SUBTRACT", layer_front, gi.outputs["Edge Width"], x=-300, y=-3000), layer_front,
+                       x=-100, y=-3000)
+    seam = b.switch("FLOAT", b.compare("GREATER_THAN", d, layer_front, x=-100, y=-3150), seam, 0.0, x=100, y=-3050)
+    seam_on = b.boolean("AND", gi.outputs["Undersuit"], gi.outputs["Edge Glow"], x=100, y=-3200)
+    rim = b.math("MAXIMUM", rim, b.switch("FLOAT", seam_on, 0.0, seam, x=300, y=-3050), x=850, y=-50)
     suit = b.store(suit, ATTR_EDGE, rim, x=400, y=350)
     # 0 at the edge .. 1 at the front of the hologram (materials draw a scan ring there).
     holo = b.math("DIVIDE", b.math("SUBTRACT", d, radius, x=150, y=-650),
                   b.math("MAXIMUM", holo_width, 1e-4, x=150, y=-800), x=350, y=-700, clamp=True)
     holo = b.switch("FLOAT", gi.outputs["Hologram"], 0.0, holo, x=550, y=-700)
     suit = b.store(suit, ATTR_HOLO, holo, x=600, y=350)
+    suit = b.switch("GEOMETRY", gi.outputs["Undersuit"], suit, b.store(suit, ATTR_LAYER, suit_layer, x=700, y=500),
+                    x=800, y=350)
+    # Inner glow: 1 at the edge, fading over Inner Depth; materials light up the back faces there, the inside of the
+    # outfit seen through the cut.
+    cut = b.math("SUBTRACT", 1.0, b.math("DIVIDE", b.math("ABSOLUTE", b.math("SUBTRACT", d, radius, x=-700, y=-3400),
+                                                          x=-500, y=-3400),
+                                         b.math("MAXIMUM", gi.outputs["Inner Depth"], 1e-4, x=-500, y=-3550),
+                                         x=-300, y=-3450, clamp=True), x=-100, y=-3450)
+
+    def mark_cut(geometry, x, y):
+        return b.switch("GEOMETRY", gi.outputs["Inner Glow"], geometry, b.store(geometry, ATTR_CUT, cut, x=x, y=y + 150),
+                        x=x + 200, y=y)
+
+    suit = mark_cut(suit, 900, 350)
 
     # --- Assemble: the new outfit arrives in pieces that fly in from around the body and click into
     # place where the front passes (instead of growing at the front).
@@ -534,15 +652,37 @@ def build_target_group(field_group):
                                      x=1800, y=1200),
                     b.math("MAXIMUM", lead, 1e-4, x=1600, y=1050), x=2000, y=1150, clamp=True)
     pieces = b.delete(pieces, b.compare("LESS_EQUAL", landed, 0.0, x=2000, y=1350), "POINT", x=2200, y=1500)
+    # Leave behind: a piece takes off from a fixed point in the world, given by where the body was when it showed up
+    # (recorded per face corner, launch.py). Put the piece there for a moment to measure its centre and normal, then
+    # back; on a still model that is where it is anyway.
+    chunk_launch, has_chunk_launch = _recorded(b, space, has_space, ATTR_CHUNK_LAUNCH, 1200, 2700)
+    held = b.store(pieces, ATTR_HELD, position, "FLOAT_VECTOR", x=2400, y=2000)
+    moved = b.set_position(held, selection=has_chunk_launch, position=chunk_launch, x=2600, y=2000)
+    moved = b.store(moved, ATTR_START, b.vmath("DIVIDE", b.accumulate(position, island, "FLOAT_VECTOR", x=2600, y=2300),
+                                              count, x=2800, y=2300), "FLOAT_VECTOR", x=2800, y=2000)
+    piece_normal_now = b.node("GeometryNodeInputNormal", 2800, 2600).outputs[0]
+    moved = b.store(moved, ATTR_START_NORMAL,
+                    b.vmath("NORMALIZE", b.accumulate(piece_normal_now, island, "FLOAT_VECTOR", x=3000, y=2600),
+                            x=3200, y=2600), "FLOAT_VECTOR", x=3000, y=2000)
+    back = b.set_position(moved, position=b.named_attribute(ATTR_HELD, "FLOAT_VECTOR", x=3000, y=2300)[0],
+                          x=3200, y=2000)
+    pieces = b.switch("GEOMETRY", gi.outputs["Leave Behind"], pieces, back, x=3400, y=2000)
+    start_center = b.switch("VECTOR", gi.outputs["Leave Behind"], center,
+                            b.named_attribute(ATTR_START, "FLOAT_VECTOR", x=3200, y=2800)[0], x=3400, y=2800)
+    start_normal = b.switch("VECTOR", gi.outputs["Leave Behind"], piece_normal,
+                            b.named_attribute(ATTR_START_NORMAL, "FLOAT_VECTOR", x=3200, y=3000)[0], x=3400, y=3000)
     flying = b.math("SUBTRACT", 1.0, landed, x=2200, y=1150)
     rnd, rnd_color = b.white_noise(b.vmath("SCALE", rest_center, scale=5.31, x=2200, y=900), x=2400, y=900)
     jitter = b.vmath("SCALE", b.vmath("SUBTRACT", rnd_color, (0.5, 0.5, 0.5), x=2600, y=900), scale=1.2,
                      x=2800, y=900)
-    heading = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("ADD", piece_normal, jitter, x=3000, y=950),
-                                           (0.0, 0.0, 0.5), x=3200, y=950), x=3400, y=950)
-    away = b.vmath("SCALE", heading, scale=b.math("MULTIPLY", gi.outputs["Fly Distance"],
-                                                   b.math("MULTIPLY", flying, flying, x=2400, y=1100),
-                                                   x=2600, y=1100), x=3600, y=1000)
+    # Random spread and the lift are world directions, so a piece in the air does not swing round with a turning model.
+    lift = _unrotate(b, me, b.vmath("ADD", jitter, (0.0, 0.0, 0.5), x=3000, y=900), 3200, 900)
+    heading = b.vmath("NORMALIZE", b.vmath("ADD", start_normal, lift, x=3400, y=950), x=3600, y=950)
+    # It flies from its starting point (centre + heading * distance) to its place on the body, which moves along.
+    start = b.vmath("ADD", start_center, b.vmath("SCALE", heading, scale=gi.outputs["Fly Distance"], x=3800, y=950),
+                    x=4000, y=950)
+    away = b.vmath("SCALE", b.vmath("SUBTRACT", start, center, x=4000, y=1100),
+                   scale=b.math("MULTIPLY", flying, flying, x=2400, y=1100), x=4200, y=1000)
     turn = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Spin"], flying, x=2600, y=750),
                   b.math("MULTIPLY_ADD", rnd, 2.0, -1.0, x=2600, y=600), x=2800, y=700)
     turned = b.rotate(position, center, b.vmath("SUBTRACT", rnd_color, (0.5, 0.5, 0.5), x=2800, y=550), turn,
@@ -557,7 +697,12 @@ def build_target_group(field_group):
                                                                      x=3800, y=400), 0.0, 0.9, x=4000, y=400),
                        x=4200, y=400)
     pieces = b.store(pieces, ATTR_EDGE, piece_rim, x=4200, y=1500)
-    suit = b.switch("GEOMETRY", gi.outputs["Assemble"], suit, pieces, x=4400, y=1000)
+    # With the undersuit the pieces come in dark too and take on the final look behind the edge.
+    pieces = b.switch("GEOMETRY", gi.outputs["Undersuit"], pieces, b.store(pieces, ATTR_LAYER, under, x=4400, y=1700),
+                      x=4600, y=1500)
+    pieces = mark_cut(pieces, 4800, 1500)
+    pieces = _remove_attributes(b, pieces, (ATTR_HELD, ATTR_START, ATTR_START_NORMAL), 5200, 1500)
+    suit = b.switch("GEOMETRY", gi.outputs["Assemble"], suit, pieces, x=5800, y=1000)
 
     # --- Wire layer: keep a band around the boundary.
     t = b.math("SUBTRACT", d, radius, x=-700, y=-500)
@@ -607,10 +752,18 @@ def build_target_group(field_group):
     face_seed = b.on_domain(anchor, "FACE", "FLOAT_VECTOR", x=900, y=-3000)
     lottery = b.white_noise(b.vmath("ADD", b.vmath("SCALE", face_seed, scale=2.93, x=1100, y=-3000),
                                     (5.0, 11.0, 23.0), x=1300, y=-3000), x=1500, y=-3000)[0]
-    src = b.store(geo, ATTR_NORMAL, normal, "FLOAT_VECTOR", "FACE", x=1300, y=-2700)
+    src = b.store(geo, ATTR_PICK, b.compare("LESS_THAN", lottery, chance, x=1500, y=-2850), "BOOLEAN", "FACE",
+                  x=1100, y=-2600)
+    # Leave behind: a star bursts out of where the body was when it was born (recorded per vertex, launch.py), along
+    # the normal it had there; the faces are picked before they move, so the same stars come out.
+    star_launch, has_star_launch = _recorded(b, space, has_space, ATTR_LAUNCH, 300, -5600)
+    src = b.switch("GEOMETRY", gi.outputs["Leave Behind"], src,
+                   b.set_position(src, selection=has_star_launch, position=star_launch, x=1200, y=-2450),
+                   x=1300, y=-2550)
+    src = b.store(src, ATTR_NORMAL, normal, "FLOAT_VECTOR", "FACE", x=1500, y=-2600)
     to_points = b.node("GeometryNodeMeshToPoints", 1700, -2700, mode="FACES")
     b.feed(to_points.inputs["Mesh"], src)
-    b.feed(to_points.inputs["Selection"], b.compare("LESS_THAN", lottery, chance, x=1700, y=-3000))
+    b.feed(to_points.inputs["Selection"], b.named_attribute(ATTR_PICK, "BOOLEAN", x=1500, y=-3150)[0])
     # Each star's own time: all of them start with the flash; with the sweep a star starts when the light
     # reaches it and lives for the rest of the finale.
     birth = b.math("MULTIPLY", b.math("DIVIDE", field["Path"], sweep_span, x=1700, y=-2400, clamp=True), SWEEP_SHARE,
@@ -627,17 +780,17 @@ def build_target_group(field_group):
     srnd, srnd_color = b.white_noise(b.vmath("SCALE", anchor, scale=4.17, x=1700, y=-3400), x=1900, y=-3400)
     spread = b.vmath("SCALE", b.vmath("SUBTRACT", srnd_color, (0.5, 0.5, 0.5), x=2100, y=-3400), scale=1.4,
                      x=2300, y=-3400)
-    heading = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("ADD", point_normal, spread, x=2500, y=-3300),
-                                           (0.0, 0.0, 0.35), x=2700, y=-3300), x=2900, y=-3300)
+    # spread and lift are world directions (a turning model does not swing the stars round)
+    lift = _unrotate(b, me, b.vmath("ADD", spread, (0.0, 0.0, 0.35), x=2500, y=-3450), 2700, -3450)
+    heading = b.vmath("NORMALIZE", b.vmath("ADD", point_normal, lift, x=2700, y=-3300), x=2900, y=-3300)
     shot = b.math("SUBTRACT", 1.0, b.math("POWER", b.math("SUBTRACT", 1.0, burst_t, x=2100, y=-3600), 3.0,
                                           x=2300, y=-3600), x=2500, y=-3600)
     travel = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Sparkle Distance"], shot, x=2700, y=-3600),
                     b.math("ADD", srnd, 0.5, x=2700, y=-3750), x=2900, y=-3650)
     pts = b.set_position(born, b.vmath("SCALE", heading, scale=travel, x=3100, y=-3400), x=3300, y=-2700)
-    remove = b.node("GeometryNodeRemoveAttribute", 3500, -2700)
-    b.feed(remove.inputs["Geometry"], pts)
-    remove.inputs["Name"].default_value = ATTR_NORMAL
-    # Stars face the front (MMD models and cameras look along Y), each spun on its own.
+    stars = _remove_attributes(b, pts, (ATTR_NORMAL, ATTR_PICK), 3500, -2700)
+    # Stars face the front (MMD models and cameras look along Y; the world's, also when the model turns), each spun on
+    # its own.
     cx, cy, _cz = b.split_xyz(srnd_color, x=2900, y=-3900)
     rotation = b.combine(b.math("MULTIPLY_ADD", cx, 0.6, math.pi / 2 - 0.3, x=3100, y=-3850),
                          b.math("MULTIPLY_ADD", srnd, 2.0 * math.pi, b.math("MULTIPLY", burst_t, 3.0, x=2900, y=-4100),
@@ -656,11 +809,12 @@ def build_target_group(field_group):
     info = b.node("GeometryNodeObjectInfo", 3500, -3000, transform_space="ORIGINAL")
     b.feed(info.inputs["Object"], gi.outputs["Sparkle Object"])
     on_points = b.node("GeometryNodeInstanceOnPoints", 3800, -2700)
-    b.feed(on_points.inputs["Points"], remove.outputs["Geometry"])
+    b.feed(on_points.inputs["Points"], stars)
     b.feed(on_points.inputs["Instance"], info.outputs["Geometry"])
     b.feed(on_points.inputs["Rotation"], rotation)
     b.feed(on_points.inputs["Scale"], size)
-    sparkles = b.switch("GEOMETRY", bursting, None, on_points.outputs["Instances"], x=4100, y=-2500)
+    sparkles = b.switch("GEOMETRY", bursting, None, _world_instances(b, on_points.outputs["Instances"], me, 4000, -2700),
+                        x=4900, y=-2500)
 
     join = b.node("GeometryNodeJoinGeometry", 2000, 250)
     b.feed(join.inputs["Geometry"], wire)
@@ -670,16 +824,17 @@ def build_target_group(field_group):
     return ng
 
 
-def _fly(b, gi, t, normal, seed, rnd, x, y):
+def _fly(b, gi, t, normal, seed, rnd, wind, me, x, y):
     """Offset of a piece that has left the surface, t going 0 -> 1 over its flight: it pops out along
-    the normal, drifts with the wind (accelerating, each piece at its own speed) and swirls in a noise."""
+    the normal, drifts with the wind (accelerating, each piece at its own speed) and swirls in a noise.
+    `wind` is in object space; the swirl is turned by the object's rotation `me`, so it stays put in the world."""
     inv = b.math("SUBTRACT", 1.0, t, x=x, y=y)
     pop = b.math("SUBTRACT", 1.0, b.math("MULTIPLY", inv, inv, x=x + 150, y=y), x=x + 300, y=y)
     burst = b.vmath("SCALE", normal, scale=b.math("MULTIPLY", pop, gi.outputs["Burst"], x=x + 450, y=y),
                     x=x + 600, y=y)
     speed = b.math("ADD", rnd, 0.5, x=x, y=y - 200)
     drift = b.math("MULTIPLY", b.math("MULTIPLY", t, t, x=x + 150, y=y - 200), speed, x=x + 300, y=y - 200)
-    gust = b.vmath("SCALE", gi.outputs["Wind"], scale=drift, x=x + 600, y=y - 200)
+    gust = b.vmath("SCALE", wind, scale=drift, x=x + 600, y=y - 200)
     noise = b.node("ShaderNodeTexNoise", x, y - 400, noise_dimensions="4D")
     b.feed(noise.inputs["Vector"], seed)
     b.feed(noise.inputs["W"], b.math("MULTIPLY", t, 1.5, x=x - 200, y=y - 450))
@@ -689,7 +844,7 @@ def _fly(b, gi, t, normal, seed, rnd, x, y):
     swirl = b.vmath("SUBTRACT", noise.outputs[1], (0.5, 0.5, 0.5), x=x + 200, y=y - 400)
     amount = b.math("MULTIPLY", gi.outputs["Turbulence"], b.math("MULTIPLY", t, 4.0, x=x + 200, y=y - 600),
                     x=x + 400, y=y - 600)
-    swirl = b.vmath("SCALE", swirl, scale=amount, x=x + 600, y=y - 400)
+    swirl = _unrotate(b, me, b.vmath("SCALE", swirl, scale=amount, x=x + 600, y=y - 400), x + 800, y - 400)
     return b.vmath("ADD", b.vmath("ADD", burst, gust, x=x + 800, y=y - 100), swirl, x=x + 1000, y=y - 250)
 
 
@@ -753,23 +908,13 @@ def build_base_group(field_group):
     rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=-1700, y=-1100)
     anchor = b.switch("VECTOR", has_rest, position, rest, x=-1500, y=-1100)
     # Leave behind: flakes, chunks and particles start from where the body was when they broke off (recorded
-    # in world space at build time, see launch.py) instead of riding along with the dancing body. Launch Space
-    # replays the object's own motion as recorded, which brings those positions back into object space.
-    space = b.node("GeometryNodeObjectInfo", -1700, -1500, transform_space="ORIGINAL")
-    b.feed(space.inputs["Object"], gi.outputs["Launch Space"])
-    has_space = b.compare("GREATER_THAN", b.vmath("LENGTH", space.outputs["Scale"], x=-1500, y=-1650), 0.0,
-                          x=-1300, y=-1650)
-
-    def recorded(name, x, y):
-        """(object-space position, exists) of a recorded world position attribute."""
-        world, exists = b.named_attribute(name, "FLOAT_VECTOR", x=x, y=y)
-        turn = b.node("ShaderNodeVectorRotate", x + 400, y, rotation_type="EULER_XYZ", invert=True)
-        b.feed(turn.inputs["Vector"], b.vmath("SUBTRACT", world, space.outputs["Location"], x=x + 200, y=y))
-        b.feed(turn.inputs["Rotation"], space.outputs["Rotation"])
-        local = b.vmath("DIVIDE", turn.outputs[0], space.outputs["Scale"], x=x + 600, y=y)
-        return local, b.boolean("AND", exists, has_space, x=x + 600, y=y - 150)
-
-    launch, has_launch = recorded(ATTR_LAUNCH, -1700, -1300)
+    # in world space at build time, see launch.py) instead of riding along with the dancing body.
+    space, has_space = _launch_space(b, gi, -1700, -1500)
+    launch, has_launch = _recorded(b, space, has_space, ATTR_LAUNCH, -1700, -1300)
+    # The wind blows in the world: undo the object's own rotation and scale, also while the whole model turns.
+    me = _self_info(b, -1700, -1900)
+    wind = b.vmath("DIVIDE", _unrotate(b, me, gi.outputs["Wind"], -1500, -1900), me.outputs["Scale"],
+                   x=-1300, y=-1900)
 
     def left_behind(geo, x, y):
         moved = b.set_position(geo, selection=has_launch, position=launch, x=x, y=y - 150)
@@ -824,7 +969,8 @@ def build_base_group(field_group):
     turn = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Spin"], tf, x=1200, y=-1250),
                   b.math("MULTIPLY_ADD", rnd, 2.0, -1.0, x=1200, y=-1400), x=1400, y=-1300)
     turned = b.rotate(position, center, axis, turn, x=1600, y=-1100)
-    flown = b.vmath("ADD", turned, _fly(b, gi, tf, face_normal, seed, rnd, x=1200, y=-1600), x=2600, y=-1100)
+    flown = b.vmath("ADD", turned, _fly(b, gi, tf, face_normal, seed, rnd, wind, me, x=1200, y=-1600),
+                    x=2600, y=-1100)
     flakes = b.set_position(scale.outputs["Geometry"], position=flown, x=2800, y=0)
     # Bright as they break off, fading out; the injected material glow raises this to the 8th power.
     fade = b.math("POWER", b.math("SUBTRACT", 1.0, tf, x=2600, y=-300), 0.25, x=2800, y=-300)
@@ -847,7 +993,7 @@ def build_base_group(field_group):
     # Leave behind: a chunk is thrown from where the body was when it broke off, all of it at that moment. That
     # is recorded per face corner (a vertex on a cut belongs to two chunks that break at different times); on
     # the cut mesh the corners of a vertex agree. Centre and normal below then come from the frozen chunk.
-    chunk_launch, has_chunk_launch = recorded(ATTR_CHUNK_LAUNCH, 1000, 3300)
+    chunk_launch, has_chunk_launch = _recorded(b, space, has_space, ATTR_CHUNK_LAUNCH, 1000, 3300)
     frozen = b.set_position(chunks, selection=b.boolean("AND", moving, has_chunk_launch, x=1800, y=3150),
                             position=chunk_launch, x=2000, y=3300)
     chunks = b.switch("GEOMETRY", gi.outputs["Leave Behind"], chunks, frozen, x=2200, y=3300)
@@ -865,8 +1011,9 @@ def build_base_group(field_group):
     shrinking = b.math("SUBTRACT", 1.0, b.math("POWER", ct, 3.0, x=2800, y=3000), x=3000, y=3000)
     chunk_pos = b.vmath("ADD", c_center, b.vmath("SCALE", b.vmath("SUBTRACT", chunk_turned, c_center, x=3000, y=2850),
                                                  scale=shrinking, x=3200, y=2850), x=3400, y=2850)
-    chunk_pos = b.vmath("ADD", b.vmath("ADD", chunk_pos, blast, x=3600, y=2600),
-                        b.combine(0.0, 0.0, drop, x=3400, y=2500), x=3800, y=2600)
+    # they fall down in the world
+    fall = _unrotate(b, me, b.combine(0.0, 0.0, drop, x=3400, y=2500), 3600, 2450)
+    chunk_pos = b.vmath("ADD", b.vmath("ADD", chunk_pos, blast, x=3600, y=2600), fall, x=3800, y=2600)
     chunks = b.set_position(chunks, selection=moving, position=chunk_pos, x=4000, y=2200)
     chunks = b.delete(chunks, b.boolean("AND", b.compare("GREATER_EQUAL", ct, 0.999, x=3800, y=2100), free,
                                         x=4000, y=2050), "POINT", x=4200, y=2200)
@@ -896,19 +1043,19 @@ def build_base_group(field_group):
     alive = b.compare("LESS_THAN", b.on_domain(tp, "FACE", x=-400, y=-1800), 0.999, x=-200, y=-1800)
     emit = b.boolean("AND", b.boolean("AND", started, alive, x=0, y=-1900),
                      b.compare("LESS_THAN", lottery, chance, x=0, y=-2100), x=200, y=-2000)
-    src = b.store(left_behind(geometry, -400, -1500), ATTR_NORMAL, normal, "FLOAT_VECTOR", "FACE", x=0, y=-1600)
+    # Picked before leave behind moves the faces (their areas change a little), so the same faces release.
+    src = b.store(geometry, ATTR_PICK, emit, "BOOLEAN", "FACE", x=-600, y=-1500)
+    src = b.store(left_behind(src, -400, -1500), ATTR_NORMAL, normal, "FLOAT_VECTOR", "FACE", x=0, y=-1600)
     to_points = b.node("GeometryNodeMeshToPoints", 400, -1600, mode="FACES")
     b.feed(to_points.inputs["Mesh"], src)
-    b.feed(to_points.inputs["Selection"], emit)
+    b.feed(to_points.inputs["Selection"], b.named_attribute(ATTR_PICK, "BOOLEAN", x=200, y=-1750)[0])
 
     # On the points: rest position, arrival and the stored normal came along from the faces.
     point_normal = b.named_attribute(ATTR_NORMAL, "FLOAT_VECTOR", x=400, y=-1900)[0]
     prnd, prnd_color = b.white_noise(b.vmath("SCALE", anchor, scale=5.13, x=400, y=-2400), x=600, y=-2400)
-    pts = b.set_position(to_points.outputs["Points"], _fly(b, gi, tp, point_normal, anchor, prnd, x=600, y=-2700),
-                         x=1800, y=-1600)
-    remove = b.node("GeometryNodeRemoveAttribute", 2000, -1600)
-    b.feed(remove.inputs["Geometry"], pts)
-    remove.inputs["Name"].default_value = ATTR_NORMAL
+    pts = b.set_position(to_points.outputs["Points"],
+                         _fly(b, gi, tp, point_normal, anchor, prnd, wind, me, x=600, y=-2700), x=1800, y=-1600)
+    pts = _remove_attributes(b, pts, (ATTR_NORMAL, ATTR_PICK), 2000, -1600)
 
     # Petals tumble; butterflies stay roughly upright and turn slowly.
     two_pi = 2.0 * math.pi
@@ -953,14 +1100,15 @@ def build_base_group(field_group):
                         b.math("MULTIPLY", prnd, float(len(FLAP_ANGLES)), x=2400, y=-2800), x=2600, y=-2700)
 
     on_points = b.node("GeometryNodeInstanceOnPoints", 3200, -1600)
-    b.feed(on_points.inputs["Points"], remove.outputs["Geometry"])
+    b.feed(on_points.inputs["Points"], pts)
     b.feed(on_points.inputs["Instance"], instance)
     b.feed(on_points.inputs["Pick Instance"], gi.outputs["Flap"])
     b.feed(on_points.inputs["Instance Index"], pose_index)
     b.feed(on_points.inputs["Rotation"], rotation)
     b.feed(on_points.inputs["Scale"], size)
-    particles = b.switch("GEOMETRY", gi.outputs["Particles"], None, on_points.outputs["Instances"],
-                         x=3400, y=-1400)
+    # Upright in the world, also when the model turns.
+    particles = b.switch("GEOMETRY", gi.outputs["Particles"], None,
+                         _world_instances(b, on_points.outputs["Instances"], me, 3400, -1600), x=4200, y=-1400)
 
     # --- Silhouette: ahead of the edge the old outfit turns into glowing light (magical-girl style);
     # brightest right at the edge. Stored as glow^(1/8) because the material raises it to the 8th power.
@@ -974,6 +1122,13 @@ def build_base_group(field_group):
                    x=4200, y=-300)
     current = b.named_attribute(ATTR_EDGE, "FLOAT", x=3800, y=-500)[0]
     old = b.store(old, ATTR_EDGE, b.math("MAXIMUM", current, lit, x=4200, y=-500), x=4400, y=0)
+    # Inner glow: 1 at the edge, fading over Inner Depth; materials light up the back faces there (the inside seen
+    # where the outfit is cut open).
+    cut = b.math("SUBTRACT", 1.0, b.math("DIVIDE", b.math("ABSOLUTE", age, x=4000, y=-700),
+                                         b.math("MAXIMUM", gi.outputs["Inner Depth"], 1e-4, x=4000, y=-850),
+                                         x=4200, y=-750, clamp=True), x=4400, y=-750)
+    old = b.switch("GEOMETRY", gi.outputs["Inner Glow"], old, b.store(old, ATTR_CUT, cut, x=4500, y=200),
+                   x=4600, y=150)
     tidy = b.node("GeometryNodeRemoveAttribute", 4600, 0)
     b.feed(tidy.inputs["Geometry"], b.join([old, particles], x=4400, y=-150))
     tidy.inputs["Name"].default_value = ATTR_AGE
@@ -1036,8 +1191,11 @@ def ensure_ribbon_group():
 
 
 def build_probe_group(field_group):
-    """Modifier used while the launch positions are recorded (leave behind): stores the age the Base group
-    sees (mask radius minus the noisy distance) on every vertex, so Python can tell when each breaks off.
+    """Modifier used while the launch positions are recorded (leave behind): stores on every vertex the ages
+    whose sign change is the moment to record, so Python can tell when it comes. On the old outfit both are the age
+    the Base group sees (mask radius minus the noisy distance: a vertex, or on average a chunk, breaks off). On the
+    new outfit (Target) the vertex age turns positive when its finale star is born, the piece age (averaged over a
+    piece) when the piece takes off to fly in, its lead ahead of the edge.
     With Pieces on it outputs the mesh cut into chunks the way the Base group cuts it instead, every vertex
     and face corner tagged with its original index and every vertex with its chunk."""
     ng = _new_group(PROBE_GROUP, is_modifier=True)
@@ -1049,8 +1207,22 @@ def build_probe_group(field_group):
     gi = b.node("NodeGroupInput", -600, 0)
     go = b.node("NodeGroupOutput", 2600, 0)
     field = _field_node(b, field_group, gi, -300, -200)
-    age = b.math("SUBTRACT", field["Radius"], field["Distance"], x=0, y=-200)
-    aged = b.store(gi.outputs["Geometry"], ATTR_AGE, age, x=200, y=0)
+    radius = field["Radius"]
+    age = b.math("SUBTRACT", radius, field["Distance"], x=0, y=-200)
+    # The Target group's timing: star birth (finale_t past the star's own start) and the fly-in lead.
+    finale_t = b.math("DIVIDE", b.math("SUBTRACT", radius, gi.outputs["Finale Start"], x=0, y=-500),
+                      b.math("MAXIMUM", gi.outputs["Finale Length"], 1e-4, x=0, y=-650), x=200, y=-550)
+    span = b.math("ADD", gi.outputs["Finale Start"], gi.outputs["Sweep Width"], x=0, y=-800)
+    birth = b.math("MULTIPLY", b.math("DIVIDE", field["Path"], span, x=200, y=-800, clamp=True), SWEEP_SHARE,
+                   x=400, y=-800)
+    birth = b.switch("FLOAT", gi.outputs["Finale Sweep"], 0.0, birth, x=600, y=-800)
+    star_age = b.math("SUBTRACT", finale_t, birth, x=800, y=-600)
+    lead = b.math("MINIMUM", gi.outputs["Fly Range"], b.math("MAXIMUM", radius, 0.0, x=0, y=-1000), x=200, y=-1000)
+    vertex_age = b.switch("FLOAT", gi.outputs["Target"], age, star_age, x=1000, y=-300)
+    piece_age = b.switch("FLOAT", gi.outputs["Target"], age, b.math("ADD", age, lead, x=400, y=-1000),
+                         x=1000, y=-500)
+    aged = b.store(gi.outputs["Geometry"], ATTR_AGE, vertex_age, x=1200, y=0)
+    aged = b.store(aged, ATTR_PIECE_AGE, piece_age, x=1400, y=0)
 
     index = b.node("GeometryNodeInputIndex", -300, 500).outputs[0]
     tagged = b.store(gi.outputs["Geometry"], ATTR_VERTEX, index, "INT", "POINT", x=0, y=400)

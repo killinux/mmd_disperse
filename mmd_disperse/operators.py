@@ -131,6 +131,12 @@ class MMDDISPERSE_OT_preset(bpy.types.Operator):
             except effect.EffectError as err:
                 self.report({"ERROR"}, str(err))
                 return {"CANCELLED"}
+        if self.preset in presets.WHITE_FLASH:
+            try:
+                compositor.add_white_flash(context.scene)
+            except RuntimeError as err:
+                self.report({"WARNING"}, str(err))
+            effect.update_white_flash(settings)
         return {"FINISHED"}
 
 

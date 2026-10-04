@@ -9,7 +9,8 @@ blender -b "Tifa Gantz 18 V2.blend" --factory-startup --python demo/render_hd.py
     --base-root "Tifa Gantz 18 V2" --out test_output/hd --frames 1,100,200
 
 Add --vmd dance.vmd to let the model dance (mmd_tools must be installed), --spin 720 to turn the whole model
-while it transforms (object animation) and --white-flash for the finale's compositor flash.
+while it transforms (object animation), --white-flash for the finale's compositor flash and --no-base to let the
+new outfit materialise from nothing.
 """
 
 import argparse
@@ -65,6 +66,8 @@ def parse_args():
                    help="turn the old model this many degrees about Z during the transformation (object animation)")
     p.add_argument("--spin-frames", default="", help="first:last frame of the turn (default: the transformation)")
     p.add_argument("--preset", default="", help="apply a preset first, e.g. MAGICAL")
+    p.add_argument("--no-base", action="store_true",
+                   help="the new outfit materialises from nothing (the old model is hidden)")
     return p.parse_args(argv)
 
 
@@ -319,6 +322,10 @@ def main():
 
     s = scene.mmd_disperse
     s.base, s.target = base_root, target_root
+    if args.no_base:  # the new outfit stays where it is, the old model is only used to place the camera
+        s.base = None
+        for ob in [base_root] + list(base_root.children_recursive):
+            ob.hide_render = ob.hide_viewport = True
     s.frame_start, s.frame_end = (int(v) for v in args.wave.split(":"))
     if args.spin:
         first, last = (int(v) for v in args.spin_frames.split(":")) if args.spin_frames else (s.frame_start, s.frame_end)

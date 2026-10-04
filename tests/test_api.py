@@ -22,8 +22,8 @@ import mmd_disperse  # noqa: E402
 from mmd_disperse import compositor, effect, launch, materials, particles, presets, ribbons  # noqa: E402
 from mmd_disperse.arrival import limb_points  # noqa: E402
 from mmd_disperse.model import resolve, rest_points_world  # noqa: E402
-from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_EDGE, ATTR_HOLO, ATTR_LOCK, BASE_GROUP,  # noqa: E402
-                                      TARGET_GROUP, input_identifiers)
+from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_CUT, ATTR_EDGE, ATTR_HOLO, ATTR_LAYER,  # noqa: E402
+                                      ATTR_LOCK, BASE_GROUP, TARGET_GROUP, input_identifiers)
 from scene_setup import add_model_args, load_models  # noqa: E402
 
 FAILURES = []
@@ -263,6 +263,47 @@ def instance_count(ob):
                if inst.is_instance and inst.parent is not None and inst.parent.original == ob)
 
 
+def instance_positions(ob):
+    """World positions of the instances (stars, petals ...) `ob` makes, in their order."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    return np.array([tuple(inst.matrix_world.translation) for inst in deps.object_instances
+                     if inst.is_instance and inst.parent is not None and inst.parent.original == ob]).reshape(-1, 3)
+
+
+def world_vertices(ob, name=ATTR_EDGE):
+    """World positions of the evaluated vertices and attribute `name` on them."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = ob.evaluated_get(deps)
+    me = ev.to_mesh()
+    try:
+        co = np.zeros(len(me.vertices) * 3, dtype=np.float32)
+        me.vertices.foreach_get("co", co)
+        values = np.zeros(len(me.vertices), dtype=np.float32)
+        attr = me.attributes.get(name)
+        if attr is not None and attr.domain == "POINT":
+            attr.data.foreach_get("value", values)
+    finally:
+        ev.to_mesh_clear()
+    mw = np.array(ob.matrix_world, dtype=np.float64)
+    return co.reshape(-1, 3) @ mw[:3, :3].T + mw[:3, 3], values
+
+
+def chain(mat):
+    """Name prefixes of our shader nodes between the material output and the surface, output first."""
+    out = next(n for n in mat.node_tree.nodes
+               if n.bl_idname == "ShaderNodeOutputMaterial" and n.inputs["Surface"].links)
+    names = []
+    socket = out.inputs["Surface"]
+    while socket.links:
+        node = socket.links[0].from_node
+        place = materials._place(node)
+        if place is None:
+            break
+        names.append(node.name.rsplit(" ", 1)[0])
+        socket = node.inputs[place[1]]
+    return names
+
+
 def arrival_values(ob):
     attr = ob.data.attributes.get(ATTR_ARRIVAL)
     if attr is None:
@@ -470,6 +511,30 @@ def run():
     check(faces == locked_faces(base.meshes[0]), "only the shared parts of the old outfit left (%d faces)" % faces)
     check(instance_count(base.meshes[0]) == 0, "every petal gone at the end")
 
+    # --- the wind blows in the world: turning the whole model leaves its direction alone. Without the burst and the
+    # swirl the flakes only drift: turned with the model they would land on the old picture turned the same way.
+    saved = s.frag_wind_dir[:], s.frag_burst, s.frag_turbulence
+    s.frag_wind_dir, s.frag_burst, s.frag_turbulence = (1.0, 0.0, 0.0), 0.0, 0.0
+    scene.frame_set(50)
+    still, flying = world_flakes(base.meshes[0])
+    pivot = np.array(base_root.matrix_world.translation)
+    base_root.rotation_euler.z += math.pi / 2
+    bpy.context.view_layer.update()
+    scene.frame_set(51)
+    scene.frame_set(50)
+    turned, flying_turned = world_flakes(base.meshes[0])
+    base_root.rotation_euler.z -= math.pi / 2
+    bpy.context.view_layer.update()
+    drift = np.zeros(3)
+    if still.shape == turned.shape and flying.any() and (flying == flying_turned).all():
+        quarter = np.array(Matrix.Rotation(math.pi / 2, 3, "Z"))
+        drift = (turned - ((still - pivot) @ quarter.T + pivot))[flying].mean(axis=0)
+    # (I - R) * wind: the wind along +X, turned with the model it would blow along +Y
+    check(drift[0] > 0.01 * height and drift[1] < -0.01 * height and abs(drift[0] + drift[1]) < 0.25 * drift[0],
+          "the wind keeps its world direction when the model turns (drift off the turned picture %s)"
+          % np.round(drift, 3))
+    s.frag_wind_dir, s.frag_burst, s.frag_turbulence = saved
+
     # --- butterflies, then live switch back to shrinking
     s.particles = "BUTTERFLY"
     check(bpy.data.objects.get(particles.BUTTERFLY) is not None, "butterfly shape created")
@@ -532,6 +597,41 @@ def run():
     scene.frame_set(100)
     grown_faces = evaluated_faces_and_edge(target.meshes[0])[0]
 
+    # --- inner glow: both outfits mark how close each vertex is to the cut, their materials light the back faces
+    # there; the dark undersuit: the new outfit first forms dark and takes on its own look behind the edge, so the
+    # mask grows that much further
+    wave, reach_plain = float(s.mask[effect.P_WAVE]), float(s.mask[effect.P_REACH])
+    base_free = [s_.material for ob in base.meshes for s_ in ob.material_slots
+                 if s_.material and not s_.material.name.lower().startswith(("face", "hair"))]
+    s.inner_glow = True
+    check(all(m.get(materials.P_INNER) for m in glow) and any(m.get(materials.P_INNER) for m in base_free),
+          "inner glow added to both outfits' materials")
+    scene.frame_set(50)
+    cut_new, cut_old = evaluated_values(target.meshes[0], ATTR_CUT), evaluated_values(base.meshes[0], ATTR_CUT)
+    check(cut_new is not None and cut_old is not None and float(cut_new.max()) > 0.9 and float(cut_old.max()) > 0.9
+          and float(cut_new.min()) == 0.0, "inner glow: the cut marked on both outfits at frame 50")
+    s.layer_enable = True
+    s.holo_enable = True  # every spliced node at once: they run in a fixed order, whatever order they were added in
+    order = {tuple(chain(m)) for m in glow}
+    check(order == {("MMDD Edge Add", "MMDD Holo Mix", "MMDD Inner Mix", "MMDD Layer Mix")},
+          "shader nodes spliced in order (%s)" % order)
+    s.holo_enable = False
+    check(abs(float(s.mask[effect.P_REACH]) - (wave + s.layer_width)) < 1e-4 * wave,
+          "undersuit: the mask grows on by its width (%.3f -> %.3f)" % (reach_plain, float(s.mask[effect.P_REACH])))
+    scene.frame_set(50)
+    layer = evaluated_values(target.meshes[0], ATTR_LAYER)
+    check(layer is not None and (layer > 0.99).any() and (layer < 0.01).any(),
+          "undersuit: dark at the edge, the final look behind it at frame 50 (%.0f%% dark)"
+          % (100.0 * float((layer > 0.5).mean()) if layer is not None else 0.0))
+    scene.frame_set(100)
+    layer = evaluated_values(target.meshes[0], ATTR_LAYER)
+    check(layer is not None and float(layer.max()) == 0.0, "undersuit: the final look everywhere at the end")
+    check(not draw_panels(bpy.context), "panels draw with the undersuit and inner glow")
+    s.layer_enable, s.inner_glow = False, False
+    check(not any(m.get(materials.P_LAYER) or m.get(materials.P_INNER) for m in glow + base_free)
+          and abs(float(s.mask[effect.P_REACH]) - reach_plain) < 1e-4 * reach_plain,
+          "undersuit and inner glow removed, the mask back to its length")
+
     # --- pieces: the new outfit flies in, the old one is cast off in chunks
     s.entrance, s.exit_style = "ASSEMBLE", "CHUNKS"
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build fly-in + cast-off")
@@ -566,13 +666,16 @@ def run():
     slide = (to_mesh @ centre.head) - head30
     direction = np.array(slide.normalized())
     s.exit_style, s.particles = "FRAGMENTS", "PETAL"
-    shots = {}
+    shots, petals = {}, {}
     for keep in (False, True):
         s.leave_behind = keep
         check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with leave behind = %s" % keep)
         scene.frame_set(60)
         shots[keep] = flake_positions(base.meshes[0])
+        petals[keep] = instance_count(base.meshes[0])
     check(launch.has_launch(base.meshes[0]), "launch positions recorded")
+    # (Blender 3.6 lost the petal shape when it was first referenced during the recording)
+    check(petals[True] == petals[False] > 0, "the same petals released with leave behind (%s)" % petals)
     check(not draw_panels(bpy.context), "panels draw with leave behind")
     # Same flakes in both builds; recorded ones trail the riding ones by the slide since they broke off
     # (flakes live a few frames), and none is ahead of where the body was.
@@ -659,6 +762,55 @@ def run():
         off = np.abs(moved[flying] - left[flying] - np.array((3.0, 0.0, 0.0)))
     check(float(off.max()) < 1e-3 * height, "moving the model afterwards carries the flakes along (off by %.5f)"
           % float(off.max()))
+    # The new outfit too: its pieces fly in from fixed points in the world (homing in on the sliding body) and the
+    # finale stars stay where they burst out; without leave behind both ride along with the body.
+    s.exit_style, s.entrance, s.finale, s.finale_style = "SHRINK", "ASSEMBLE", True, "PULSE"
+    pieces, stars = {}, {}
+    for keep in (False, True):
+        s.leave_behind = keep
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build fly-in + finale with the model sliding, "
+              "leave behind = %s" % keep)
+        if not keep:
+            counts = []
+            for f in (30, 45, 60, 75):
+                scene.frame_set(f)
+                counts.append(int((world_vertices(target.meshes[0])[1] >= 0.89).sum()))
+            fly_frame = (30, 45, 60, 75)[int(np.argmax(counts))]
+            wave = float(s.mask[effect.P_WAVE])
+            finale_frame = None
+            for f in range(1, 101):
+                scene.frame_set(f)
+                if finale_frame is None and (s.mask.scale[0] - wave) / (s.finale_length * wave) >= 0.4:
+                    finale_frame = f
+        scene.frame_set(fly_frame)
+        pieces[keep] = world_vertices(target.meshes[0])
+        scene.frame_set(finale_frame or 100)
+        stars[keep] = instance_positions(target.meshes[0])
+    check(launch.has_launch(target.meshes[0]) and launch.has_launch(target.meshes[0], chunks=True),
+          "the new outfit's star births and take-offs recorded")
+    (riding, edge), (left, _edge) = pieces[False], pieces[True]
+    moved, lag = np.zeros(1, dtype=bool), np.zeros(1)
+    if riding.shape == left.shape:
+        moved = np.linalg.norm(riding - left, axis=1) > 1e-4 * height
+        lag = (riding - left)[moved, 0] if moved.any() else np.zeros(1)
+    # A piece trails by the slide since it took off, less and less as it homes in (by the square of the flight left),
+    # so the lag is smaller than the flakes'.
+    check(moved.any() and bool((edge[moved] >= 0.89).all()) and np.percentile(lag, 90) > 0.3 * per_frame
+          and lag.min() > -0.01 * height, "pieces fly in from fixed points: only those in the air differ (%d vertices), "
+          "10%% trail by over %.2f (a third of a frame's slide: %.2f), none ahead (%.3f), frame %d"
+          % (int(moved.sum()), np.percentile(lag, 90), 0.3 * per_frame, lag.min(), fly_frame))
+    lag = (stars[False] - stars[True])[:, 0] if stars[False].shape == stars[True].shape else np.zeros(1)
+    check(len(stars[True]) > 0 and np.percentile(lag, 90) > per_frame and lag.min() > -0.01 * height,
+          "finale stars stay where they burst out: %d stars, 10%% trail by over %.2f, none ahead (%.3f), frame %s"
+          % (len(stars[True]), np.percentile(lag, 90), lag.min(), finale_frame))
+    s.fly_range = s.fly_range * 1.2
+    check(not launch.has_launch(target.meshes[0], chunks=True) and launch.has_launch(target.meshes[0]),
+          "take-offs dropped when the fly range changes, star births kept")
+    s.fly_range = s.fly_range / 1.2
+    s.finale_style = "SWEEP"
+    check(not launch.has_launch(target.meshes[0]) and launch.space(target.meshes[0]) is None,
+          "star births dropped when the finale's timing changes (and the motion empty with them)")
+    s.finale_style, s.entrance, s.finale = "PULSE", "GROW", False
     s.leave_behind, s.path, s.exit_style = False, "SPHERE", "SHRINK"
     base_root.animation_data_clear()
     base_root.location.x = start_x
@@ -680,6 +832,9 @@ def run():
     # --- presets; the magical girl adds light ribbons, sparkles and the glowing silhouette
     for key, _label, _desc in presets.ITEMS:
         check(bpy.ops.mmd_disperse.apply_preset(preset=key) == {"FINISHED"}, "preset " + key)
+        if key == "NANO_FINALE":
+            check(s.layer_enable and s.inner_glow and s.finale_style == "SWEEP" and white_flash(scene)[0] is not None
+                  and len(white_flash(scene)[1]) == 1, "nanotech finale: undersuit, light sweep and the white flash")
     check(s.path == "SURFACE" and s.seeds == "LIMBS" and s.ribbon_enable and s.particles == "STAR",
           "magical girl preset applied (and rebuilt)")
     strands = ribbons.ribbon_objects(s.mask)

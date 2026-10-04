@@ -59,8 +59,11 @@ SIZE_RATIOS = {
     "ribbon_linger": 0.12,
     "finale_distance": 0.17,
     "finale_width": 0.04,
+    "layer_width": 0.12,
+    "inner_depth": 0.1,
 }
 HOLO_LINE_SPACING = 0.006  # scan line spacing of the hologram, fraction of the model height
+LAYER_CELL = 0.012  # cell size of the line web on the undersuit, fraction of the model height
 NOISE_CELLS_PER_HEIGHT = 6.0
 
 
@@ -148,17 +151,23 @@ def _create_mask(settings, location, armature, bone, collection, radius_max, pat
     return mask
 
 
-def _tail(settings, has_base, has_target):
-    """How long things go on after the wave has passed (flakes, particles, the finale), as a share of it."""
-    tail = 0.0
+def _layer(settings):
+    """How far the new outfit's final look trails behind the edge (the dark undersuit), in world units."""
+    return settings.layer_width if settings.layer_enable else 0.0
+
+
+def _extra(settings, wave, has_base, has_target):
+    """How much further the mask grows after the wave has passed (radius `wave`) so everything finishes: flakes and
+    particles (their flight is a share of the wave), the undersuit turning into the final look and then the finale."""
+    extra = 0.0
     if has_base:
         if settings.exit_style in ("FRAGMENTS", "CHUNKS"):
-            tail = settings.frag_life
+            extra = settings.frag_life * wave
         if settings.particles != "NONE":
-            tail = max(tail, settings.particle_life)
-    if has_target and settings.finale:
-        tail = max(tail, settings.finale_length)
-    return tail
+            extra = max(extra, settings.particle_life * wave)
+    if has_target:
+        extra = max(extra, _layer(settings) + (settings.finale_length * wave if settings.finale else 0.0))
+    return extra
 
 
 def _scale_curves(ob):
@@ -183,7 +192,7 @@ def _retime(settings, mask, objects):
     if wave <= 0.0 or old <= 0.0:
         return
     roles = {ob.get(P_ROLE) for ob in objects}
-    radius = wave * (1.0 + _tail(settings, "BASE" in roles, "TARGET" in roles))
+    radius = wave + _extra(settings, wave, "BASE" in roles, "TARGET" in roles)
     curves = _scale_curves(mask)
     if abs(radius - old) <= 1e-6 * radius or not curves:
         return
@@ -292,6 +301,8 @@ def _cleanup_mesh(ob):
             if slot.material is not None:
                 materials.remove_edge_glow(slot.material)
                 materials.remove_hologram(slot.material)
+                materials.remove_inner_glow(slot.material)
+                materials.remove_layer(slot.material)
     saved = ob.get(P_ARM)
     if saved:
         for mod_name, arm_name in saved.to_dict().items():
@@ -381,6 +392,26 @@ def _update_hologram(ob, settings):
             materials.remove_hologram(mat)
 
 
+def _update_inner_glow(ob, settings):
+    for mat in _glow_materials(ob, settings):
+        if settings.inner_glow:
+            materials.add_inner_glow(mat)
+            materials.update_inner_glow(mat, settings.glow_color, settings.inner_glow_strength)
+        else:
+            materials.remove_inner_glow(mat)
+
+
+def _update_layer(ob, settings):
+    # the cells sit on the rest position, which is in object units
+    cell = LAYER_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob)
+    for mat in _glow_materials(ob, settings):
+        if settings.layer_enable:
+            materials.add_layer(mat)
+            materials.update_layer(mat, settings.layer_color, settings.glow_color, settings.layer_lines, cell)
+        else:
+            materials.remove_layer(mat)
+
+
 def _update_ribbons(settings, mask):
     """Create / recreate / remove the limb ribbons to match the panel (they need the built effect)."""
     current = ribbons.ribbon_objects(mask)
@@ -428,11 +459,51 @@ def update_white_flash(settings):
     within a frame where the finale starts and is gone about six frames later, however long the finale is."""
     mask = settings.mask
     wave = float(mask.get(P_WAVE, 0.0)) if mask is not None else 0.0
-    step = _radius_step(mask, wave) if mask is not None else 0.0
+    start = wave + _layer(settings) if wave > 0.0 else 0.0  # the outfit is complete once its final look is
+    step = _radius_step(mask, start) if mask is not None else 0.0
     if step <= 0.0:  # no keys to measure: a share of the finale instead
         step = 0.05 * settings.finale_length * wave
     amount = settings.finale_white if settings.finale else 0.0
-    compositor.update_white_flash(settings.id_data, mask, wave, step, 6.0 * step, amount)
+    compositor.update_white_flash(settings.id_data, mask, start, step, 6.0 * step, amount)
+
+
+def _signatures(settings, role, s):
+    """What the recorded moments of a mesh depend on besides the mask keys, in object space (`s` is its scale):
+    (its vertices', its pieces'). A recording that does not match any more is dropped (launch.py)."""
+    if role == "BASE":
+        return (), (settings.piece_size / s,)
+    layer = _layer(settings) / s  # the finale starts when the final look is complete
+    if settings.finale_style == "SWEEP":
+        stars = (1.0, settings.finale_length, settings.finale_width / s, layer)
+    else:
+        stars = (0.0, layer)
+    return stars, (settings.piece_size / s, settings.fly_range / s, float(settings.subdivide))
+
+
+def _record_parts(settings, role, shown=False):
+    """(vertices, pieces): which moments of a mesh of `role` leave behind records with the current settings, or with
+    `shown` only those the current settings show. The old outfit's vertices are recorded with its chunks too, so
+    switching between flakes and chunks needs no new recording."""
+    if role == "BASE":
+        pieces = settings.exit_style == "CHUNKS"
+        vertices = settings.exit_style == "FRAGMENTS" or settings.particles != "NONE"
+        return vertices or (pieces and not shown), pieces
+    stars = settings.finale and settings.finale_sparkles > 0
+    # with Subdivide the fly-in pieces are cut from another mesh than the one recorded
+    return stars, settings.entrance == "ASSEMBLE" and settings.subdivide == 0
+
+
+def missing_recording(settings):
+    """True when leave behind is on but some part of the built effect that needs a recording has none (rebuild)."""
+    if not settings.leave_behind or settings.mask is None:
+        return False
+    for ob in effect_objects(settings.mask):
+        if ob.type != "MESH" or ob.get(P_ROLE) not in ("BASE", "TARGET"):
+            continue
+        vertices, chunks = _record_parts(settings, ob.get(P_ROLE), shown=True)
+        if (vertices and not launch.has_launch(ob)) or (chunks and not launch.has_launch(ob, chunks=True)):
+            return True
+    return False
 
 
 def sync(settings):
@@ -464,6 +535,9 @@ def sync(settings):
         "Glitch Rate": settings.glitch_rate,
         "Glitch Shift": settings.glitch_shift,
         "Glitch Flash": settings.glitch_flash,
+        "Leave Behind": settings.leave_behind,
+        "Inner Glow": settings.inner_glow,
+        "Inner Depth": settings.inner_depth,
     }
     values = {
         TARGET_GROUP: dict(common, **{
@@ -495,6 +569,8 @@ def sync(settings):
             "Sparkle Distance": settings.finale_distance,
             "Finale Sweep": settings.finale_style == "SWEEP",
             "Sweep Width": settings.finale_width,
+            "Undersuit": settings.layer_enable,
+            "Undersuit Width": settings.layer_width,
         }),
         BASE_GROUP: dict(common, **{
             "Shrink": settings.base_shrink,
@@ -516,7 +592,6 @@ def sync(settings):
             "Flap": settings.particles == "BUTTERFLY",
             "Flap Speed": settings.flap_speed,
             "Particle Size": settings.particle_size,
-            "Leave Behind": settings.leave_behind,
         }),
     }
     reach = float(mask.get(P_REACH, 0.0)) or 1e6
@@ -533,23 +608,24 @@ def sync(settings):
         # frequencies grow), so a scaled model looks the same as an unscaled one.
         s = _object_scale(ob)
         own = {"Reach": reach}
+        if role in ("BASE", "TARGET") and launch.space(ob) is not None:
+            # A recording made with other settings (piece size, the finale's timing ...) does not match any more:
+            # those pieces follow the body again until the next build records them.
+            for chunks, wanted in enumerate(_signatures(settings, role, s)):
+                if launch.has_launch(ob, chunks) and not launch.matches(ob, chunks, wanted):
+                    launch.remove(ob, "chunks" if chunks else "vertices")
+            if launch.space(ob) is not None:
+                own["Launch Space"] = launch.space(ob)
         if role == "BASE":
-            # Chunks recorded with another piece size do not match the chunks any more: they are thrown from
-            # the body again until the next build records them.
-            pieces = settings.piece_size / s
-            if launch.has_launch(ob, chunks=True) and abs(launch.piece_size(ob) - pieces) > 1e-4 * pieces:
-                launch.remove(ob, chunks_only=True)
             own.update({
                 "Flight": settings.frag_life * wave,
                 "Particle Flight": settings.particle_life * wave,
-                "Wind": tuple(ob.matrix_world.inverted_safe().to_3x3() @ wind),
+                "Wind": tuple(wind),  # world direction: the node group turns it into object space every frame
                 "Particle Density": density * s * s,
             })
-            if launch.space(ob) is not None:
-                own["Launch Space"] = launch.space(ob)
         elif role == "TARGET":
             own.update({
-                "Finale Start": wave,
+                "Finale Start": wave + _layer(settings),
                 "Finale Length": settings.finale_length * wave,
                 "Sparkle Density": sparkle_density * s * s,
             })
@@ -573,10 +649,13 @@ def sync(settings):
             _update_glow(ob, settings, settings.edge_glow or flashes or settings.finale,
                          settings.edge_glow_strength)
             _update_hologram(ob, settings)
+            _update_layer(ob, settings)
         elif role == "BASE":
             flakes = settings.exit_style in ("FRAGMENTS", "CHUNKS") and settings.frag_glow
             _update_glow(ob, settings, flakes or flashes or settings.silhouette,
                          settings.frag_glow_strength if flakes or settings.silhouette else settings.edge_glow_strength)
+        if role in ("TARGET", "BASE"):
+            _update_inner_glow(ob, settings)
 
 
 def _seeds(settings, location, model):
@@ -655,9 +734,9 @@ def build(context, settings):
     margin = settings.noise_amount + max(settings.edge_width, settings.wire_outer) + 0.02 * height
     if path == "SPHERE" and settings.space == "POSED":
         margin += 0.1 * height
-    # Flakes, particles and the finale go on after the front has passed: leave them time to finish.
+    # Flakes, particles, the undersuit and the finale go on after the front has passed: leave them time to finish.
     wave = reach + margin
-    radius = wave * (1.0 + _tail(settings, bool(base), bool(target)))
+    radius = wave + _extra(settings, wave, bool(base), bool(target))
     root = target.root or base.root
     collection = root.users_collection[0] if root.users_collection else context.scene.collection
     mask = _create_mask(settings, location, owner.armature, bone, collection, radius, path, owner.root)
@@ -680,16 +759,25 @@ def build(context, settings):
     mask[P_AREA_NEW] = sum(mdl.free_area(ob) for ob in target.meshes)
     sync(settings)
 
-    # Leave behind: play the transformation once and record where the old outfit (and each chunk) breaks off.
+    # Leave behind: play the transformation once and record where the old outfit (and each chunk) breaks off, where
+    # the new outfit's stars are born and where its pieces take off.
     recorded, record_seconds = 0, 0.0
-    if settings.leave_behind and base.meshes:
+    jobs = []
+    if settings.leave_behind:
+        for role, outfit in (("BASE", base.meshes), ("TARGET", target.meshes)):
+            vertices, chunks = _record_parts(settings, role)
+            for ob in outfit if vertices or chunks else ():
+                jobs.append(launch.Job(ob, role == "TARGET", vertices, chunks,
+                                       *_signatures(settings, role, _object_scale(ob))))
+    if jobs:
         t0 = time.time()
         scene = context.scene
         physics = scene.rigidbody_world is not None and scene.rigidbody_world.enabled
         start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
         warmup = scene.frame_start if physics and scene.frame_start < start else None
-        recorded = launch.record(context, base.meshes, target.meshes + ribbons.ribbon_objects(mask),
-                                 range(start, end + 1), warmup, chunks=settings.exit_style == "CHUNKS")
+        busy = {job.ob for job in jobs}
+        others = [ob for ob in meshes if ob not in busy] + ribbons.ribbon_objects(mask)
+        recorded = launch.record(context, jobs, others, range(start, end + 1), warmup)
         record_seconds = time.time() - t0
     return {
         "mask": mask,

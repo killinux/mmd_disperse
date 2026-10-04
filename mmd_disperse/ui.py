@@ -1,6 +1,6 @@
 import bpy
 
-from . import effect, launch
+from . import effect
 from .model import find_armature
 
 
@@ -50,6 +50,9 @@ class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
         col = layout.column()
         col.prop(s, "direction")
         col.prop(s, "easing")
+        col.prop(s, "leave_behind")
+        if effect.missing_recording(s):
+            col.label(text="Rebuild to record the motion", icon="INFO")
 
         layout.separator()
         row = layout.row(align=True)
@@ -84,6 +87,12 @@ class MMDDISPERSE_PT_edge(_Panel, bpy.types.Panel):
         sub = col.column()
         sub.active = s.edge_glow
         sub.prop(s, "edge_glow_strength")
+        col = layout.column(align=True)
+        col.prop(s, "inner_glow")
+        sub = col.column(align=True)
+        sub.active = s.inner_glow
+        sub.prop(s, "inner_glow_strength")
+        sub.prop(s, "inner_depth")
         layout.prop(s, "subdivide")
 
 
@@ -132,6 +141,29 @@ class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
             col.prop(s, "fly_distance")
             col.prop(s, "fly_range")
             col.prop(s, "frag_spin")
+            if s.leave_behind and s.subdivide > 0:
+                layout.label(text="Pieces fly in from fixed points only without Subdivide", icon="INFO")
+
+
+class MMDDISPERSE_PT_undersuit(_Panel, bpy.types.Panel):
+    bl_label = "Dark Undersuit"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "layer_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.layer_enable
+        col = layout.column(align=True)
+        col.prop(s, "layer_width")
+        col.prop(s, "layer_color")
+        col.prop(s, "layer_lines")
+        layout.label(text="The seam glows with the edge glow", icon="INFO")
 
 
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
@@ -264,13 +296,6 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
             col.prop(s, "frag_wind_dir")
             col.prop(s, "frag_turbulence")
             col.prop(s, "frag_spin")
-        if s.exit_style != "SHRINK" or s.particles != "NONE":
-            col = layout.column()
-            col.prop(s, "leave_behind")
-            chunks = s.exit_style == "CHUNKS"
-            if s.leave_behind and s.mask is not None and not any(
-                    launch.has_launch(ob, chunks) for ob in effect.effect_objects(s.mask)):
-                col.label(text="Rebuild to record the motion", icon="INFO")
         col = layout.column(align=True)
         if s.exit_style != "SHRINK":
             col.prop(s, "frag_glow")
@@ -319,6 +344,7 @@ classes = (
     MMDDISPERSE_PT_edge,
     MMDDISPERSE_PT_wire,
     MMDDISPERSE_PT_entrance,
+    MMDDISPERSE_PT_undersuit,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_ribbons,

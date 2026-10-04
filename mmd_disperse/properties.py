@@ -104,6 +104,12 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                       update=_sync)
     subdivide: IntProperty(name="Subdivide", default=0, min=0, max=3, update=_sync,
                            description="Subdivide low-poly outfits for a smoother edge (slow)")
+    inner_glow: BoolProperty(name="Inner Glow", default=False, update=_sync,
+                             description="Back faces near the edge glow, so where an outfit is cut open its inside "
+                                         "looks lit and solid instead of hollow (uses the glow color)")
+    inner_glow_strength: FloatProperty(name="Inner Glow Strength", default=2.0, min=0.0, soft_max=20.0,
+                                       update=_sync)
+    inner_depth: _distance("Inner Glow Depth", "How far from the edge the inside glows", 2.0)
 
     # --- wire layer
     wire_enable: BoolProperty(name="Wire Layer", default=True, update=_sync)
@@ -132,6 +138,17 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     fly_range: _distance("Fly Range",
                          "How far ahead of the edge a piece takes off: larger means a longer flight", 1.6)
     chunk_force: _distance("Chunk Force", "How hard the old outfit's chunks are thrown off", 3.0, soft_max=50.0)
+
+    # --- dark undersuit under the new outfit's final look
+    layer_enable: BoolProperty(name="Dark Undersuit", default=False, update=_sync,
+                               description="The new outfit first forms as a dark undersuit at the edge and takes on "
+                                           "its own look a little behind it, along a second glowing seam "
+                                           "(Mark 50 style)")
+    layer_width: _distance("Undersuit Width", "How far the final look trails behind the edge", 2.0)
+    layer_color: FloatVectorProperty(name="Undersuit Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(0.02, 0.022, 0.026), update=_sync)
+    layer_lines: FloatProperty(name="Undersuit Lines", default=1.5, min=0.0, soft_max=20.0, update=_sync,
+                               description="Glow of the fine web of lines on the undersuit (glow color; 0 = none)")
 
     # --- hologram ahead of the edge
     holo_enable: BoolProperty(name="Hologram", default=False, update=_sync,
@@ -185,10 +202,11 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                       update=_sync)
 
     leave_behind: BoolProperty(name="Leave Behind", default=False, update=_sync,
-                               description="Flakes, chunks and particles fly on from where they broke off instead "
-                                           "of moving with the body (dancing, or the whole model moving or "
-                                           "turning). Building plays the animation once to record it: rebuild "
-                                           "after changing the motion or the timing")
+                               description="Flakes, chunks and particles fly on from where they broke off, the new "
+                                           "outfit's pieces fly in from fixed points and the finale stars stay where "
+                                           "they burst out, instead of moving with the body (dancing, or the whole "
+                                           "model moving or turning). Building plays the animation once to record "
+                                           "it: rebuild after changing the motion or the timing")
 
     silhouette: BoolProperty(name="Glowing Silhouette", default=False, update=_sync,
                              description="The old outfit lights up just before the edge reaches it, so the body "

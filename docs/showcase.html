@@ -210,12 +210,12 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.5：用 Blender 几何节点给 MMD 模型做换装变身。下面十六段视频都是插件生成的
+    <p>mmd_disperse 1.6：用 Blender 几何节点给 MMD 模型做换装变身。下面二十五段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤。</p>
     <div class="stats">
-      <span><b>16</b> 段演示</span>
-      <span><b>8</b> 个一键预设</span>
-      <span><b>120</b> 种基本组合</span>
+      <span><b>25</b> 段演示</span>
+      <span><b>15</b> 个一键预设</span>
+      <span><b>432</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
     <div class="links">
@@ -244,8 +244,8 @@
     <div class="card">
       <ol class="setup">
         <li><b>安装插件。</b>安装包在 <a href="https://github.com/killinux/mmd_disperse/releases">GitHub Releases</a> 下载。Blender 4.2 及以上：编辑 › 偏好设置 › 获取扩展 › 右上角下拉 › 从磁盘安装，选
-          <code>dist/mmd_disperse-1.5.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
-          <code>mmd_disperse-1.5.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
+          <code>dist/mmd_disperse-1.6.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
+          <code>mmd_disperse-1.6.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
         <li><b>导入两个模型。</b>用 mmd_tools（文件 › 导入 › MikuMikuDance 模型 (.pmd, .pmx)）导入
           旧服装（变身前，视频里是 V2）和新服装（变身后，V1）。位置随意，生成时新服装会自动对齐到旧服装上。</li>
         <li><b>跳舞的话先加载动作。</b>只给旧模型加载：选中旧模型脚下的根物体，文件 › 导入 ›
@@ -292,6 +292,15 @@
       <a href="#nano-finale"><img src="../test_output/posters/nano_finale.jpg" alt="" loading="lazy">纳米战衣收尾</a>
       <a href="#spin-armor"><img src="../test_output/posters/spin_armor.jpg" alt="" loading="lazy">转圈·装甲换装</a>
       <a href="#scan-layer"><img src="../test_output/posters/scan_layer.jpg" alt="" loading="lazy">内衬扫描·背面发光</a>
+      <a href="#venom"><img src="../test_output/posters/venom_dance.jpg" alt="" loading="lazy">跳舞·毒液共生体</a>
+      <a href="#clamp"><img src="../test_output/posters/clamp.jpg" alt="" loading="lazy">前后夹合</a>
+      <a href="#ghosts"><img src="../test_output/posters/ghosts.jpg" alt="" loading="lazy">残影汇聚</a>
+      <a href="#ice"><img src="../test_output/posters/ice.jpg" alt="" loading="lazy">冰封碎裂</a>
+      <a href="#burn"><img src="../test_output/posters/burn.jpg" alt="" loading="lazy">燃烧成灰</a>
+      <a href="#derez"><img src="../test_output/posters/derez.jpg" alt="" loading="lazy">方块消散</a>
+      <a href="#coins"><img src="../test_output/posters/coins.jpg" alt="" loading="lazy">金币迸发</a>
+      <a href="#beat"><img src="../test_output/posters/beat_glitch.jpg" alt="" loading="lazy">跳舞·故障风卡节拍</a>
+      <a href="#spin-armor-16"><img src="../test_output/posters/spin_armor16.jpg" alt="" loading="lazy">转圈·零件保持朝向</a>
     </div>
 
     <article class="effect card" id="suitup">
@@ -671,6 +680,190 @@
         <p class="cmd">演示参数：<code>--no-base --set use_lock=0 --set path=UP --set inner_glow=1 --set layer_enable=1</code></p>
       </div>
     </article>
+
+    <article class="effect card" id="venom">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/venom_dance.jpg">
+          <source src="../test_output/demo_v8/tifa_venom_dance_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.6</span><span class="tag">毒液共生体</span><span class="tag">黑色血管</span><span class="tag">触手</span><span class="tag">黏丝</span><span class="tag">黏液内衬</span><span class="tag">跳舞</span></div>
+        <h3>跳舞 · 毒液共生体（新预设）</h3>
+        <p class="lead">边跳舞边被黑色共生体吞没：皮肤下先爬出黑色血管，黏液从胸口漫开，触手跑在黏液前面爬过身体，面对面的地方拉出黏丝，黏液覆盖全身后变成黑色紧身衣。触手每个点都绑在身体的三角形上，跳舞时紧贴着身体。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li>给旧模型加载舞蹈动作（见「通用准备」第 3 步）。</li>
+          <li><span class="ui">预设</span> 选 <span class="v">毒液共生体</span>：沿体表流动（只从起点）、<span class="ui">毒液共生体</span>、旧服装表面 <span class="v">黑色血管</span>、<span class="ui">深色内衬</span> 选 <span class="v">共生体黏液</span> 样式，关掉边缘发光。</li>
+          <li><span class="ui">毒液共生体</span> 面板调 <span class="ui">触手数量</span>、<span class="ui">触手长度</span>、<span class="ui">触手粗细</span>、<span class="ui">触手速度</span> 和 <span class="ui">黏丝数量</span>；改数量或长度会自动重新走线。</li>
+          <li><span class="ui">旧服装表面</span> 面板的 <span class="ui">范围</span> 决定血管在边界前方多远出现。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset VENOM --vmd 回レ！雪月花.vmd</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="clamp">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/clamp.jpg">
+          <source src="../test_output/demo_v8/tifa_clamp_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.6</span><span class="tag">前后两半夹合</span><span class="tag">假面骑士 Build</span><span class="tag">碎片飞散</span><span class="tag">收尾闪光</span><span class="tag">全屏闪白</span></div>
+        <h3>前后两半夹合（新预设）</h3>
+        <p class="lead">新服装在身前、身后两个发光框里从脚往上打印出前后两半，滑进来「咔」地夹合，接缝一亮；旧服装在合上的瞬间炸成碎片，同时迸出星星、画面闪白。斜侧面的镜头能同时看到两半。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">前后夹合</span>：新服装登场 <span class="v">前后两半夹合</span>，旧服装 <span class="v">碎片飞散</span>，收尾闪光 + 闪白，橙红色发光。</li>
+          <li><span class="ui">新服装登场</span> 面板的 <span class="ui">夹合距离</span> 调两半离身体多远。框的颜色用线框层的颜色。</li>
+          <li>镜头放在模型斜侧面（演示里转了 -55°），正前方两半会互相挡住。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset CLAMP --white-flash --angle -55 --orbit 8</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="ghosts">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/ghosts.jpg">
+          <source src="../test_output/demo_v8/tifa_ghosts_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.6</span><span class="tag">残影汇聚</span><span class="tag">假面骑士 Decade</span><span class="tag">全息先行</span><span class="tag">收尾闪光</span><span class="tag">全屏闪白</span></div>
+        <h3>残影汇聚（新预设）</h3>
+        <p class="lead">六个粉色全息残影站在身体两侧和后面，从脚往上出现，一边转一边收拢到身上；碰到一起的那一刻新服装闪亮出现，迸出星星。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">残影汇聚</span>：新服装登场 <span class="v">残影汇聚</span>、<span class="ui">全息先行</span>，收尾闪光 + 闪白，粉色发光。</li>
+          <li><span class="ui">新服装登场</span> 面板调 <span class="ui">残影数量</span> 和 <span class="ui">残影距离</span>。不开全息先行的话，残影就是实心的复制品。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset GHOSTS --white-flash</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="ice">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/ice.jpg">
+          <source src="../test_output/demo_v8/tifa_ice_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.6</span><span class="tag">从下往上扫</span><span class="tag">结霜</span><span class="tag">冰晶</span><span class="tag">装甲弹开</span><span class="tag">冰片</span></div>
+        <h3>冰封碎裂（新预设）</h3>
+        <p class="lead">从脚往上结霜：衣服和皮肤变成清透的冰面，长出白霜和一根根冰晶；冰封到哪里，哪里就裂成冰块弹开，飞出冰片，下面露出新服装。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">冰封碎裂</span>：从下往上扫，旧服装表面 <span class="v">结霜</span>，退场 <span class="v">装甲弹开</span>，粒子 <span class="v">冰片</span>。</li>
+          <li><span class="ui">旧服装表面</span> 面板调结霜的 <span class="ui">范围</span>、<span class="ui">颜色</span> 和 <span class="ui">冰晶数量</span>、<span class="ui">冰晶大小</span>。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset ICE</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="burn">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/burn.jpg">
+          <source src="../test_output/demo_v8/tifa_burn_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.6</span><span class="tag">只从手脚</span><span class="tag">烧焦</span><span class="tag">碎片飞散</span><span class="tag">余烬</span></div>
+        <h3>燃烧成灰（新预设）</h3>
+        <p class="lead">从手脚开始烧：衣服先一片片烧黑，快到边界时裂纹透出火光，然后化成发光的灰烬飘散，火星往上飞，新服装在一圈火光后面出现。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">燃烧成灰</span>：只从手脚出发，旧服装表面 <span class="v">烧焦</span>，退场 <span class="v">碎片飞散</span>（碎片发光），粒子 <span class="v">余烬</span>，橙色发光，风往上吹。</li>
+          <li>裂纹和火光用线框层的 <span class="ui">发光颜色</span>；<span class="ui">颜色</span> 调焦黑的颜色。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset BURN</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="derez">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/derez.jpg">
+          <source src="../test_output/demo_v8/tifa_derez_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.6</span><span class="tag">从上往下扫</span><span class="tag">碎片飞散</span><span class="tag">方块</span></div>
+        <h3>方块消散（新预设）</h3>
+        <p class="lead">《创：战纪》式的 derez：从头往下，旧服装碎成小片和一颗颗发光的青色方块，往下散落。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">方块消散</span>：从上往下扫，退场 <span class="v">碎片飞散</span>，粒子 <span class="v">方块</span>，青色发光。</li>
+          <li>粒子面板的 <span class="ui">数量</span>、<span class="ui">粒子大小</span> 调方块多少、多大。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset DEREZ</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="coins">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/coins.jpg">
+          <source src="../test_output/demo_v8/tifa_coins_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.6</span><span class="tag">球形扩散</span><span class="tag">收缩消失</span><span class="tag">金币</span></div>
+        <h3>金币迸发（新预设）</h3>
+        <p class="lead">《头号玩家》里被打败时爆成金币：变身经过的地方迸出满天旋转的金币，往上飞散。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">金币迸发</span>：粒子 <span class="v">金币</span>、数量 <span class="v">2000</span>，粒子颜色金黄。</li>
+          <li>金币是金属材质，颜色就是 <span class="ui">粒子颜色</span>。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset COINS</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="beat">
+      <figure class="clip">
+        <video controls loop playsinline preload="metadata" poster="../test_output/posters/beat_glitch.jpg">
+          <source src="../test_output/demo_v8/tifa_beat_glitch_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.6</span><span class="tag">故障风</span><span class="tag">卡音乐节拍</span><span class="tag">色散</span><span class="tag">跳舞</span><span class="tag">有声音</span></div>
+        <h3>跳舞 · 故障风卡音乐节拍（有声音）</h3>
+        <p class="lead">故障切片和红绿蓝色散跟着音乐的鼓点跳：每一拍切片重新洗牌，拍点上跳得最多、闪得最亮，色散冲高。这段视频带着舞曲，点开声音听。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li>给旧模型加载舞蹈动作。<span class="ui">预设</span> 选 <span class="v">故障风</span>，生成。</li>
+          <li><span class="ui">故障风</span> 面板的 <span class="ui">音乐</span> 选这首歌（从第 1 帧开始），点音符按钮 <span class="ui">找节拍</span>：报告找到多少拍，自动勾上 <span class="ui">卡音乐节拍</span>。</li>
+          <li>点 <span class="ui">添加色散</span>，色散也跟着拍子。渲染完把歌合进视频。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset GLITCH --vmd 回レ！雪月花.vmd --music wav.mp3 --glitch-fx</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="spin-armor-16">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/spin_armor16.jpg">
+          <source src="../test_output/demo_v8/tifa_spin_armor_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.6</span><span class="tag">物体动画</span><span class="tag">转圈</span><span class="tag">留在原地</span><span class="tag">零件飞入</span><span class="tag">保持朝向</span></div>
+        <h3>边转圈边换装甲 · 零件在空中保持朝向</h3>
+        <p class="lead">和 1.5 那段同样的设置：飞行中的新装甲零件现在保持起飞那一刻在世界里的形状和朝向，不再跟着转动的身体一起扭，快落位时才转过来贴到身上。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li>同上面「边转圈边换装甲」：根物体旋转关键帧、<span class="ui">预设</span> 选 <span class="v">装甲换装</span>、勾 <span class="ui">留在原地</span> 后生成。</li>
+          <li>1.6 起自动生效，不需要额外设置。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset ARMOR --set leave_behind=1 --spin 360 --spin-frames 10:150</code></p>
+      </div>
+    </article>
   </div>
 </section>
 
@@ -684,21 +877,27 @@
         <ul><li>球形扩散</li><li>沿体表流动（出发点：只从起点 / 起点 + 手脚 / 只从手脚）</li><li>从下往上扫</li><li>从上往下扫</li></ul>
       </div>
       <div class="opt card">
-        <h3>新服装登场 <b>2</b></h3>
-        <ul><li>边缘生长</li><li>零件飞入</li></ul>
+        <h3>新服装登场 <b>4</b></h3>
+        <ul><li>边缘生长</li><li>零件飞入</li><li>前后两半夹合</li><li>残影汇聚</li></ul>
       </div>
       <div class="opt card">
         <h3>旧服装退场 <b>3</b></h3>
         <ul><li>收缩消失</li><li>碎片飞散</li><li>装甲弹开</li></ul>
       </div>
       <div class="opt card">
-        <h3>粒子 <b>4</b></h3>
-        <ul><li>花瓣</li><li>蝴蝶（会扇翅膀）</li><li>星光</li><li>自定义物体</li><li>也可以不要</li></ul>
+        <h3>粒子 <b>8</b></h3>
+        <ul><li>花瓣</li><li>蝴蝶（会扇翅膀）</li><li>星光</li><li>方块</li><li>金币</li><li>冰片</li><li>余烬</li>
+          <li>自定义物体</li><li>也可以不要</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>9</b></h3>
-        <ul><li>线框层（六边形 / 三角网）</li><li>全息先行</li><li>故障风</li><li>光剪影</li><li>光带</li>
-          <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬</li><li>背面发光</li>
+        <h3>旧服装表面 <b>3</b></h3>
+        <ul><li>黑色血管</li><li>结霜（可以长冰晶）</li><li>烧焦</li><li>也可以不变</li></ul>
+      </div>
+      <div class="opt card">
+        <h3>叠加开关 <b>11</b></h3>
+        <ul><li>线框层（六边形 / 三角网）</li><li>全息先行</li><li>故障风（可以卡音乐节拍）</li><li>光剪影</li><li>光带</li>
+          <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
+          <li>毒液共生体（触手、黏丝）</li>
           <li>留在原地（碎片、装甲、粒子、新服装的零件和星星；跳舞或整个人移动、转圈）</li></ul>
       </div>
       <div class="opt card">
@@ -706,8 +905,9 @@
         <ul><li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散、全屏闪白</li></ul>
       </div>
     </div>
-    <p class="sum">路径 × 登场 × 退场 × 粒子 = 4 × 2 × 3 × 5 = <b>120</b> 种基本组合；再叠加 9 个开关
-      （收尾闪光有两种方式），理论上有九万多种（「留在原地」在碎片飞散、装甲弹开、开了粒子、零件飞入或收尾星星时起作用）。</p>
+    <p class="sum">路径 × 登场 × 退场 × 粒子 = 4 × 4 × 3 × 9 = <b>432</b> 种基本组合，再乘旧服装表面的 4 种就是 1728 种；
+      再叠加 11 个开关（收尾闪光有两种方式，内衬有两种样式），组合多到数不过来（「留在原地」在碎片飞散、装甲弹开、开了粒子、
+      零件飞入或收尾星星时起作用）。</p>
   </div>
 </section>
 
@@ -726,6 +926,13 @@
           <tr><td>故障风</td><td>球形扩散</td><td>边缘生长</td><td>收缩消失</td><td>故障风 + 闪光，粉色发光</td></tr>
           <tr><td>装甲换装</td><td>沿体表流动（只从起点）</td><td>零件飞入</td><td>装甲弹开</td><td>碎片发光，橙色发光</td></tr>
           <tr><td>纳米战衣收尾</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>六边形线框、深色内衬、背面发光、收尾光扫 + 星光、全屏闪白，青色发光</td></tr>
+          <tr><td>毒液共生体</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>黑色血管、触手、黏丝、共生体黏液内衬，不发光</td></tr>
+          <tr><td>冰封碎裂</td><td>从下往上扫</td><td>边缘生长</td><td>装甲弹开</td><td>结霜、冰晶、冰片，冰蓝色发光</td></tr>
+          <tr><td>燃烧成灰</td><td>沿体表流动（只从手脚）</td><td>边缘生长</td><td>碎片飞散</td><td>烧焦、发光的灰烬、余烬往上飘，橙色发光</td></tr>
+          <tr><td>方块消散</td><td>从上往下扫</td><td>边缘生长</td><td>碎片飞散</td><td>发光方块，青色发光</td></tr>
+          <tr><td>金币迸发</td><td>球形扩散</td><td>边缘生长</td><td>收缩消失</td><td>2000 枚金币，金色发光</td></tr>
+          <tr><td>前后夹合</td><td>（不看路径）</td><td>前后两半夹合</td><td>碎片飞散</td><td>收尾闪光 + 星光、全屏闪白，橙红色发光</td></tr>
+          <tr><td>残影汇聚</td><td>（不看路径）</td><td>残影汇聚</td><td>收缩消失</td><td>全息残影、收尾闪光 + 星光、全屏闪白，粉色发光</td></tr>
           <tr><td>魔法少女</td><td>沿体表流动（只从手脚）</td><td>边缘生长</td><td>碎片飞散</td><td>光剪影、光带、星光、收尾闪光，粉色发光</td></tr>
         </tbody>
       </table>
@@ -738,7 +945,7 @@
 <footer>
   <div class="wrap">
     本页在仓库的 <code>docs/</code> 里，用浏览器直接打开即可。视频和缩略图在 <code>test_output/</code>（渲染结果不进 git），
-    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.5.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
+    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.6.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
   </div>
 </footer>
 

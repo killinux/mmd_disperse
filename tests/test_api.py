@@ -8,7 +8,9 @@ import argparse
 import math
 import os
 import sys
+import tempfile
 import traceback
+import wave
 
 import bpy
 import numpy as np
@@ -19,11 +21,13 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
-from mmd_disperse import compositor, effect, launch, materials, particles, presets, ribbons  # noqa: E402
+from mmd_disperse import (beats, compositor, effect, launch, materials, particles, presets, ribbons,  # noqa: E402
+                          venom)
 from mmd_disperse.arrival import limb_points  # noqa: E402
 from mmd_disperse.model import resolve, rest_points_world  # noqa: E402
 from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_CUT, ATTR_EDGE, ATTR_HOLO, ATTR_LAYER,  # noqa: E402
-                                      ATTR_LOCK, BASE_GROUP, TARGET_GROUP, input_identifiers)
+                                      ATTR_AHEAD, ATTR_LOCK, BASE_GROUP, TARGET_GROUP, VENOM_ATTRS, VENOM_ENDS,
+                                      input_identifiers)
 from scene_setup import add_model_args, load_models  # noqa: E402
 
 FAILURES = []
@@ -304,6 +308,71 @@ def chain(mat):
     return names
 
 
+def material_points(ob, name, others=False):
+    """World positions of the evaluated vertices of the faces drawn with material `name` (with `others`, of the faces
+    drawn with any other material)."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = ob.evaluated_get(deps)
+    me = ev.to_mesh()
+    try:
+        names = [m.name if m is not None else "" for m in me.materials]
+        if not len(me.polygons):
+            return np.zeros((0, 3))
+        face_material = np.zeros(len(me.polygons), dtype=np.int32)
+        me.polygons.foreach_get("material_index", face_material)
+        totals = np.zeros(len(me.polygons), dtype=np.int32)
+        me.polygons.foreach_get("loop_total", totals)
+        corner_vertex = np.zeros(len(me.loops), dtype=np.int32)
+        me.loops.foreach_get("vertex_index", corner_vertex)
+        drawn = face_material == (names.index(name) if name in names else -1)
+        picked = np.repeat(~drawn if others else drawn, totals)
+        co = np.zeros(len(me.vertices) * 3, dtype=np.float32)
+        me.vertices.foreach_get("co", co)
+        co = co.reshape(-1, 3)[np.unique(corner_vertex[picked])]
+    finally:
+        ev.to_mesh_clear()
+    mw = np.array(ob.matrix_world, dtype=np.float64)
+    return co @ mw[:3, :3].T + mw[:3, 3]
+
+
+def goo_points(ob):
+    """World positions of the evaluated vertices drawn with the symbiote's goo (its tendrils and strands)."""
+    return material_points(ob, materials.GOO_MATERIAL)
+
+
+def surface_distance(points, ob):
+    """Distance of world `points` to the skinned surface of mesh `ob` (our modifier off)."""
+    from mathutils import Vector
+    from mathutils.bvhtree import BVHTree
+
+    mw = np.array(ob.matrix_world, dtype=np.float64)
+    world = skinned(ob).astype(np.float64) @ mw[:3, :3].T + mw[:3, 3]
+    me = ob.data
+    me.calc_loop_triangles()
+    tris = np.zeros(len(me.loop_triangles) * 3, dtype=np.int64)
+    me.loop_triangles.foreach_get("vertices", tris)
+    bvh = BVHTree.FromPolygons(world.tolist(), tris.reshape(-1, 3).tolist(), all_triangles=True)
+    return np.array([bvh.find_nearest(Vector(p))[3] for p in points])
+
+
+def write_clicks(path, times, seconds, rate=44100):
+    """A WAV file with a kick-like click at each of `times` (seconds) over quiet noise."""
+    rng = np.random.default_rng(3)
+    data = rng.normal(0.0, 0.004, int(seconds * rate))
+    k = np.arange(int(0.08 * rate))
+    click = (0.8 * np.sin(2.0 * math.pi * 70.0 * k / rate) * np.exp(-k / (0.015 * rate))
+             + rng.normal(0.0, 0.2, len(k)) * np.exp(-k / (0.004 * rate)))
+    for t in times:
+        i = int(t * rate)
+        n = min(len(k), len(data) - i)
+        data[i:i + n] += click[:n]
+    with wave.open(path, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes((np.clip(data, -1.0, 1.0) * 32767).astype("<i2").tobytes())
+
+
 def arrival_values(ob):
     attr = ob.data.attributes.get(ATTR_ARRIVAL)
     if attr is None:
@@ -506,6 +575,15 @@ def run():
     check(glow_top > 0.0, "flakes in the air at frame 50 (glow %.2f)" % glow_top)
     petals = instance_count(base.meshes[0])
     check(petals > 0, "petals released at frame 50 (%d)" % petals)
+    # the other shapes: the same flight, each with its material
+    for kind, mat_name in (("CUBE", materials.PARTICLE_MATERIAL), ("COIN", materials.COIN_MATERIAL),
+                           ("SHARD", materials.ICE_MATERIAL), ("EMBER", materials.PARTICLE_MATERIAL)):
+        s.particles = kind
+        shape = bpy.data.objects.get(particles.NAMES[kind])
+        check(shape is not None and len(shape.data.polygons) > 0 and shape.data.materials[0].name == mat_name
+              and instance_count(base.meshes[0]) == petals,
+              "%s released like the petals (%d)" % (kind.lower(), instance_count(base.meshes[0])))
+    s.particles = "PETAL"
     scene.frame_set(100)
     faces, _ = evaluated_faces_and_edge(base.meshes[0])
     check(faces == locked_faces(base.meshes[0]), "only the shared parts of the old outfit left (%d faces)" % faces)
@@ -593,6 +671,50 @@ def run():
     drivers = tree.animation_data.drivers if tree.animation_data else []
     check(len(lens) == 1 and len(drivers) == 1 and drivers[0].driver.is_valid, "one lens node driven by the frame")
     check(not draw_panels(bpy.context), "panels draw with hologram and glitch")
+
+    # --- the glitch on the beat: beats found in a click track (two a second from the scene's start); the slices flash
+    # most on them and the RGB split spikes on them
+    track = os.path.join(tempfile.gettempdir(), "mmdd_beats_test.wav")
+    write_clicks(track, [0.5 * i for i in range(10)], 5.5)
+    s.beat_audio = track
+    check(bpy.ops.mmd_disperse.find_beats() == {"FINISHED"}, "beats found in a click track")
+    beat_ob = beats.beat_object()
+    fps = scene.render.fps / scene.render.fps_base
+    on = [int(round(scene.frame_start + 0.5 * i * fps)) for i in range(10)]
+    off = [f + int(round(0.25 * fps)) for f in on]
+    check(beat_ob is not None and beat_ob.get(beats.P_BEATS) == 10 and s.beat_sync,
+          "ten beats, the glitch follows them (%s)" % (beat_ob.get(beats.P_BEATS) if beat_ob else None))
+    pulses = []
+    for f_on, f_off in zip(on, off):
+        scene.frame_set(f_on)
+        a = beat_ob.location.x if beat_ob else 0.0
+        scene.frame_set(f_off)
+        pulses.append((round(a, 2), round(beat_ob.location.x if beat_ob else 0.0, 2)))
+    check(all(a > 0.7 and b_ < 0.2 for a, b_ in pulses), "the beat empty pulses on the beats %s" % pulses)
+    mod_ids = input_identifiers(our_modifiers(base.meshes[0])[0].node_group)
+    check(our_modifiers(base.meshes[0])[0][mod_ids["Beat Sync"]] and
+          our_modifiers(base.meshes[0])[0][mod_ids["Beat Object"]] == beat_ob, "modifiers read the beats")
+    # Same frames, the pulse held on and off (its curve muted), so the same slices are in the band either way.
+    pulse_curve = next((c for c in beats._fcurves(beat_ob) if c.data_path == "location" and c.array_index == 0), None)
+    flashes = {"on": 0, "off": 0}
+    if pulse_curve is not None:
+        pulse_curve.mute = True
+        for f in (30, 40, 50, 60):
+            scene.frame_set(f)
+            for name, value in (("on", 1.0), ("off", 0.0)):
+                beat_ob.location.x = value
+                bpy.context.view_layer.update()
+                values = evaluated_values(base.meshes[0], ATTR_EDGE)
+                flashes[name] += int((values > 0.5).sum()) if values is not None else 0
+        pulse_curve.mute = False
+    check(flashes["on"] > 3 * max(flashes["off"], 1), "slices flash on the beat %s" % flashes)
+    drivers = tree.animation_data.drivers if tree.animation_data else []
+    check(len(drivers) == 1 and drivers[0].driver.is_valid and [v.name for v in drivers[0].driver.variables] == ["b"],
+          "the RGB split spikes on the beat")
+    s.beat_sync = False
+    drivers = tree.animation_data.drivers if tree.animation_data else []
+    check(not our_modifiers(base.meshes[0])[0][mod_ids["Beat Sync"]] and len(drivers) == 1
+          and not drivers[0].driver.variables, "beat sync off: back to the flicker rate")
     s.glitch_enable = False
     scene.frame_set(100)
     grown_faces = evaluated_faces_and_edge(target.meshes[0])[0]
@@ -632,6 +754,109 @@ def run():
           and abs(float(s.mask[effect.P_REACH]) - reach_plain) < 1e-4 * reach_plain,
           "undersuit and inner glow removed, the mask back to its length")
 
+    # --- symbiote: black veins on the old outfit ahead of the edge, tendrils and strands of goo bound to its
+    # triangles (so they stick to the body when it moves) and the goo undersuit on the new outfit
+    old_mesh = base.meshes[0]
+    s.venom_enable, s.old_surface = True, "VEINS"
+    skeleton = venom.skeleton(old_mesh)
+    check(skeleton is not None and venom.skeleton(target.meshes[0]) is None, "symbiote: a skeleton on the old outfit")
+    if skeleton is not None:
+        sk_attrs = skeleton.data.attributes
+        check(all(sk_attrs.get(n) is not None for n in VENOM_ATTRS), "the skeleton carries its bindings and timing")
+        n_points = len(skeleton.data.vertices)
+        kinds = np.zeros(n_points, dtype=np.float32)
+        sk_attrs["mmdd_kind"].data.foreach_get("value", kinds)
+        index = np.zeros((6, n_points), dtype=np.int32)
+        for i, name in enumerate(VENOM_ENDS[0][:3] + VENOM_ENDS[1][:3]):
+            sk_attrs[name].data.foreach_get("value", index[i])
+        weights = np.zeros((2, n_points * 3), dtype=np.float32)
+        for i, end in enumerate(VENOM_ENDS):
+            sk_attrs[end[3]].data.foreach_get("vector", weights[i])
+        check(int((kinds < 0.5).sum()) > 100 and int((kinds > 0.5).sum()) >= 3 * 8,
+              "tendrils (%d points) and strands (%d points)" % ((kinds < 0.5).sum(), (kinds > 0.5).sum()))
+        check(index.min() >= 0 and index.max() < len(old_mesh.data.vertices)
+              and float(np.abs(weights.reshape(2, -1, 3).sum(axis=2) - 1.0).max()) < 1e-4,
+              "every point bound to a triangle of the old outfit")
+    veined = set(effect._glow_materials(old_mesh, s))
+    check(veined and all(m.get(materials.P_SURFACE) == "VEINS" for m in veined)
+          and not any(m.get(materials.P_SURFACE) for m in glow),
+          "veins added to the old outfit's materials (%d), not to locked parts or the new outfit" % len(veined))
+    scene.frame_set(1)
+    check(len(goo_points(old_mesh)) == 0, "symbiote: no goo at frame 1")
+    busiest, most = None, 0
+    for f in range(10, 100, 5):
+        scene.frame_set(f)
+        count = len(goo_points(old_mesh))
+        if count > most:
+            busiest, most = f, count
+    check(busiest is not None, "tendrils grow while the edge passes (most at frame %s: %d vertices)" % (busiest, most))
+    if busiest is not None:
+        scene.frame_set(busiest)
+        near = float(np.median(surface_distance(goo_points(old_mesh), old_mesh)))
+        pb = base.armature.pose.bones.get("腕.L") or base.armature.pose.bones.get("左腕")
+        pb.matrix_basis = Matrix.Rotation(math.radians(60.0), 4, "X")
+        bpy.context.view_layer.update()
+        lifted = float(np.median(surface_distance(goo_points(old_mesh), old_mesh)))
+        pb.matrix_basis = Matrix.Identity(4)
+        bpy.context.view_layer.update()
+        check(near < 2.0 * s.venom_thickness and lifted < 2.0 * s.venom_thickness,
+              "the goo lies on the body, also with the arm lifted (median distance %.3f / %.3f, radius %.3f)"
+              % (near, lifted, s.venom_thickness))
+        vein = evaluated_values(old_mesh, ATTR_AHEAD)
+        check(vein is not None and float(vein.max()) > 0.9 and float(vein.min()) == 0.0,
+              "veins marked ahead of the edge at frame %d" % busiest)
+    scene.frame_set(100)
+    check(len(goo_points(old_mesh)) == 0, "every tendril and strand gone at the end")
+    s.layer_enable, s.layer_style = True, "GOO"
+    styles = [m.node_tree.nodes.get(materials.LAYER + " Style") for m in glow]
+    target_mod = our_modifiers(target.meshes[0])[0]
+    goo_input = target_mod[input_identifiers(target_mod.node_group)["Goo"]]
+    check(all(n is not None and n.outputs[0].default_value == 1.0 for n in styles) and goo_input,
+          "goo undersuit: the layer's goo style and the lumpy edge")
+    check({tuple(chain(m)) for m in veined} == {("MMDD Surface Mix",)},
+          "veins spliced into the old outfit (%s)" % {tuple(chain(m)) for m in veined})
+    points = len(skeleton.data.vertices) if skeleton is not None else 0
+    s.venom_tendrils += 60
+    skeleton = venom.skeleton(old_mesh)
+    check(skeleton is not None and len(skeleton.data.vertices) > points,
+          "more tendrils: traced again (%d -> %d points)" % (points, len(skeleton.data.vertices) if skeleton else 0))
+    s.venom_tendrils -= 60
+    check(not draw_panels(bpy.context), "panels draw with the symbiote")
+    s.venom_enable = False
+    scene.frame_set(busiest or 50)
+    check(venom.skeleton(old_mesh) is None and not bpy.data.objects.get(venom.SKELETON)
+          and len(goo_points(old_mesh)) == 0, "symbiote off: skeleton and goo gone")
+    s.layer_enable, s.layer_style = False, "NANO"
+
+    # --- frost: the old outfit freezes ahead of the edge and ice crystals grow out of it, gone where the edge passed;
+    # char: it smoulders instead
+    s.old_surface = "FROST"
+    check(all(m.get(materials.P_SURFACE) == "FROST" for m in veined)
+          and all(m.node_tree.nodes.get(materials.SURFACE + " Ice BSDF") for m in veined)
+          and not any(m.node_tree.nodes.get(materials.SURFACE + " Veins") for m in veined),
+          "frost replaces the veins in the old outfit's materials")
+    crystal_shape = bpy.data.objects.get(particles.CRYSTAL)
+    check(crystal_shape is not None and crystal_shape.data.materials[0].name == materials.ICE_MATERIAL,
+          "ice crystal shape (ice material)")
+    grown = {}
+    for f in (1, busiest or 50, 100):
+        scene.frame_set(f)
+        grown[f] = instance_count(old_mesh)
+    check(grown[1] == 0 and grown[busiest or 50] > 0 and grown[100] == 0,
+          "ice crystals grow ahead of the edge and are gone where it passed (%s)" % grown)
+    s.ice_crystals = 0
+    scene.frame_set(busiest or 50)
+    check(instance_count(old_mesh) == 0, "no crystals with the count at 0")
+    s.ice_crystals = 400
+    s.old_surface = "CHAR"
+    check(all(m.get(materials.P_SURFACE) == "CHAR" and m.node_tree.nodes.get(materials.SURFACE + " Char BSDF")
+              for m in veined), "char replaces the frost")
+    scene.frame_set(busiest or 50)
+    check(instance_count(old_mesh) == 0, "no crystals without frost")
+    s.old_surface = "NONE"
+    check(not any(m.get(materials.P_SURFACE) for m in base_free)
+          and evaluated_values(old_mesh, ATTR_AHEAD) is None, "surface effect off: materials and attribute clean")
+
     # --- pieces: the new outfit flies in, the old one is cast off in chunks
     s.entrance, s.exit_style = "ASSEMBLE", "CHUNKS"
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build fly-in + cast-off")
@@ -648,6 +873,71 @@ def run():
           "fly-in: every piece landed (%d faces)" % grown_faces)
     check(evaluated_faces_and_edge(base.meshes[0])[0] == locked_faces(base.meshes[0]),
           "cast-off: only the shared parts left")
+
+    # --- front and back halves (Kamen Rider Build): printed from the feet up in frames in front of and behind the body,
+    # sliding in and clamping shut, when the old outfit goes
+    s.entrance, s.exit_style = "CLAMP", "SHRINK"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the clamping halves")
+    check(not draw_panels(bpy.context), "panels draw with the clamping halves")
+    closing = effect.CLAMP_AT * float(s.mask[effect.P_WAVE])
+    moments = {}
+    for f in range(1, 101):
+        scene.frame_set(f)
+        progress = sum(s.mask.matrix_world.to_scale()) / 3.0 / closing
+        for name, at in (("printing", 0.15), ("sliding", 0.6), ("closed", 1.12)):
+            if name not in moments and progress >= at:
+                moments[name] = f
+    check(len(moments) == 3, "the halves print, slide and close within the frames (%s)" % moments)
+    new_mesh, old_mesh = target.meshes[0], base.meshes[0]
+    spans = {}
+    for name, f in moments.items():
+        scene.frame_set(f)
+        suit = material_points(new_mesh, effect.WIRE_MATERIAL, others=True)
+        spans[name] = (len(suit), round(float(suit[:, 1].min()), 2) if len(suit) else 0.0,
+                       round(float(suit[:, 1].max()), 2) if len(suit) else 0.0,
+                       len(material_points(new_mesh, effect.WIRE_MATERIAL)), evaluated_counts(old_mesh))
+    scene.frame_set(100)  # long closed: where the halves sit on the body
+    rest_y = material_points(new_mesh, effect.WIRE_MATERIAL, others=True)[:, 1]
+    gap = s.clamp_distance
+    if len(spans) == 3:
+        printing, sliding, closed = spans["printing"], spans["sliding"], spans["closed"]
+        check(0 < printing[0] < sliding[0] and printing[3] > 0, "printing: part of the halves in their frames %s"
+              % (printing,))
+        check(sliding[1] < rest_y.min() - 0.3 * gap and sliding[2] > rest_y.max() + 0.3 * gap and sliding[3] > 0,
+              "sliding: the halves still apart, in front of and behind the body (%s, body %.2f .. %.2f)"
+              % (sliding, rest_y.min(), rest_y.max()))
+        check(abs(closed[1] - rest_y.min()) < 0.02 * gap and abs(closed[2] - rest_y.max()) < 0.02 * gap
+              and closed[3] == 0, "closed: the halves on the body, the frames gone %s" % (closed,))
+        check(printing[4] == len(old_mesh.data.vertices) and sliding[4] == len(old_mesh.data.vertices)
+              and closed[4] < sliding[4], "the old outfit stays until the halves close (%s)"
+              % [spans[k][4] for k in ("printing", "sliding", "closed")])
+
+    # --- converging ghosts (Kamen Rider Decade): see-through copies stand around the body and converge into it; the
+    # outfit is there when they meet, and the old one goes
+    s.entrance, s.holo_enable = "GHOSTS", True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with converging ghosts")
+    check(not draw_panels(bpy.context), "panels draw with the ghosts")
+    closing = effect.CLAMP_AT * float(s.mask[effect.P_WAVE])
+    seen = {}
+    for f in range(1, 101):
+        scene.frame_set(f)
+        progress = sum(s.mask.matrix_world.to_scale()) / 3.0 / closing
+        for name, at in (("apart", 0.3), ("closer", 0.8), ("met", 1.05)):
+            if name not in seen and progress >= at:
+                spots = instance_positions(new_mesh)
+                spread = float(np.linalg.norm(spots - np.array(new_mesh.matrix_world.translation), axis=1).mean()) \
+                    if len(spots) else 0.0
+                seen[name] = (len(spots), round(spread, 2), evaluated_counts(new_mesh), evaluated_counts(old_mesh))
+    check(len(seen) == 3, "the ghosts gather and meet within the frames (%s)" % seen)
+    if len(seen) == 3:
+        apart, closer, met = seen["apart"], seen["closer"], seen["met"]
+        check(apart[0] == s.ghost_count and closer[0] == s.ghost_count and apart[1] > closer[1] > 0.0,
+              "%d ghosts drawing in (%s, %s)" % (s.ghost_count, apart, closer))
+        check(apart[2] == 0 and closer[2] == 0 and met[0] == 0 and met[2] > 0,
+              "the outfit itself only once they met, the ghosts gone then (%s)" % (met,))
+        check(apart[3] == closer[3] == len(old_mesh.data.vertices) and met[3] < closer[3],
+              "the old outfit goes when they meet (%s)" % [seen[k][3] for k in ("apart", "closer", "met")])
+    s.holo_enable = False
     s.entrance, s.exit_style = "GROW", "SHRINK"
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
@@ -803,6 +1093,43 @@ def run():
     check(len(stars[True]) > 0 and np.percentile(lag, 90) > per_frame and lag.min() > -0.01 * height,
           "finale stars stay where they burst out: %d stars, 10%% trail by over %.2f, none ahead (%.3f), frame %s"
           % (len(stars[True]), np.percentile(lag, 90), lag.min(), finale_frame))
+    # A turning model: in the air (no spin) a piece keeps the orientation it took off with in the world; riding along
+    # with the body it turns with the model, by as much as the model turned since the piece took off.
+    saved_spin, s.frag_spin = s.frag_spin, 0.0
+    base_root.animation_data_clear()
+    base_root.location.x = start_x
+    turn_z = base_root.rotation_euler.z
+    base_root.keyframe_insert("rotation_euler", index=2, frame=1)
+    base_root.rotation_euler.z = turn_z + math.radians(90.0)
+    base_root.keyframe_insert("rotation_euler", index=2, frame=100)
+    poses = {}
+    for keep in (False, True):
+        s.leave_behind = keep
+        scene.frame_set(1)  # (the body path is voxelised in the world: build both with the model turned alike)
+        bpy.ops.mmd_disperse.build()
+        scene.frame_set(fly_frame)
+        poses[keep] = world_vertices(target.meshes[0])
+    islands = evaluated_islands(target.meshes[0])
+    (ride, edge), (kept, _edge) = poses[False], poses[True]
+    angles = []
+    if ride.shape == kept.shape and len(islands) == len(ride):
+        for piece in np.unique(islands[edge >= 0.89]):
+            sel = islands == piece
+            if sel.sum() < 3:
+                continue
+            a = ride[sel][:, :2] - ride[sel][:, :2].mean(axis=0)
+            k = kept[sel][:, :2] - kept[sel][:, :2].mean(axis=0)
+            angles.append(math.degrees(math.atan2(float((k[:, 0] * a[:, 1] - k[:, 1] * a[:, 0]).sum()),
+                                                  float((k * a).sum()))))
+    angles = np.array(angles) if angles else np.zeros(1)
+    check(len(angles) > 3 and np.percentile(angles, 90) > 1.0 and angles.max() > 3.0 and angles.min() > -1.0,
+          "in the air the pieces keep their orientation in the world while the model turns: %d pieces, turned by "
+          "%.1f..%.1f degrees against riding along (90%%: %.1f)" % (len(angles), angles.min(), angles.max(),
+                                                                  np.percentile(angles, 90)))
+    s.frag_spin = saved_spin
+    base_root.animation_data_clear()
+    base_root.rotation_euler.z = turn_z
+    s.leave_behind = True
     s.fly_range = s.fly_range * 1.2
     check(not launch.has_launch(target.meshes[0], chunks=True) and launch.has_launch(target.meshes[0]),
           "take-offs dropped when the fly range changes, star births kept")
@@ -832,6 +1159,16 @@ def run():
     # --- presets; the magical girl adds light ribbons, sparkles and the glowing silhouette
     for key, _label, _desc in presets.ITEMS:
         check(bpy.ops.mmd_disperse.apply_preset(preset=key) == {"FINISHED"}, "preset " + key)
+        if key == "VENOM":
+            check(s.venom_enable and s.layer_style == "GOO" and s.old_surface == "VEINS"
+                  and venom.skeleton(base.meshes[0]) is not None, "symbiote preset: tendrils traced, veins, goo")
+        if key in ("CLAMP", "GHOSTS"):
+            check(s.entrance == key and len(white_flash(scene)[1]) == 1, "%s preset: entrance and white flash" % key)
+        if key in ("ICE", "BURN"):
+            mats = set(effect._glow_materials(base.meshes[0], s))
+            check(mats and all(m.get(materials.P_SURFACE) == s.old_surface for m in mats)
+                  and s.particles in ("SHARD", "EMBER"), "%s preset: %s ahead of the edge, %s"
+                  % (key, s.old_surface.lower(), s.particles.lower()))
         if key == "NANO_FINALE":
             check(s.layer_enable and s.inner_glow and s.finale_style == "SWEEP" and white_flash(scene)[0] is not None
                   and len(white_flash(scene)[1]) == 1, "nanotech finale: undersuit, light sweep and the white flash")
@@ -956,6 +1293,8 @@ def run():
     check(not any(bpy.data.objects.get(n) for n in particles.NAMES.values()), "particle shapes removed")
     check(not any(o.name.startswith(ribbons.NAME) for o in bpy.data.objects), "ribbons removed")
     check(not any(o.name.startswith(launch.SPACE) for o in bpy.data.objects), "motion empties removed")
+    check(not any(o.name.startswith(venom.SKELETON) for o in bpy.data.objects)
+          and bpy.data.materials.get(materials.GOO_MATERIAL) is None, "symbiote skeletons and goo removed")
     flash_node, flash_drivers = white_flash(scene)
     check(flash_node is not None and not flash_drivers and white_flash_value(scene) == 0.0,
           "white flash node kept but switched off")

@@ -1,6 +1,6 @@
 import bpy
 
-from . import effect
+from . import beats, effect
 from .model import find_armature
 
 
@@ -143,6 +143,15 @@ class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
             col.prop(s, "frag_spin")
             if s.leave_behind and s.subdivide > 0:
                 layout.label(text="Pieces fly in from fixed points only without Subdivide", icon="INFO")
+        elif s.entrance == "CLAMP":
+            layout.prop(s, "clamp_distance")
+            layout.label(text="The frames use the wire layer's colors", icon="INFO")
+        elif s.entrance == "GHOSTS":
+            col = layout.column(align=True)
+            col.prop(s, "ghost_count")
+            col.prop(s, "ghost_distance")
+            if not s.holo_enable:
+                layout.label(text="Turn on the hologram for see-through ghosts", icon="INFO")
 
 
 class MMDDISPERSE_PT_undersuit(_Panel, bpy.types.Panel):
@@ -159,11 +168,64 @@ class MMDDISPERSE_PT_undersuit(_Panel, bpy.types.Panel):
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
         layout.active = s.layer_enable
+        layout.prop(s, "layer_style")
         col = layout.column(align=True)
         col.prop(s, "layer_width")
+        if s.layer_style == "GOO":
+            layout.label(text="Uses the goo color of the symbiote", icon="INFO")
+            return
         col.prop(s, "layer_color")
         col.prop(s, "layer_lines")
         layout.label(text="The seam glows with the edge glow", icon="INFO")
+
+
+class MMDDISPERSE_PT_venom(_Panel, bpy.types.Panel):
+    bl_label = "Symbiote"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "venom_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.venom_enable
+        col = layout.column(align=True)
+        col.prop(s, "venom_tendrils")
+        col.prop(s, "venom_length")
+        col.prop(s, "venom_thickness")
+        col.prop(s, "venom_speed")
+        layout.prop(s, "venom_strands")
+        layout.prop(s, "venom_color")
+        if not (s.layer_enable and s.layer_style == "GOO"):
+            layout.label(text="Goo coat: Dark Undersuit, Symbiote Goo style", icon="INFO")
+        if s.old_surface != "VEINS":
+            layout.label(text="Black veins: Old Outfit Surface", icon="INFO")
+
+
+class MMDDISPERSE_PT_surface(_Panel, bpy.types.Panel):
+    bl_label = "Old Outfit Surface"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "old_surface")
+        if s.old_surface == "NONE":
+            return
+        col = layout.column(align=True)
+        col.prop(s, "surface_width")
+        col.prop(s, "surface_color")
+        if s.old_surface == "FROST":
+            col = layout.column(align=True)
+            col.prop(s, "ice_crystals")
+            col.prop(s, "crystal_size")
 
 
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
@@ -208,6 +270,17 @@ class MMDDISPERSE_PT_glitch(_Panel, bpy.types.Panel):
         col.prop(s, "glitch_shift")
         layout.prop(s, "glitch_flash")
         layout.operator("mmd_disperse.add_glitch_fx", icon="SEQ_CHROMA_SCOPE")
+        col = layout.column()
+        col.prop(s, "beat_audio")
+        row = col.row(align=True)
+        row.prop(s, "beat_sensitivity")
+        row.operator("mmd_disperse.find_beats", text="", icon="SOUND")
+        found = beats.beat_object()
+        sub = col.column()
+        sub.active = found is not None
+        sub.prop(s, "beat_sync")
+        if found is not None:
+            col.label(text="{} beats".format(found.get(beats.P_BEATS, 0)), icon="CHECKMARK")
 
 
 class MMDDISPERSE_PT_ribbons(_Panel, bpy.types.Panel):
@@ -345,6 +418,8 @@ classes = (
     MMDDISPERSE_PT_wire,
     MMDDISPERSE_PT_entrance,
     MMDDISPERSE_PT_undersuit,
+    MMDDISPERSE_PT_venom,
+    MMDDISPERSE_PT_surface,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_ribbons,

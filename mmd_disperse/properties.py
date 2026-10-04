@@ -131,8 +131,19 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     entrance: EnumProperty(
         name="New Outfit Entrance",
         items=(("GROW", "Grow at the Edge", "The new outfit grows where the edge passes (the tutorial's method)"),
-               ("ASSEMBLE", "Fly In", "The new outfit arrives in pieces that fly in and click into place")),
+               ("ASSEMBLE", "Fly In", "The new outfit arrives in pieces that fly in and click into place"),
+               ("CLAMP", "Front and Back Halves",
+                "The new outfit forms in two halves in glowing frames in front of and behind the body, which slide in "
+                "and clamp shut with a flash; the old outfit goes at that moment (Kamen Rider Build)"),
+               ("GHOSTS", "Converging Ghosts",
+                "Copies of the new outfit stand around the body and converge into it; where they meet the outfit is "
+                "there and the old one goes (Kamen Rider Decade; see-through with the hologram on)")),
         default="GROW", update=_sync)
+    clamp_distance: _distance("Slide Distance", "How far in front of and behind the body the halves form", 5.0,
+                              soft_max=50.0)
+    ghost_count: IntProperty(name="Ghost Count", default=6, min=1, max=32, update=_sync,
+                             description="How many copies of the new outfit converge")
+    ghost_distance: _distance("Ghost Distance", "How far from the body the copies stand", 5.0, soft_max=50.0)
     piece_size: _distance("Piece Size", "Size of the pieces the outfits break into (fly in / cast off)", 1.2)
     fly_distance: _distance("Fly Distance", "How far away the pieces start", 5.0, soft_max=50.0)
     fly_range: _distance("Fly Range",
@@ -149,6 +160,51 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                      default=(0.02, 0.022, 0.026), update=_sync)
     layer_lines: FloatProperty(name="Undersuit Lines", default=1.5, min=0.0, soft_max=20.0, update=_sync,
                                description="Glow of the fine web of lines on the undersuit (glow color; 0 = none)")
+    layer_style: EnumProperty(
+        name="Undersuit Style",
+        items=(("NANO", "Nanotech", "Dark metal with a fine web of glowing lines"),
+               ("GOO", "Symbiote Goo", "Wet black goo (the symbiote's goo color); the edge bulges out in lumps")),
+        default="NANO", update=_sync)
+
+    # --- symbiote (Venom)
+    venom_enable: BoolProperty(name="Symbiote", default=False, update=_sync,
+                               description="Black goo takes the outfit over (Venom): tendrils crawl ahead of the edge "
+                                           "and sticky strands stretch across gaps. They stick to the body while it "
+                                           "dances. Pair it with the undersuit's Symbiote Goo style")
+    venom_tendrils: IntProperty(name="Tendril Count", default=160, min=0, soft_max=600, update=_sync,
+                                description="About how many tendrils grow over the outfit (each may branch)")
+    venom_length: _distance("Tendril Length", "How long a tendril grows", 2.0)
+    venom_thickness: _distance("Tendril Thickness", "Radius of the tendrils (strands are thinner)", 0.06,
+                               soft_max=0.5)
+    venom_speed: FloatProperty(name="Tendril Speed", default=3.0, min=0.5, soft_max=5.0, update=_sync,
+                               description="How many times faster than the edge the tendrils crawl, so they run "
+                                           "ahead of it")
+    venom_strands: IntProperty(name="Strand Count", default=60, min=0, soft_max=400, update=_sync,
+                               description="About how many sticky strands stretch across gaps (armpits, between the "
+                                           "legs, skirt and legs ...); they sag, thin out and snap")
+    venom_color: FloatVectorProperty(name="Goo Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(0.006, 0.006, 0.009), update=_sync,
+                                     description="Color of the tendrils, strands and the goo undersuit")
+
+    # --- the old outfit's surface ahead of the edge
+    old_surface: EnumProperty(
+        name="Surface Ahead",
+        items=(("NONE", "None", "The old outfit stays as it is until the edge reaches it"),
+               ("VEINS", "Black Veins", "Black veins spread under the old outfit, which turns black just before the "
+                                        "edge reaches it (symbiote)"),
+               ("FROST", "Frost", "Frost creeps over the old outfit and freezes it to ice; ice crystals grow out of "
+                                  "it"),
+               ("CHAR", "Char", "The old outfit chars and smoulders, glowing cracks open just before it burns away "
+                                "(uses the glow color)")),
+        default="NONE", update=_sync)
+    surface_width: _distance("Surface Reach", "How far ahead of the edge the old outfit starts to change", 3.0)
+    surface_color: FloatVectorProperty(name="Surface Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                       default=(0.006, 0.006, 0.009), update=_sync,
+                                       description="Color of the veins, the ice or the char")
+    ice_crystals: IntProperty(name="Ice Crystals", default=600, min=0, soft_max=3000, update=_sync,
+                              description="With frost: about how many ice crystals grow out of the old outfit before "
+                                          "the edge shatters it (0 = none; they use the particle color)")
+    crystal_size: _distance("Crystal Size", "How tall the ice crystals grow", 0.6)
 
     # --- hologram ahead of the edge
     holo_enable: BoolProperty(name="Hologram", default=False, update=_sync,
@@ -171,6 +227,14 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     glitch_shift: _distance("Slice Shift", "How far a slice jumps sideways", 0.4)
     glitch_flash: BoolProperty(name="Flashes", default=True, update=_sync,
                                description="Some slices flash in the glow color")
+    beat_sync: BoolProperty(name="Sync to Beat", default=False, update=_sync,
+                            description="The slices reshuffle on every beat of the music and jump, flash and split "
+                                        "most on it (Find Beats first)")
+    beat_audio: StringProperty(name="Music", subtype="FILE_PATH",
+                               description="Music to find the beats in, starting with the scene; leave empty to use "
+                                           "the first sound strip of the Video Sequencer")
+    beat_sensitivity: FloatProperty(name="Sensitivity", default=0.3, min=0.0, max=1.0, subtype="FACTOR",
+                                    description="Higher finds more (weaker) beats")
 
     # --- old outfit
     base_shrink: _distance("Shrink", "Pull the old outfit inwards where the new one has formed", 0.08,
@@ -254,6 +318,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("PETAL", "Petals", "Cherry-blossom petals"),
                ("BUTTERFLY", "Butterflies", "Butterflies flapping their wings"),
                ("STAR", "Sparkles", "Four-pointed glowing stars"),
+               ("CUBE", "Cubes", "Glowing cubes (Tron's derez)"),
+               ("COIN", "Coins", "Spinning metal coins (Ready Player One; gold with a gold particle color)"),
+               ("SHARD", "Ice Shards", "Splinters of ice"),
+               ("EMBER", "Embers", "Small glowing embers (let the wind blow up to make them rise)"),
                ("OBJECT", "Custom Object", "Copies of any mesh object")),
         default="NONE", update=_sync)
     particle_object: PointerProperty(name="Particle Object", type=bpy.types.Object, poll=_mesh_object,

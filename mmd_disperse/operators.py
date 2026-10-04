@@ -1,7 +1,7 @@
 import bpy
 from bpy.props import EnumProperty
 
-from . import compositor, effect, presets
+from . import beats, compositor, effect, presets
 
 
 class MMDDISPERSE_OT_assign(bpy.types.Operator):
@@ -149,12 +149,46 @@ class MMDDISPERSE_OT_glitch_fx(bpy.types.Operator):
 
     def execute(self, context):
         settings = context.scene.mmd_disperse
+        beat = beats.beat_object() if settings.beat_sync else None
         try:
-            compositor.add_glitch(context.scene, settings.frame_start, settings.frame_end, settings.glitch_rate)
+            compositor.add_glitch(context.scene, settings.frame_start, settings.frame_end, settings.glitch_rate,
+                                  beat=beat)
         except RuntimeError as err:
             self.report({"ERROR"}, str(err))
             return {"CANCELLED"}
         self.report({"INFO"}, "Lens Distortion added to the compositor")
+        return {"FINISHED"}
+
+
+class MMDDISPERSE_OT_find_beats(bpy.types.Operator):
+    """Find the beats of the music (the file, or the first sound strip of the Video Sequencer) for the glitch to
+    follow"""
+
+    bl_idname = "mmd_disperse.find_beats"
+    bl_label = "Find Beats"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        settings = context.scene.mmd_disperse
+        scene = context.scene
+        fps = scene.render.fps / scene.render.fps_base
+        try:
+            path, start = beats.music_source(scene, settings.beat_audio)
+            times = beats.find(path, fps, settings.beat_sensitivity)
+        except beats.BeatError as err:
+            self.report({"ERROR"}, str(err))
+            return {"CANCELLED"}
+        if not times:
+            self.report({"WARNING"}, "No beats found; try a higher sensitivity")
+            return {"CANCELLED"}
+        beats.write(scene, times, start, path)
+        settings.beat_sync = True
+        effect.sync(settings)
+        if len(times) > 1:
+            bpm = 60.0 * (len(times) - 1) / max(times[-1] - times[0], 1e-6)
+            self.report({"INFO"}, "Found {} beats (about {:.0f} per minute)".format(len(times), bpm))
+        else:
+            self.report({"INFO"}, "Found 1 beat")
         return {"FINISHED"}
 
 
@@ -187,6 +221,7 @@ classes = (
     MMDDISPERSE_OT_fit,
     MMDDISPERSE_OT_bloom,
     MMDDISPERSE_OT_glitch_fx,
+    MMDDISPERSE_OT_find_beats,
     MMDDISPERSE_OT_white_flash,
     MMDDISPERSE_OT_preset,
 )

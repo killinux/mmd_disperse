@@ -9,8 +9,9 @@ blender -b "Tifa Gantz 18 V2.blend" --factory-startup --python demo/render_hd.py
     --base-root "Tifa Gantz 18 V2" --out test_output/hd --frames 1,100,200
 
 Add --vmd dance.vmd to let the model dance (mmd_tools must be installed), --spin 720 to turn the whole model
-while it transforms (object animation), --white-flash for the finale's compositor flash and --no-base to let the
-new outfit materialise from nothing.
+while it transforms (object animation), --white-flash for the finale's compositor flash, --no-base to let the
+new outfit materialise from nothing and --music song.mp3 to find the beats of the song (starting at frame 1) for the
+glitch to follow (mux the song into the video afterwards).
 """
 
 import argparse
@@ -58,6 +59,8 @@ def parse_args():
     p.add_argument("--res", type=int, default=1920)
     p.add_argument("--samples", type=int, default=64)
     p.add_argument("--orbit", type=float, default=12.0, help="camera orbit half-angle in degrees")
+    p.add_argument("--angle", type=float, default=0.0,
+                   help="camera angle around the model in degrees (0 = from the front, 90 = from its left)")
     p.add_argument("--save", default="")
     p.add_argument("--set", action="append", default=[], help="override a setting, e.g. path=SURFACE")
     p.add_argument("--glitch-fx", action="store_true", help="add the compositor RGB split")
@@ -68,6 +71,7 @@ def parse_args():
     p.add_argument("--preset", default="", help="apply a preset first, e.g. MAGICAL")
     p.add_argument("--no-base", action="store_true",
                    help="the new outfit materialises from nothing (the old model is hidden)")
+    p.add_argument("--music", default="", help="find the beats of this song (from frame 1) for the glitch")
     return p.parse_args(argv)
 
 
@@ -300,7 +304,7 @@ def setup_stage(scene, bounds, args):
     prefs = bpy.context.preferences.edit
     old = prefs.keyframe_new_interpolation_type
     prefs.keyframe_new_interpolation_type = "BEZIER"
-    for frame, angle in ((1, -args.orbit), (args.length, args.orbit)):
+    for frame, angle in ((1, args.angle - args.orbit), (args.length, args.angle + args.orbit)):
         pivot.rotation_euler = (0.0, 0.0, math.radians(angle))
         pivot.keyframe_insert("rotation_euler", index=2, frame=frame)
     prefs.keyframe_new_interpolation_type = old
@@ -337,6 +341,10 @@ def main():
     apply_settings(s, args.set)
     print("BUILD", bpy.ops.mmd_disperse.build())
     apply_settings(s, args.set)
+    if args.music:
+        scene.frame_start = 1
+        s.beat_audio = os.path.abspath(args.music)
+        print("BEATS", bpy.ops.mmd_disperse.find_beats())
 
     setup_stage(scene, rest_bounds(base.meshes), args)
     compositor.add_bloom(scene)
@@ -345,6 +353,7 @@ def main():
     if args.white_flash:
         print("WHITE FLASH", bpy.ops.mmd_disperse.add_white_flash())
 
+    print("FPS", scene.render.fps / scene.render.fps_base)
     frames = [int(f) for f in args.frames.split(",") if f]
     if args.anim:
         a, b = (int(v) for v in args.anim.split(":"))

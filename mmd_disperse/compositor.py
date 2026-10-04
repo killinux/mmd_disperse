@@ -108,21 +108,43 @@ def add_bloom(scene, threshold=0.8, strength=0.6):
     return "COMPOSITOR"
 
 
-def glitch_expression(start, end, rate, amount):
-    """Driver expression: random RGB-split spikes between `start` and `end`, changing `rate` times per frame.
-    Only built-in math on `frame`, so Blender runs it as a simple expression even with Python scripts off."""
-    return ("{a:.4f} * max(0.0, fmod(abs(sin(floor(frame * {r:.4f}) * 12.9898) * 43758.5453), 1.0) - 0.55) / 0.45"
-            " * (frame >= {s}) * (frame <= {e})").format(a=amount, r=rate, s=int(start), e=int(end))
+def glitch_expression(start, end, rate, amount, beat=False):
+    """Driver expression: random RGB-split spikes between `start` and `end`, changing `rate` times per frame, or
+    with `beat` a spike on every beat (the variable `b`, the beat pulse) and only small ones between. Only built-in
+    math on `frame`, so Blender runs it as a simple expression even with Python scripts off."""
+    spikes = "max(0.0, fmod(abs(sin(floor(frame * {r:.4f}) * 12.9898) * 43758.5453), 1.0) - 0.55) / 0.45"
+    if beat:
+        spikes = "max(b, 0.25 * " + spikes + ")"
+    return ("{a:.4f} * " + spikes + " * (frame >= {s}) * (frame <= {e})").format(a=amount, r=rate, s=int(start),
+                                                                              e=int(end))
 
 
-def add_glitch(scene, start, end, rate=0.5, amount=0.06):
-    """Lens Distortion with a flickering dispersion (RGB split) while the transformation runs."""
+def add_glitch(scene, start, end, rate=0.5, amount=0.06, beat=None):
+    """Lens Distortion with a flickering dispersion (RGB split) while the transformation runs; on the beats of the
+    `beat` empty (beats.py) when given."""
     node = _insert_before_output(scene, GLITCH_NAME, "CompositorNodeLensdist")
+    update_glitch(scene, start, end, rate, amount, beat)
+    return node
+
+
+def update_glitch(scene, start, end, rate=0.5, amount=0.06, beat=None):
+    """Drive the RGB split (when the scene has one) for the transformation from `start` to `end`."""
+    tree = _existing_tree(scene)
+    node = tree.nodes.get(GLITCH_NAME) if tree is not None else None
+    if node is None:
+        return None
     socket = node.inputs["Dispersion"]
     socket.driver_remove("default_value")
-    fcurve = socket.driver_add("default_value")
-    fcurve.driver.type = "SCRIPTED"
-    fcurve.driver.expression = glitch_expression(start, end, rate, amount)
+    driver = socket.driver_add("default_value").driver
+    driver.type = "SCRIPTED"
+    if beat is not None:
+        var = driver.variables.new()
+        var.name = "b"
+        var.type = "TRANSFORMS"
+        var.targets[0].id = beat
+        var.targets[0].transform_type = "LOC_X"
+        var.targets[0].transform_space = "WORLD_SPACE"
+    driver.expression = glitch_expression(start, end, rate, amount, beat is not None)
     return node
 
 

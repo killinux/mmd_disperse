@@ -1,13 +1,17 @@
-"""Wire and particle materials, and what we inject into the outfits' own materials: the glowing rim, the hologram,
-the glowing inside (back faces near the cut) and the dark undersuit."""
+"""Wire, particle and goo materials, and what we inject into the outfits' own materials: the glowing rim, the
+hologram, the glowing inside (back faces near the cut), the dark undersuit and the old outfit's surface ahead of the
+edge (black veins, frost, char)."""
 
 import bpy
 
-from .node_groups import ATTR_CUT, ATTR_EDGE, ATTR_HOLO, ATTR_LAYER, ATTR_REST
+from .node_groups import ATTR_AHEAD, ATTR_CUT, ATTR_EDGE, ATTR_HOLO, ATTR_LAYER, ATTR_REST
 
 WIRE_MATERIAL = "MMD Disperse Wire"
 RIBBON_MATERIAL = "MMD Disperse Ribbon"
 PARTICLE_MATERIAL = "MMD Disperse Particle"
+GOO_MATERIAL = "MMD Disperse Goo"
+COIN_MATERIAL = "MMD Disperse Coin"
+ICE_MATERIAL = "MMD Disperse Ice"
 GLOW = "MMDD Edge"  # prefix of every node we add to a user material
 P_GLOW = "mmd_disperse_glow"
 HOLO = "MMDD Holo"
@@ -17,11 +21,14 @@ INNER = "MMDD Inner"
 P_INNER = "mmd_disperse_inner"
 LAYER = "MMDD Layer"
 P_LAYER = "mmd_disperse_layer"
+SURFACE = "MMDD Surface"
+P_SURFACE = "mmd_disperse_surface"  # the style the surface nodes were made for
+SURFACE_STYLES = ("VEINS", "FROST", "CHAR")
 
 # The shader nodes we splice in front of a material output always run in this order, whatever order they are added
-# in: undersuit (replaces the surface) -> inner glow (replaces it on back faces) -> hologram -> edge glow (added on
-# top). (name prefix of the node, its pass-through input), first to last.
-_CHAIN = ((LAYER + " Mix", 1), (INNER + " Mix", 1), (HOLO + " Mix", 1), (GLOW + " Add", 0))
+# in: the surface ahead of the edge and the undersuit (replace the surface) -> inner glow (replaces it on back faces) ->
+# hologram -> edge glow (added on top). (name prefix of the node, its pass-through input), first to last.
+_CHAIN = ((SURFACE + " Mix", 1), (LAYER + " Mix", 1), (INNER + " Mix", 1), (HOLO + " Mix", 1), (GLOW + " Add", 0))
 
 
 def _set_input(node, names, value):
@@ -167,11 +174,59 @@ def ensure_particle_material():
     return mat
 
 
+def ensure_coin_material():
+    """Coins: polished metal in the particle colour (gold by default in the coin preset)."""
+    mat = bpy.data.materials.get(COIN_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(COIN_MATERIAL)
+    if mat.node_tree is None:
+        mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = _new(nt, "ShaderNodeOutputMaterial", "Output", 400, 0)
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", "MMDD_BSDF", 100, 0)
+    _set_input(bsdf, ("Metallic",), 1.0)
+    _set_input(bsdf, ("Roughness",), 0.22)
+    nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
+    return mat
+
+
+def ensure_ice_material():
+    """Ice shards and crystals: clear glossy ice in the particle colour with a faint cold glow."""
+    mat = bpy.data.materials.get(ICE_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(ICE_MATERIAL)
+    if mat.node_tree is None:
+        mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = _new(nt, "ShaderNodeOutputMaterial", "Output", 400, 0)
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", "MMDD_BSDF", 100, 0)
+    _set_input(bsdf, ("Roughness",), 0.04)
+    _set_input(bsdf, ("Coat Weight", "Clearcoat"), 1.0)
+    _set_input(bsdf, ("Specular IOR Level", "Specular"), 1.0)
+    _set_input(bsdf, ("Emission Strength",), 0.25)
+    nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
+    return mat
+
+
 def update_particle_material(settings):
+    color = tuple(settings.particle_color) + (1.0,)
+    for name in (COIN_MATERIAL, ICE_MATERIAL):
+        shiny = bpy.data.materials.get(name)
+        bsdf = shiny.node_tree.nodes.get("MMDD_BSDF") if shiny is not None and shiny.node_tree else None
+        if bsdf is not None:
+            if name == ICE_MATERIAL:  # deep, clear ice with a faint glow (coins do not glow; 3.x's Emission is a colour)
+                _set_input(bsdf, ("Base Color",), tuple(0.35 * c for c in color[:3]) + (1.0,))
+                _set_input(bsdf, ("Emission Color", "Emission"), color)
+            else:
+                _set_input(bsdf, ("Base Color",), color)
+            shiny.diffuse_color = color
     mat = bpy.data.materials.get(PARTICLE_MATERIAL)
     if mat is None or mat.node_tree is None:
         return
-    color = tuple(settings.particle_color) + (1.0,)
     bsdf = mat.node_tree.nodes.get("MMDD_BSDF")
     if bsdf is not None:
         _set_input(bsdf, ("Base Color",), color)
@@ -180,6 +235,65 @@ def update_particle_material(settings):
     if strength is not None:
         strength.outputs[0].default_value = settings.particle_glow
     mat.diffuse_color = color
+
+
+def _goo_shader(nt, prefix, coord, x, y):
+    """Wet black goo: a Principled BSDF (`prefix` + " BSDF") under a clear coat, its roughness smeared by a noise on
+    `coord` with a matching bump, so it is not equally wet everywhere (DNEG's "semi-dry" symbiote). Returns the BSDF;
+    the noise (`prefix` + " Smear") gets its scale from _set_goo()."""
+    smear = _new(nt, "ShaderNodeTexNoise", prefix + " Smear", x - 700, y - 200, noise_dimensions="3D")
+    nt.links.new(coord, smear.inputs["Vector"])
+    smear.inputs["Detail"].default_value = 3.0
+    wet = _new(nt, "ShaderNodeMapRange", prefix + " Wet", x - 500, y - 100)
+    for i, value in ((1, 0.35), (2, 0.65), (3, 0.04), (4, 0.45)):
+        wet.inputs[i].default_value = value
+    nt.links.new(smear.outputs[0], wet.inputs[0])  # "Fac" / "Factor"
+    bump = _new(nt, "ShaderNodeBump", prefix + " Bump", x - 500, y - 400)
+    bump.inputs["Strength"].default_value = 0.35
+    bump.inputs["Distance"].default_value = 0.05
+    nt.links.new(smear.outputs[0], bump.inputs["Height"])
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", prefix + " BSDF", x - 250, y - 200)
+    _set_input(bsdf, ("Metallic",), 0.0)
+    _set_input(bsdf, ("Coat Weight", "Clearcoat"), 1.0)
+    _set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.03)
+    nt.links.new(wet.outputs[0], bsdf.inputs["Roughness"])
+    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    return bsdf
+
+
+def _set_goo(nodes, prefix, color, cell):
+    """Goo colour, and the size of its wet / dry smears (`cell`, in the units of the noise's coordinates)."""
+    bsdf = nodes.get(prefix + " BSDF")
+    if bsdf is not None:
+        _set_input(bsdf, ("Base Color",), tuple(color) + (1.0,))
+    smear = nodes.get(prefix + " Smear")
+    if smear is not None:
+        smear.inputs["Scale"].default_value = 1.0 / max(cell, 1e-6)
+
+
+def ensure_goo_material():
+    """The symbiote's tendrils and strands: wet black goo (smears on the object coordinates)."""
+    mat = bpy.data.materials.get(GOO_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(GOO_MATERIAL)
+    if mat.node_tree is None:
+        mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = _new(nt, "ShaderNodeOutputMaterial", "Output", 400, 0)
+    coord = _new(nt, "ShaderNodeTexCoord", "Coordinates", -1000, -200)
+    bsdf = _goo_shader(nt, "MMDD Goo", coord.outputs["Object"], 200, 0)
+    nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
+    return mat
+
+
+def update_goo_material(color, cell):
+    mat = bpy.data.materials.get(GOO_MATERIAL)
+    if mat is None or mat.node_tree is None:
+        return
+    _set_goo(mat.node_tree.nodes, "MMDD Goo", color, cell)
+    mat.diffuse_color = tuple(color) + (1.0,)
 
 
 def _alpha_source(nt):
@@ -460,7 +574,7 @@ def remove_inner_glow(mat):
 
 def add_layer(mat):
     """Where `disperse_layer` > 0 the surface is a dark, glossy undersuit with a fine web of glowing lines (cells
-    on the rest position, so they stick to the body)."""
+    on the rest position, so they stick to the body), or the symbiote's wet black goo."""
     nt = mat.node_tree
     if nt is None or mat.get(P_LAYER):
         return
@@ -489,19 +603,28 @@ def add_layer(mat):
     _set_input(bsdf, ("Metallic",), 0.8)
     _set_input(bsdf, ("Roughness",), 0.32)
     nt.links.new(glow.outputs[0], bsdf.inputs["Emission Strength"])
+    # The symbiote's style: wet black goo instead (Style 1).
+    goo = _goo_shader(nt, LAYER + " Goo", rest.outputs["Vector"], x - 300, y - 800)
     alpha = _alpha_source(nt)
     if alpha is not None:  # lace and other cut-outs keep their holes
         nt.links.new(alpha, bsdf.inputs["Alpha"])
+        nt.links.new(alpha, goo.inputs["Alpha"])
+    style = _new(nt, "ShaderNodeValue", LAYER + " Style", x - 300, y - 500)
+    pick = _new(nt, "ShaderNodeMixShader", LAYER + " Pick", x - 50, y - 300)
+    nt.links.new(style.outputs[0], pick.inputs[0])
+    nt.links.new(bsdf.outputs[0], pick.inputs[1])
+    nt.links.new(goo.outputs[0], pick.inputs[2])
     for i, out in enumerate(outputs):
         mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (LAYER, i), out.location.x - 180, out.location.y + 450)
         nt.links.new(attr.outputs[2], mix.inputs[0])
-        nt.links.new(bsdf.outputs[0], mix.inputs[2])
+        nt.links.new(pick.outputs[0], mix.inputs[2])
         _splice(nt, out, mix)
     mat[P_LAYER] = 1
 
 
-def update_layer(mat, color, glow_color, lines, cell):
-    """Undersuit colour, colour and brightness of its lines, cell size in object units."""
+def update_layer(mat, color, glow_color, lines, cell, goo=None):
+    """Undersuit colour, colour and brightness of its lines, cell size in object units; `goo` = (colour, smear size)
+    for the symbiote's goo instead."""
     nodes = mat.node_tree.nodes if mat.node_tree else {}
     bsdf = nodes.get(LAYER + " BSDF")
     if bsdf is not None:
@@ -513,6 +636,11 @@ def update_layer(mat, color, glow_color, lines, cell):
     cells = nodes.get(LAYER + " Cells")
     if cells is not None:
         cells.inputs["Scale"].default_value = 1.0 / max(cell, 1e-6)
+    style = nodes.get(LAYER + " Style")
+    if style is not None:
+        style.outputs[0].default_value = 0.0 if goo is None else 1.0
+    if goo is not None:
+        _set_goo(nodes, LAYER + " Goo", *goo)
 
 
 def remove_layer(mat):
@@ -523,3 +651,241 @@ def remove_layer(mat):
     for node in [n for n in nt.nodes if n.name.startswith(LAYER)]:
         nt.nodes.remove(node)
     del mat[P_LAYER]
+
+
+def _veins(nt, near, rest, x, y):
+    """Black veins: two webs of warped cells on the rest position (so they stick to the body) that spread and thicken
+    as the edge comes, until right at the edge all of it has turned to goo. Returns (factor, shader)."""
+    warp = _new(nt, "ShaderNodeTexNoise", SURFACE + " Warp", x - 1700, y - 300, noise_dimensions="3D")
+    nt.links.new(rest, warp.inputs["Vector"])
+    centered = _new(nt, "ShaderNodeVectorMath", SURFACE + " Center", x - 1500, y - 300, operation="SUBTRACT")
+    centered.inputs[1].default_value = (0.5, 0.5, 0.5)
+    nt.links.new(warp.outputs["Color"], centered.inputs[0])
+    amount = _new(nt, "ShaderNodeVectorMath", SURFACE + " Amount", x - 1300, y - 300, operation="SCALE")
+    nt.links.new(centered.outputs[0], amount.inputs[0])
+    coord = _new(nt, "ShaderNodeVectorMath", SURFACE + " Coord", x - 1100, y - 150, operation="ADD")
+    nt.links.new(rest, coord.inputs[0])
+    nt.links.new(amount.outputs[0], coord.inputs[1])
+
+    def web(name, width, top, yy):
+        cells = _new(nt, "ShaderNodeTexVoronoi", SURFACE + " " + name, x - 900, yy, voronoi_dimensions="3D",
+                     feature="DISTANCE_TO_EDGE")
+        nt.links.new(coord.outputs[0], cells.inputs["Vector"])
+        wide = _new(nt, "ShaderNodeMath", SURFACE + " " + name + " Width", x - 900, yy - 250, operation="MULTIPLY")
+        nt.links.new(near, wide.inputs[0])
+        wide.inputs[1].default_value = width  # in cells, right at the edge
+        line = _new(nt, "ShaderNodeMapRange", SURFACE + " " + name + " Line", x - 700, yy)
+        nt.links.new(cells.outputs["Distance"], line.inputs[0])
+        nt.links.new(wide.outputs[0], line.inputs[2])
+        line.inputs[3].default_value = top
+        line.inputs[4].default_value = 0.0
+        return line
+
+    big = web("Cells", 0.14, 1.0, y)
+    fine = web("Fine", 0.08, 0.8, y - 500)
+    veins = _new(nt, "ShaderNodeMath", SURFACE + " Veins", x - 500, y - 200, operation="MAXIMUM")
+    nt.links.new(big.outputs[0], veins.inputs[0])
+    nt.links.new(fine.outputs[0], veins.inputs[1])
+    # Only part of the cell walls are veins (a noise picks them), more of them as the edge comes, so they branch
+    # and join up instead of drawing closed cells.
+    patches = _new(nt, "ShaderNodeTexNoise", SURFACE + " Patches", x - 900, y + 700, noise_dimensions="3D")
+    nt.links.new(rest, patches.inputs["Vector"])
+    patches.inputs["Detail"].default_value = 2.0
+    level = _new(nt, "ShaderNodeMapRange", SURFACE + " Level", x - 900, y + 450)
+    nt.links.new(near, level.inputs[0])
+    level.inputs[3].default_value = 0.6
+    level.inputs[4].default_value = 0.25
+    level_top = _new(nt, "ShaderNodeMath", SURFACE + " Level Top", x - 700, y + 450, operation="ADD")
+    nt.links.new(level.outputs[0], level_top.inputs[0])
+    level_top.inputs[1].default_value = 0.06
+    picked = _new(nt, "ShaderNodeMapRange", SURFACE + " Picked", x - 500, y + 600)
+    nt.links.new(patches.outputs[0], picked.inputs[0])  # "Fac" / "Factor"
+    nt.links.new(level.outputs[0], picked.inputs[1])
+    nt.links.new(level_top.outputs[0], picked.inputs[2])
+    show = _new(nt, "ShaderNodeMapRange", SURFACE + " Show", x - 700, y + 300)
+    nt.links.new(near, show.inputs[0])
+    show.inputs[2].default_value = 0.3
+    grown = _new(nt, "ShaderNodeMath", SURFACE + " Grown", x - 300, y + 400, operation="MULTIPLY")
+    nt.links.new(show.outputs[0], grown.inputs[0])
+    nt.links.new(picked.outputs[0], grown.inputs[1])
+    shown = _new(nt, "ShaderNodeMath", SURFACE + " Shown", x - 300, y - 100, operation="MULTIPLY")
+    nt.links.new(veins.outputs[0], shown.inputs[0])
+    nt.links.new(grown.outputs[0], shown.inputs[1])
+    # The last stretch before the edge turns black all over.
+    dark = _new(nt, "ShaderNodeMath", SURFACE + " Dark", x - 500, y + 300, operation="POWER")
+    nt.links.new(near, dark.inputs[0])
+    dark.inputs[1].default_value = 6.0
+    fac = _new(nt, "ShaderNodeMath", SURFACE + " Fac", x - 100, y + 100, operation="MAXIMUM", use_clamp=True)
+    nt.links.new(shown.outputs[0], fac.inputs[0])
+    nt.links.new(dark.outputs[0], fac.inputs[1])
+    goo = _goo_shader(nt, SURFACE + " Goo", rest, x - 100, y - 900)
+    return fac.outputs[0], goo
+
+
+def _creeping(nt, near, rest, low, high, x, y):
+    """A front that creeps in patches: 0 .. 1 as `near` rises from `low` to `high`, shifted by a noise on the rest
+    position (the noise is SURFACE + " Noise")."""
+    noise = _new(nt, "ShaderNodeTexNoise", SURFACE + " Noise", x - 900, y, noise_dimensions="3D")
+    nt.links.new(rest, noise.inputs["Vector"])
+    noise.inputs["Detail"].default_value = 4.0
+    shifted = _new(nt, "ShaderNodeMath", SURFACE + " Shifted", x - 700, y, operation="MULTIPLY_ADD")
+    nt.links.new(noise.outputs[0], shifted.inputs[0])  # "Fac" / "Factor"
+    shifted.inputs[1].default_value = 0.6
+    shifted.inputs[2].default_value = -0.3
+    front = _new(nt, "ShaderNodeMath", SURFACE + " Front", x - 500, y, operation="ADD")
+    nt.links.new(near, front.inputs[0])
+    nt.links.new(shifted.outputs[0], front.inputs[1])
+    fac = _new(nt, "ShaderNodeMapRange", SURFACE + " Fac", x - 300, y, interpolation_type="SMOOTHSTEP")
+    nt.links.new(front.outputs[0], fac.inputs[0])
+    fac.inputs[1].default_value = low
+    fac.inputs[2].default_value = high
+    return fac.outputs[0]
+
+
+def _frost(nt, near, rest, x, y):
+    """Frost creeps over the surface in patches and freezes it to ice: clear, glossy, deep-coloured ice with white
+    frost grown over it in feathery patches (a fine noise on the rest position), a faint cold glow and a few sparkling
+    facets. Returns (factor, shader)."""
+    fac = _creeping(nt, near, rest, 0.35, 0.7, x, y + 400)
+    feathers = _new(nt, "ShaderNodeTexNoise", SURFACE + " Feathers", x - 900, y + 100, noise_dimensions="3D")
+    nt.links.new(rest, feathers.inputs["Vector"])
+    feathers.inputs["Detail"].default_value = 8.0
+    feathers.inputs["Roughness"].default_value = 0.65
+    white = _new(nt, "ShaderNodeMapRange", SURFACE + " White", x - 700, y + 100, interpolation_type="SMOOTHSTEP")
+    nt.links.new(feathers.outputs[0], white.inputs[0])  # "Fac" / "Factor"
+    white.inputs[1].default_value = 0.47
+    white.inputs[2].default_value = 0.62
+    # deep ice is the colour darkened to a quarter, frost the colour itself (the colour goes into Shade's vector)
+    tint = _new(nt, "ShaderNodeMath", SURFACE + " Tint", x - 500, y + 100, operation="MULTIPLY_ADD")
+    nt.links.new(white.outputs[0], tint.inputs[0])
+    tint.inputs[1].default_value = 0.75
+    tint.inputs[2].default_value = 0.25
+    shade = _new(nt, "ShaderNodeVectorMath", SURFACE + " Shade", x - 300, y + 100, operation="SCALE")
+    nt.links.new(tint.outputs[0], shade.inputs[3])
+    rough = _new(nt, "ShaderNodeMapRange", SURFACE + " Rough", x - 500, y - 100)
+    nt.links.new(white.outputs[0], rough.inputs[0])
+    rough.inputs[3].default_value = 0.03
+    rough.inputs[4].default_value = 0.55
+    # one facet in forty sparkles
+    facets = _new(nt, "ShaderNodeTexVoronoi", SURFACE + " Facets", x - 900, y - 300, voronoi_dimensions="3D",
+                  feature="F1")
+    nt.links.new(rest, facets.inputs["Vector"])
+    lucky = _new(nt, "ShaderNodeSeparateColor" if bpy.app.version >= (3, 3, 0) else "ShaderNodeSeparateRGB",
+                 SURFACE + " Lucky", x - 700, y - 450)
+    nt.links.new(facets.outputs["Color"], lucky.inputs[0])
+    sparkle = _new(nt, "ShaderNodeMath", SURFACE + " Sparkle", x - 500, y - 450, operation="GREATER_THAN")
+    nt.links.new(lucky.outputs[0], sparkle.inputs[0])
+    sparkle.inputs[1].default_value = 0.975
+    glow = _new(nt, "ShaderNodeMath", SURFACE + " Glow", x - 300, y - 450, operation="MULTIPLY_ADD")
+    nt.links.new(sparkle.outputs[0], glow.inputs[0])
+    glow.inputs[1].default_value = 6.0
+    glow.inputs[2].default_value = 0.06
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", SURFACE + " Ice BSDF", x - 100, y - 200)
+    _set_input(bsdf, ("Metallic",), 0.0)
+    _set_input(bsdf, ("Coat Weight", "Clearcoat"), 1.0)
+    _set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.02)
+    _set_input(bsdf, ("Specular IOR Level", "Specular"), 0.9)
+    nt.links.new(shade.outputs[0], bsdf.inputs["Base Color"])
+    nt.links.new(rough.outputs[0], bsdf.inputs["Roughness"])
+    nt.links.new(glow.outputs[0], bsdf.inputs["Emission Strength"])
+    return fac, bsdf
+
+
+def _char(nt, near, rest, x, y):
+    """The surface chars in patches (dark, dull) and right before the edge smoulders: glowing cracks (cell walls on the
+    rest position) in the glow colour, then all of it glows. Returns (factor, shader)."""
+    fac = _creeping(nt, near, rest, 0.2, 0.55, x, y + 400)
+    cracks = _new(nt, "ShaderNodeTexVoronoi", SURFACE + " Cracks", x - 900, y - 200, voronoi_dimensions="3D",
+                  feature="DISTANCE_TO_EDGE")
+    nt.links.new(rest, cracks.inputs["Vector"])
+    line = _new(nt, "ShaderNodeMapRange", SURFACE + " Crack Line", x - 700, y - 200)
+    nt.links.new(cracks.outputs["Distance"], line.inputs[0])
+    line.inputs[2].default_value = 0.07
+    line.inputs[3].default_value = 1.0
+    line.inputs[4].default_value = 0.0
+    hot = _new(nt, "ShaderNodeMapRange", SURFACE + " Hot", x - 700, y - 450, interpolation_type="SMOOTHSTEP")
+    nt.links.new(near, hot.inputs[0])
+    hot.inputs[1].default_value = 0.7
+    embers = _new(nt, "ShaderNodeMath", SURFACE + " Embers", x - 500, y - 300, operation="MULTIPLY")
+    nt.links.new(line.outputs[0], embers.inputs[0])
+    nt.links.new(hot.outputs[0], embers.inputs[1])
+    burning = _new(nt, "ShaderNodeMapRange", SURFACE + " Burning", x - 500, y - 500, interpolation_type="SMOOTHSTEP")
+    nt.links.new(near, burning.inputs[0])
+    burning.inputs[1].default_value = 0.92
+    burning.inputs[4].default_value = 0.4
+    heat = _new(nt, "ShaderNodeMath", SURFACE + " Heat", x - 300, y - 400, operation="MAXIMUM")
+    nt.links.new(embers.outputs[0], heat.inputs[0])
+    nt.links.new(burning.outputs[0], heat.inputs[1])
+    glow = _new(nt, "ShaderNodeMath", SURFACE + " Glow", x - 300, y - 600, operation="MULTIPLY")
+    nt.links.new(heat.outputs[0], glow.inputs[0])
+    glow.inputs[1].default_value = 6.0
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", SURFACE + " Char BSDF", x - 100, y - 200)
+    _set_input(bsdf, ("Roughness",), 0.85)
+    _set_input(bsdf, ("Specular IOR Level", "Specular"), 0.2)
+    nt.links.new(glow.outputs[0], bsdf.inputs["Emission Strength"])
+    return fac, bsdf
+
+
+def add_surface(mat, style):
+    """Ahead of the edge (`disperse_ahead`: 0 far ahead .. 1 at the edge, also behind it) the old outfit's surface
+    changes: black veins spread under it (VEINS, the symbiote), frost creeps over it (FROST) or it chars and
+    smoulders (CHAR)."""
+    nt = mat.node_tree
+    if nt is None or mat.get(P_SURFACE) == style:
+        return
+    remove_surface(mat)
+    outputs = _outputs(nt)
+    if not outputs:
+        return
+    x = min(n.location.x for n in outputs) - 250
+    y = min(n.location.y for n in outputs) - 3300
+    attr = _new(nt, "ShaderNodeAttribute", SURFACE + " Attribute", x - 1100, y + 400,
+                attribute_type="GEOMETRY", attribute_name=ATTR_AHEAD)
+    near = attr.outputs[2]  # "Fac" / "Factor"
+    rest = _new(nt, "ShaderNodeAttribute", SURFACE + " Rest", x - 1900, y - 100,
+                attribute_type="GEOMETRY", attribute_name=ATTR_REST).outputs["Vector"]
+    make = {"VEINS": _veins, "FROST": _frost, "CHAR": _char}[style]
+    fac, shader = make(nt, near, rest, x, y)
+    alpha = _alpha_source(nt)
+    if alpha is not None:  # cut-outs stay see-through
+        nt.links.new(alpha, shader.inputs["Alpha"])
+    for i, out in enumerate(outputs):
+        mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (SURFACE, i), out.location.x - 180, out.location.y + 600)
+        nt.links.new(fac, mix.inputs[0])
+        nt.links.new(shader.outputs[0], mix.inputs[2])
+        _splice(nt, out, mix)
+    mat[P_SURFACE] = style
+
+
+def update_surface(mat, color, glow_color, cell):
+    """Colour of the veins / ice / char, the glow colour of the smouldering char, and the cell size (object units)."""
+    nodes = mat.node_tree.nodes if mat.node_tree else {}
+    for name, scale in ((" Cells", 1.0), (" Fine", 2.6), (" Warp", 0.8), (" Patches", 0.7), (" Noise", 0.5),
+                        (" Facets", 2.0), (" Feathers", 1.2), (" Cracks", 1.5)):
+        node = nodes.get(SURFACE + name)
+        if node is not None:
+            node.inputs["Scale"].default_value = scale / max(cell, 1e-6)
+    amount = nodes.get(SURFACE + " Amount")
+    if amount is not None:
+        amount.inputs[3].default_value = 0.6 * cell
+    _set_goo(nodes, SURFACE + " Goo", color, cell * 0.5)
+    ice = nodes.get(SURFACE + " Ice BSDF")
+    if ice is not None:
+        _set_input(ice, ("Emission Color", "Emission"), tuple(color) + (1.0,))
+    shade = nodes.get(SURFACE + " Shade")
+    if shade is not None:  # (a vector: the Base Color socket takes it as RGB)
+        shade.inputs[0].default_value = tuple(color)
+    char = nodes.get(SURFACE + " Char BSDF")
+    if char is not None:
+        _set_input(char, ("Base Color",), tuple(color) + (1.0,))
+        _set_input(char, ("Emission Color", "Emission"), tuple(glow_color) + (1.0,))
+
+
+def remove_surface(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_SURFACE):
+        return
+    _unsplice(nt, SURFACE + " Mix")
+    for node in [n for n in nt.nodes if n.name.startswith(SURFACE)]:
+        nt.nodes.remove(node)
+    del mat[P_SURFACE]

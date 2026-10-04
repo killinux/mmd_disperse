@@ -7,7 +7,7 @@ import time
 import bpy
 from mathutils import Matrix, Vector
 
-from . import arrival, compositor, launch, materials, particles, ribbons
+from . import arrival, beats, compositor, launch, materials, particles, ribbons, venom
 from . import model as mdl
 from .node_groups import BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups, input_identifiers
 
@@ -61,9 +61,21 @@ SIZE_RATIOS = {
     "finale_width": 0.04,
     "layer_width": 0.12,
     "inner_depth": 0.1,
+    "venom_length": 0.16,
+    "venom_thickness": 0.0028,
+    "surface_width": 0.12,
+    "crystal_size": 0.03,
+    "clamp_distance": 0.22,
+    "ghost_distance": 0.25,
 }
 HOLO_LINE_SPACING = 0.006  # scan line spacing of the hologram, fraction of the model height
 LAYER_CELL = 0.012  # cell size of the line web on the undersuit, fraction of the model height
+GOO_CELL = 0.02  # size of the goo's wet and dry smears, fraction of the model height
+SURFACE_CELL = 0.03  # cell size of the veins, frost and char ahead of the edge, fraction of the model height
+STRAND_LIFE = 2.0  # how far the edge moves on before a strand is gone, in tendril lengths
+ABSORB = 0.6  # how far behind the edge the goo swallows a tendril, in tendril lengths
+CLAMP_AT = 0.8  # share of the wave at which the halves of the new outfit clamp shut, or the ghosts meet
+AT_ONCE = ("CLAMP", "GHOSTS")  # entrances where all of the new outfit arrives at that moment (the old one goes then)
 NOISE_CELLS_PER_HEIGHT = 6.0
 
 
@@ -156,6 +168,14 @@ def _layer(settings):
     return settings.layer_width if settings.layer_enable else 0.0
 
 
+def _finale_start(settings, wave):
+    """Mask radius at which the new outfit is complete and the finale starts: when the halves clamp shut, or once the
+    wave has passed and the final look (behind the undersuit) is complete."""
+    if settings.entrance in AT_ONCE:
+        return CLAMP_AT * wave
+    return wave + _layer(settings)
+
+
 def _extra(settings, wave, has_base, has_target):
     """How much further the mask grows after the wave has passed (radius `wave`) so everything finishes: flakes and
     particles (their flight is a share of the wave), the undersuit turning into the final look and then the finale."""
@@ -167,6 +187,8 @@ def _extra(settings, wave, has_base, has_target):
             extra = max(extra, settings.particle_life * wave)
     if has_target:
         extra = max(extra, _layer(settings) + (settings.finale_length * wave if settings.finale else 0.0))
+    if settings.venom_enable:  # the last strands snap
+        extra = max(extra, STRAND_LIFE * settings.venom_length)
     return extra
 
 
@@ -303,6 +325,7 @@ def _cleanup_mesh(ob):
                 materials.remove_hologram(slot.material)
                 materials.remove_inner_glow(slot.material)
                 materials.remove_layer(slot.material)
+                materials.remove_surface(slot.material)
     saved = ob.get(P_ARM)
     if saved:
         for mod_name, arm_name in saved.to_dict().items():
@@ -315,6 +338,7 @@ def _cleanup_mesh(ob):
         mdl.remove_lock_attribute(ob)
         arrival.remove(ob)
         launch.remove(ob)
+        venom.remove(ob)
     for key in (P_MASK, P_ROLE, P_REST, P_ARM):
         if key in ob:
             del ob[key]
@@ -356,6 +380,9 @@ def remove_effect(mask):
         bpy.data.actions.remove(action)
     if not any(ob.type == "EMPTY" and ob.name.startswith(MASK_NAME) for ob in bpy.data.objects):
         particles.remove_assets()
+        goo = bpy.data.materials.get(materials.GOO_MATERIAL)
+        if goo is not None and goo.users == 0:
+            bpy.data.materials.remove(goo)
 
 
 # --------------------------------------------------------------------------- settings -> scene
@@ -403,13 +430,52 @@ def _update_inner_glow(ob, settings):
 
 def _update_layer(ob, settings):
     # the cells sit on the rest position, which is in object units
-    cell = LAYER_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob)
+    height = max(settings.size_reference, 1e-3) / _object_scale(ob)
+    goo = (settings.venom_color, GOO_CELL * height) if settings.layer_style == "GOO" else None
     for mat in _glow_materials(ob, settings):
         if settings.layer_enable:
             materials.add_layer(mat)
-            materials.update_layer(mat, settings.layer_color, settings.glow_color, settings.layer_lines, cell)
+            materials.update_layer(mat, settings.layer_color, settings.glow_color, settings.layer_lines,
+                                   LAYER_CELL * height, goo)
         else:
             materials.remove_layer(mat)
+
+
+def _update_surface(ob, settings):
+    cell = SURFACE_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob)
+    for mat in _glow_materials(ob, settings):
+        if settings.old_surface != "NONE":
+            materials.add_surface(mat, settings.old_surface)
+            materials.update_surface(mat, settings.surface_color, settings.glow_color, cell)
+        else:
+            materials.remove_surface(mat)
+
+
+def _venom_owners(objects):
+    """The meshes the symbiote's tendrils run over: the old outfit's, or the new one's when there is no old one."""
+    meshes = [ob for ob in objects if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
+    role = "BASE" if any(ob.get(P_ROLE) == "BASE" for ob in meshes) else "TARGET"
+    return [ob for ob in meshes if ob.get(P_ROLE) == role]
+
+
+def _update_venom(settings, mask, objects):
+    """Trace the tendrils and strands when the symbiote is on (again when what they depend on or the mesh changed),
+    drop them when it is off. Returns the goo material (None when off)."""
+    owners = _venom_owners(objects) if settings.venom_enable else []
+    for ob in objects:
+        if ob.type == "MESH" and ob not in owners and venom.skeleton(ob) is not None:
+            venom.remove(ob)
+    if not owners:
+        return None
+    arrival_path = mask.get(P_PATH, "SPHERE") != "SPHERE"
+    height = max(settings.size_reference, 1e-3)
+    for ob in owners:
+        if not venom.matches(ob, venom.signature(settings, _object_scale(ob))):
+            values = venom.field_values(ob, mask.matrix_world.translation, arrival_path)
+            venom.build(ob, values, settings, height, settings.id_data)
+    goo = materials.ensure_goo_material()
+    materials.update_goo_material(settings.venom_color, GOO_CELL * height)
+    return goo
 
 
 def _update_ribbons(settings, mask):
@@ -459,7 +525,7 @@ def update_white_flash(settings):
     within a frame where the finale starts and is gone about six frames later, however long the finale is."""
     mask = settings.mask
     wave = float(mask.get(P_WAVE, 0.0)) if mask is not None else 0.0
-    start = wave + _layer(settings) if wave > 0.0 else 0.0  # the outfit is complete once its final look is
+    start = _finale_start(settings, wave) if wave > 0.0 else 0.0
     step = _radius_step(mask, start) if mask is not None else 0.0
     if step <= 0.0:  # no keys to measure: a share of the finale instead
         step = 0.05 * settings.finale_length * wave
@@ -477,6 +543,8 @@ def _signatures(settings, role, s):
         stars = (1.0, settings.finale_length, settings.finale_width / s, layer)
     else:
         stars = (0.0, layer)
+    if settings.entrance in AT_ONCE:  # ... or when the halves clamp shut / the ghosts meet
+        stars += (1.0,)
     return stars, (settings.piece_size / s, settings.fly_range / s, float(settings.subdivide))
 
 
@@ -517,11 +585,18 @@ def sync(settings):
     wire = bpy.data.materials.get(WIRE_MATERIAL)
     materials.update_wire_material(wire, settings)
     shape = _particle_object(settings)
+    crystal = None
+    if settings.old_surface == "FROST" and settings.ice_crystals > 0:
+        crystal = particles.ensure_asset("CRYSTAL", settings.id_data)
     sparkle = None
     if settings.finale and settings.finale_sparkles > 0:
         sparkle = particles.ensure_asset("STAR", settings.id_data)
     materials.update_particle_material(settings)
     _update_ribbons(settings, mask)
+    goo = _update_venom(settings, mask, objects)
+    beat = beats.beat_object() if settings.beat_sync else None
+    compositor.update_glitch(settings.id_data, settings.frame_start, settings.frame_end, settings.glitch_rate,
+                             beat=beat)
     common = {
         "Mask": mask,
         "Use Rest Position": settings.space == "REST",
@@ -535,9 +610,16 @@ def sync(settings):
         "Glitch Rate": settings.glitch_rate,
         "Glitch Shift": settings.glitch_shift,
         "Glitch Flash": settings.glitch_flash,
+        "Beat Sync": beat is not None,
+        "Beat Object": beat,
         "Leave Behind": settings.leave_behind,
         "Inner Glow": settings.inner_glow,
         "Inner Depth": settings.inner_depth,
+        "Tendril Radius": settings.venom_thickness,
+        "Tendril Speed": settings.venom_speed,
+        "Tendril Absorb": ABSORB * settings.venom_length,
+        "Strand Life": STRAND_LIFE * settings.venom_length,
+        "Venom Material": goo,
     }
     values = {
         TARGET_GROUP: dict(common, **{
@@ -571,6 +653,11 @@ def sync(settings):
             "Sweep Width": settings.finale_width,
             "Undersuit": settings.layer_enable,
             "Undersuit Width": settings.layer_width,
+            "Goo": settings.layer_enable and settings.layer_style == "GOO",
+            "Clamp": settings.entrance == "CLAMP",
+            "Ghosts": settings.entrance == "GHOSTS",
+            "Ghost Count": settings.ghost_count,
+            "Ghost Distance": settings.ghost_distance,
         }),
         BASE_GROUP: dict(common, **{
             "Shrink": settings.base_shrink,
@@ -592,6 +679,12 @@ def sync(settings):
             "Flap": settings.particles == "BUTTERFLY",
             "Flap Speed": settings.flap_speed,
             "Particle Size": settings.particle_size,
+            "Surface Ahead": settings.old_surface != "NONE",
+            "Surface Reach": settings.surface_width,
+            "Crystals": crystal is not None,
+            "Crystal Object": crystal,
+            "Crystal Size": settings.crystal_size,
+            "Clamp": settings.entrance in AT_ONCE,  # the old outfit goes all at once
         }),
     }
     reach = float(mask.get(P_REACH, 0.0)) or 1e6
@@ -607,7 +700,9 @@ def sync(settings):
         # Node trees work in object space: world distances shrink with the object's scale (densities and
         # frequencies grow), so a scaled model looks the same as an unscaled one.
         s = _object_scale(ob)
-        own = {"Reach": reach}
+        skeleton = venom.skeleton(ob)
+        own = {"Reach": reach, "Venom": skeleton is not None, "Venom Skeleton": skeleton,
+               "Clamp Distance": CLAMP_AT * wave}
         if role in ("BASE", "TARGET") and launch.space(ob) is not None:
             # A recording made with other settings (piece size, the finale's timing ...) does not match any more:
             # those pieces follow the body again until the next build records them.
@@ -622,10 +717,12 @@ def sync(settings):
                 "Particle Flight": settings.particle_life * wave,
                 "Wind": tuple(wind),  # world direction: the node group turns it into object space every frame
                 "Particle Density": density * s * s,
+                "Crystal Density": (settings.ice_crystals / area if area > 0.0 else 0.0) * s * s,
             })
         elif role == "TARGET":
             own.update({
-                "Finale Start": wave + _layer(settings),
+                "Finale Start": _finale_start(settings, wave),
+                "Clamp Offset": settings.clamp_distance,
                 "Finale Length": settings.finale_length * wave,
                 "Sparkle Density": sparkle_density * s * s,
             })
@@ -654,6 +751,7 @@ def sync(settings):
             flakes = settings.exit_style in ("FRAGMENTS", "CHUNKS") and settings.frag_glow
             _update_glow(ob, settings, flakes or flashes or settings.silhouette,
                          settings.frag_glow_strength if flakes or settings.silhouette else settings.edge_glow_strength)
+            _update_surface(ob, settings)
         if role in ("TARGET", "BASE"):
             _update_inner_glow(ob, settings)
 

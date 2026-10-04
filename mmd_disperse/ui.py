@@ -214,9 +214,12 @@ class MMDDISPERSE_PT_finale(_Panel, bpy.types.Panel):
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
         layout.active = s.finale
+        layout.prop(s, "finale_style")
         col = layout.column(align=True)
         col.prop(s, "finale_length")
         col.prop(s, "finale_glow")
+        if s.finale_style == "SWEEP":
+            col.prop(s, "finale_width")
         col = layout.column(align=True)
         col.prop(s, "finale_sparkles")
         col.prop(s, "finale_distance")
@@ -224,6 +227,9 @@ class MMDDISPERSE_PT_finale(_Panel, bpy.types.Panel):
         col = layout.column()
         col.prop(s, "particle_color")
         col.prop(s, "particle_glow")
+        col = layout.column()
+        col.prop(s, "finale_white")
+        col.operator("mmd_disperse.add_white_flash", icon="NODE_COMPOSITING")
 
 
 class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
@@ -258,11 +264,12 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
             col.prop(s, "frag_wind_dir")
             col.prop(s, "frag_turbulence")
             col.prop(s, "frag_spin")
-        if s.exit_style == "FRAGMENTS" or s.particles != "NONE":
+        if s.exit_style != "SHRINK" or s.particles != "NONE":
             col = layout.column()
             col.prop(s, "leave_behind")
+            chunks = s.exit_style == "CHUNKS"
             if s.leave_behind and s.mask is not None and not any(
-                    launch.has_launch(ob) for ob in effect.effect_objects(s.mask)):
+                    launch.has_launch(ob, chunks) for ob in effect.effect_objects(s.mask)):
                 col.label(text="Rebuild to record the motion", icon="INFO")
         col = layout.column(align=True)
         if s.exit_style != "SHRINK":

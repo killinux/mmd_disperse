@@ -60,7 +60,9 @@ def snapshot(models):
 
 
 class FakeLayout:
-    """Stands in for UILayout so panel draw() code runs headless; validates names it is given."""
+    """Stands in for UILayout so panel draw() code runs headless; validates names (and icons) it is given."""
+
+    ICONS = set(bpy.types.UILayout.bl_rna.functions["label"].parameters["icon"].enum_items.keys())
 
     def __init__(self):
         self.errors = []
@@ -72,13 +74,18 @@ class FakeLayout:
 
     row = column = box = _child
 
+    def _icon(self, kw):
+        if kw.get("icon", "NONE") not in self.ICONS:
+            self.errors.append("icon " + kw["icon"])
+
     def separator(self, **_kw):
         pass
 
-    def label(self, **_kw):
-        pass
+    def label(self, **kw):
+        self._icon(kw)
 
-    def prop(self, data, name, **_kw):
+    def prop(self, data, name, **kw):
+        self._icon(kw)
         if name not in data.bl_rna.properties:
             self.errors.append("prop " + name)
 
@@ -87,10 +94,11 @@ class FakeLayout:
         if search_name not in search_data.bl_rna.properties:
             self.errors.append("search " + search_name)
 
-    def operator_menu_enum(self, idname, prop, **_kw):
-        self.operator(idname)
+    def operator_menu_enum(self, idname, prop, **kw):
+        self.operator(idname, **kw)
 
-    def operator(self, idname, **_kw):
+    def operator(self, idname, **kw):
+        self._icon(kw)
         module, name = idname.split(".")
         try:
             getattr(getattr(bpy.ops, module), name).get_rna_type()
@@ -167,6 +175,86 @@ def flake_positions(ob):
         return co.reshape(-1, 3), glow > 0.0
     finally:
         ev.to_mesh_clear()
+
+
+def world_flakes(ob):
+    """flake_positions() in world space."""
+    co, glow = flake_positions(ob)
+    mw = np.array(ob.matrix_world, dtype=np.float64)
+    return co @ mw[:3, :3].T + mw[:3, 3], glow
+
+
+def busiest_frame(ob, frames):
+    """The frame of `frames` with the most flakes in the air."""
+    counts = []
+    for f in frames:
+        bpy.context.scene.frame_set(f)
+        counts.append(int(flake_positions(ob)[1].sum()))
+    return frames[int(np.argmax(counts))]
+
+
+def evaluated_islands(ob):
+    """Per vertex of the evaluated mesh: the lowest vertex index of its connected piece (a chunk once cast off)."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = ob.evaluated_get(deps)
+    me = ev.to_mesh()
+    try:
+        corner_vertex = np.zeros(len(me.loops), dtype=np.int64)
+        me.loops.foreach_get("vertex_index", corner_vertex)
+        starts = np.zeros(len(me.polygons), dtype=np.int64)
+        me.polygons.foreach_get("loop_start", starts)
+        label = np.arange(len(me.vertices))
+    finally:
+        ev.to_mesh_clear()
+    face_of = np.repeat(np.arange(len(starts)), np.diff(np.append(starts, len(corner_vertex))))
+    while True:
+        lowest = np.minimum.reduceat(label[corner_vertex], starts)
+        new = label.copy()
+        np.minimum.at(new, corner_vertex, lowest[face_of])
+        new = new[new]
+        if (new == label).all():
+            return label
+        label = new
+
+
+def piece_spread(vectors, label):
+    """Per piece: how far its vectors stray from the piece's mean (0 when the piece moved as a whole)."""
+    ids, inv = np.unique(label, return_inverse=True)
+    mean = np.zeros((len(ids), 3))
+    np.add.at(mean, inv, vectors)
+    mean /= np.bincount(inv)[:, None]
+    spread = np.zeros(len(ids))
+    np.maximum.at(spread, inv, np.linalg.norm(vectors - mean[inv], axis=1))
+    return spread
+
+
+def fcurves(ob, path):
+    """F-curves of `ob` animating `path` (Blender 5.0+ keeps them per action slot)."""
+    ad = ob.animation_data
+    action = ad.action if ad is not None else None
+    if action is None:
+        return []
+    curves = getattr(action, "fcurves", None)
+    if curves is None:
+        from bpy_extras import anim_utils
+        bag = anim_utils.action_get_channelbag_for_slot(action, ad.action_slot)
+        curves = bag.fcurves if bag is not None else []
+    return [fc for fc in curves if fc.data_path == path]
+
+
+def white_flash(scene):
+    """(node, its drivers) of the compositor's white flash."""
+    tree = scene.compositing_node_group if hasattr(scene, "compositing_node_group") else scene.node_tree
+    node = tree.nodes.get(compositor.FLASH_NAME) if tree is not None else None
+    drivers = tree.animation_data.drivers if tree is not None and tree.animation_data else []
+    return node, [d for d in drivers if compositor.FLASH_NAME in d.data_path]
+
+
+def white_flash_value(scene):
+    """How far the white flash blends to white at the current frame (as driven)."""
+    node = white_flash(scene)[0]
+    sock = node.inputs["Fac"] if "Fac" in node.inputs else next(s for s in node.inputs if s.identifier == "Factor_Float")
+    return float(sock.default_value)
 
 
 def instance_count(ob):
@@ -250,7 +338,9 @@ def run():
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build finished")
     mask = s.mask
     check(mask is not None and mask.empty_display_type == "SPHERE", "mask empty created")
-    check(abs(target_root.location.x - base_root.location.x) < 1e-6, "new outfit snapped onto the old one")
+    check((target_root.matrix_world.translation - base_root.matrix_world.translation).length < 1e-6
+          and sum(c.name.startswith(effect.FOLLOW) for c in target_root.constraints) == 1,
+          "new outfit snapped onto the old one (and follows it)")
     for ob in target.meshes + base.meshes:
         check(len(our_modifiers(ob)) == 1, "one effect modifier on " + ob.name)
         names = [m.type for m in ob.modifiers]
@@ -496,12 +586,96 @@ def run():
     s.particle_life = s.particle_life + 0.05  # the petals set the tail: the mask keys change
     check(not launch.has_launch(base.meshes[0]), "recording dropped when the timing changes")
     s.particle_life = s.particle_life - 0.05
+    # Chunks break off whole: each is thrown from where the body was at that moment, all of it at once (its
+    # vertices taken at their own moments would shear it along the slide).
+    s.exit_style, s.particles = "CHUNKS", "NONE"
+    shots = {}
+    for keep in (False, True):
+        s.leave_behind = keep
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build cast-off with leave behind = %s" % keep)
+        scene.frame_set(60)
+        shots[keep] = flake_positions(base.meshes[0])
+    check(launch.has_launch(base.meshes[0], chunks=True), "chunk launch positions recorded")
+    check(not draw_panels(bpy.context), "panels draw with chunks left behind")
+    (riding, flying), (left, flying_left) = shots[False], shots[True]
+    same = riding.shape == left.shape and bool((flying == flying_left).all()) and bool(flying.any())
+    along, spread = np.zeros(1), np.full(1, np.inf)
+    if same:
+        lag = riding[flying] - left[flying]
+        along = lag @ direction
+        spread = piece_spread(lag, evaluated_islands(base.meshes[0])[flying])
+    check(same and np.percentile(along, 90) > per_frame and along.min() > -0.01 * height,
+          "chunks left behind: 10%% trail by over %.2f, none ahead (%.3f)" % (np.percentile(along, 90), along.min()))
+    check(float(np.median(spread)) < 0.002 * height, "each chunk left behind in one piece (median spread %.4f, "
+          "%d chunks in the air)" % (float(np.median(spread)), len(spread)))
+    s.piece_size = s.piece_size * 1.2
+    check(not launch.has_launch(base.meshes[0], chunks=True) and launch.has_launch(base.meshes[0]),
+          "chunk recording dropped when the piece size changes, the flakes' kept")
+    s.piece_size = s.piece_size / 1.2
     s.leave_behind, s.exit_style, s.particles = False, "SHRINK", "NONE"
     centre.location = (0.0, 0.0, 0.0)
     if old_action is None:
         arm.animation_data_clear()
     else:
         arm.animation_data.action = old_action
+
+    # --- leave behind while the whole model moves (object animation, not bones): the flakes stay where they
+    # broke off in the world; moving the model afterwards (the same offset on every frame) takes them along
+    s.path, s.exit_style = "SURFACE", "FRAGMENTS"
+    start_x = base_root.location.x
+    base_root.keyframe_insert("location", index=0, frame=1)
+    base_root.location.x = start_x + 0.5 * height
+    base_root.keyframe_insert("location", index=0, frame=100)
+    world = {}
+    for keep in (False, True):
+        s.leave_behind = keep
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the model sliding, leave behind = %s" % keep)
+        if not keep:  # from the hands and feet: on some models the old outfit is done by frame 60
+            busiest = busiest_frame(base.meshes[0], (40, 50, 60, 70, 80))
+        scene.frame_set(busiest)
+        world[keep] = world_flakes(base.meshes[0])
+    (riding, flying), (left, flying_left) = world[False], world[True]
+    same = riding.shape == left.shape and bool((flying == flying_left).all()) and bool(flying.any())
+    lag = (riding[flying] - left[flying])[:, 0] if same else np.zeros(1)
+    per_frame = 0.5 * height / 99.0
+    check(same and np.percentile(lag, 90) > per_frame and lag.min() > -0.01 * height,
+          "flakes left behind in the world while the model slides: 10%% trail by over %.2f (it slides %.2f per "
+          "frame), none ahead (%.3f), frame %d" % (np.percentile(lag, 90), per_frame, lag.min(), busiest))
+    space = launch.space(base.meshes[0])
+    check(space is not None and bool(fcurves(space, "location")), "the model's motion is kept on its motion empty")
+    check((target_root.matrix_world.translation - base_root.matrix_world.translation).length < 1e-4,
+          "the new outfit moves along with the old model")
+    for fc in fcurves(base_root, "location"):
+        for key in fc.keyframe_points:
+            key.co[1] += 3.0
+            key.handle_left[1] += 3.0
+            key.handle_right[1] += 3.0
+        fc.update()
+    scene.frame_set(busiest + 1)
+    scene.frame_set(busiest)
+    moved = world_flakes(base.meshes[0])[0]
+    off = np.full(1, np.inf)
+    if same and moved.shape == left.shape:
+        off = np.abs(moved[flying] - left[flying] - np.array((3.0, 0.0, 0.0)))
+    check(float(off.max()) < 1e-3 * height, "moving the model afterwards carries the flakes along (off by %.5f)"
+          % float(off.max()))
+    s.leave_behind, s.path, s.exit_style = False, "SPHERE", "SHRINK"
+    base_root.animation_data_clear()
+    base_root.location.x = start_x
+    bpy.context.view_layer.update()
+    # The sphere's centre (rest space) moves with the model too: moving the model changes nothing.
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build a sphere on the model")
+    check(any(c.type == "CHILD_OF" and c.target == base_root for c in s.mask.constraints), "mask moves with the model")
+    scene.frame_set(50)
+    here = (evaluated_counts(target.meshes[0]), evaluated_counts(base.meshes[0]))
+    base_root.location.x += 5.0
+    bpy.context.view_layer.update()
+    scene.frame_set(51)
+    scene.frame_set(50)
+    there = (evaluated_counts(target.meshes[0]), evaluated_counts(base.meshes[0]))
+    base_root.location.x -= 5.0
+    bpy.context.view_layer.update()
+    check(here == there, "moving the model keeps the sphere on the body (%s vs %s)" % (here, there))
 
     # --- presets; the magical girl adds light ribbons, sparkles and the glowing silhouette
     for key, _label, _desc in presets.ITEMS:
@@ -553,6 +727,53 @@ def run():
     glow = evaluated_values(target.meshes[0], ATTR_EDGE)
     check(float(glow.max()) == 0.0 and instance_count(target.meshes[0]) == 0, "flash and stars over at the end")
 
+    # --- light sweep: instead, a band of light runs out along the wave's path (from the hands and feet here)
+    # and stars burst where it passes
+    s.finale_style = "SWEEP"
+    check(not draw_panels(bpy.context), "panels draw with the light sweep")
+    moments = {}
+    for f in range(1, 101):
+        scene.frame_set(f)
+        progress = (s.mask.scale[0] - wave) / (s.finale_length * wave)
+        for key_, at in (("early", 0.15), ("late", 0.45)):
+            if key_ not in moments and progress >= at:
+                moments[key_] = f
+    bands = []
+    for key_ in ("early", "late"):
+        if key_ in moments:
+            scene.frame_set(moments[key_])
+            lit = evaluated_values(target.meshes[0], ATTR_EDGE) > 0.5
+            path = evaluated_values(target.meshes[0], ATTR_ARRIVAL)
+            bands.append((round(float(lit.mean()), 3), round(float(np.median(path[lit])), 2) if lit.any() else 0.0,
+                          instance_count(target.meshes[0])))
+    check(len(bands) == 2 and all(0.0 < b_[0] < 0.5 for b_ in bands) and bands[1][1] > 1.3 * bands[0][1],
+          "light sweep: a band moving out along the path (lit share, median path, stars at frames %s: %s)"
+          % (sorted(moments.values()), bands))
+    check(len(bands) == 2 and bands[1][2] > 0, "stars burst where the light passes")
+    scene.frame_set(100)
+    check(float(evaluated_values(target.meshes[0], ATTR_EDGE).max()) == 0.0 and instance_count(target.meshes[0]) == 0,
+          "light sweep and its stars over at the end")
+    s.finale_style = "PULSE"
+
+    # --- white flash: the compositor blends the picture to white as the finale starts, driven by the mask
+    check(bpy.ops.mmd_disperse.add_white_flash() == {"FINISHED"}, "white flash added")
+    check(bpy.ops.mmd_disperse.add_white_flash() == {"FINISHED"}, "white flash idempotent")
+    flash_node, flash_drivers = white_flash(scene)
+    check(flash_node is not None and len(flash_drivers) == 1 and flash_drivers[0].driver.is_valid
+          and flash_drivers[0].driver.is_simple_expression, "one white flash node driven by the mask (simple expression)")
+    # Driven values against the expression evaluated here on the mask radius: a flash where the finale starts.
+    seen = []
+    if flash_frame is not None and before_flash is not None and flash_drivers:
+        functions = {"clamp": lambda v, lo, hi: min(max(v, lo), hi), "pow": pow}
+        for f in list(range(before_flash, flash_frame + 2)) + [100]:
+            scene.frame_set(f)
+            radius_now = sum(s.mask.matrix_world.to_scale()) / 3.0
+            want = eval(flash_drivers[0].driver.expression, dict(functions, r=radius_now))
+            seen.append((round(white_flash_value(scene), 3), round(want, 3)))
+    check(len(seen) > 2 and all(abs(a - b) < 2e-3 for a, b in seen) and seen[0][0] == 0.0 and seen[-1][0] == 0.0
+          and max(a for a, _b in seen) > 0.2, "white flash only around the start of the finale (driven, expected: %s)"
+          % seen)
+
     # --- the tail follows the panel: without the sparkles the mask stops sooner (the flakes and finale fit)
     reach = float(s.mask[effect.P_REACH])
     s.particles = "NONE"
@@ -569,13 +790,20 @@ def run():
     check(not draw_panels(bpy.context), "panels draw with the magical girl preset")
     bpy.ops.mmd_disperse.apply_preset(preset="NANOTECH")
     check(not ribbons.ribbon_objects(s.mask) and s.path == "SPHERE", "back to the nanotech suit")
+    flash_drivers = white_flash(scene)[1]
+    check(len(flash_drivers) == 1 and flash_drivers[0].driver.is_valid
+          and flash_drivers[0].driver.variables[0].targets[0].id == s.mask, "white flash follows the rebuilt mask")
 
-    # --- remove restores everything (attributes, materials, particle shapes)
+    # --- remove restores everything (attributes, materials, particle shapes, motion empties)
     check(bpy.ops.mmd_disperse.remove() == {"FINISHED"}, "remove after the new paths")
     after = snapshot([base, target])
     check(all(before[k] == after[k] for k in before), "models restored after flakes, sweeps and petals")
     check(not any(bpy.data.objects.get(n) for n in particles.NAMES.values()), "particle shapes removed")
     check(not any(o.name.startswith(ribbons.NAME) for o in bpy.data.objects), "ribbons removed")
+    check(not any(o.name.startswith(launch.SPACE) for o in bpy.data.objects), "motion empties removed")
+    flash_node, flash_drivers = white_flash(scene)
+    check(flash_node is not None and not flash_drivers and white_flash_value(scene) == 0.0,
+          "white flash node kept but switched off")
 
     # --- a scaled model transforms the same way: sizes are converted to object space
     s.exit_style, s.particles = "FRAGMENTS", "PETAL"

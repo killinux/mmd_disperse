@@ -210,10 +210,10 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.3：用 Blender 几何节点给 MMD 模型做换装变身。下面十段视频都是插件生成的
+    <p>mmd_disperse 1.4：用 Blender 几何节点给 MMD 模型做换装变身。下面十三段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤。</p>
     <div class="stats">
-      <span><b>10</b> 段演示</span>
+      <span><b>13</b> 段演示</span>
       <span><b>7</b> 个一键预设</span>
       <span><b>120</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
@@ -244,8 +244,8 @@
     <div class="card">
       <ol class="setup">
         <li><b>安装插件。</b>Blender 4.2 及以上：编辑 › 偏好设置 › 获取扩展 › 右上角下拉 › 从磁盘安装，选
-          <code>dist/mmd_disperse-1.3.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
-          <code>mmd_disperse-1.3.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
+          <code>dist/mmd_disperse-1.4.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
+          <code>mmd_disperse-1.4.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
         <li><b>导入两个模型。</b>用 mmd_tools（文件 › 导入 › MikuMikuDance 模型 (.pmd, .pmx)）导入
           旧服装（变身前，视频里是 V2）和新服装（变身后，V1）。位置随意，生成时新服装会自动对齐到旧服装上。</li>
         <li><b>跳舞的话先加载动作。</b>只给旧模型加载：选中旧模型脚下的根物体，文件 › 导入 ›
@@ -286,6 +286,9 @@
       <a href="#magical"><img src="../test_output/posters/magical.jpg" alt="" loading="lazy">魔法少女</a>
       <a href="#dance-magical"><img src="../test_output/posters/dance_magical.jpg" alt="" loading="lazy">跳舞·魔法少女</a>
       <a href="#dance-dust"><img src="../test_output/posters/dance_dust.jpg" alt="" loading="lazy">跳舞·灰飞烟灭</a>
+      <a href="#dance-armor"><img src="../test_output/posters/dance_armor.jpg" alt="" loading="lazy">跳舞·装甲留下</a>
+      <a href="#spin"><img src="../test_output/posters/spin_magical.jpg" alt="" loading="lazy">转圈·魔法少女</a>
+      <a href="#sweep"><img src="../test_output/posters/sweep_flash.jpg" alt="" loading="lazy">光扫 + 闪白</a>
     </div>
 
     <article class="effect card" id="suitup">
@@ -519,6 +522,80 @@
         <p class="cmd">演示参数：<code>--preset DUST --set leave_behind=1 --vmd "回レ！雪月花.vmd"</code></p>
       </div>
     </article>
+
+    <article class="effect card" id="dance-armor">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/dance_armor.jpg">
+          <source src="../test_output/demo_v6/tifa_dance_armor_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.4</span><span class="tag">VMD 舞蹈</span><span class="tag">装甲弹开</span><span class="tag">留在原地</span></div>
+        <h3>边跳舞边变身 · 装甲留在原地</h3>
+        <p class="lead">跳着《回レ！雪月花》换装甲：旧装甲一块块整块弹开，留在她跳过的地方翻滚、落下，不会跟着手臂甩；
+          新装甲一块块飞来装上。每块都在脱落那一刻整块定住，不会被拉变形。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li>给旧模型加载 VMD（「通用准备」第 3 步）。</li>
+          <li><span class="ui">预设</span> 选 <span class="v">装甲换装</span>。</li>
+          <li><span class="ui">旧服装处理</span> › 勾选 <span class="ui">留在原地</span>，点 <span class="ui">生成变身效果</span>：
+            插件把这段动画播一遍，记下每块装甲脱落那一刻整块的位置（测试模型约 8 秒）。</li>
+          <li>改了 <span class="ui">零件大小</span> 以后旧记录对不上，插件会自动丢掉（面板提示重新生成），再点一次生成即可。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset ARMOR --set leave_behind=1 --vmd "回レ！雪月花.vmd"</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="spin">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/spin_magical.jpg">
+          <source src="../test_output/demo_v6/tifa_spin_magical_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.4</span><span class="tag">物体动画</span><span class="tag">转圈</span><span class="tag">留在原地</span><span class="tag">收尾闪光</span></div>
+        <h3>边转圈边变身 · 魔法少女</h3>
+        <p class="lead">整个人转两圈的同时变身：手脚先亮起来，碎成的光尘和星光留在空中，被甩成一圈圈螺旋；
+          转完正好面向镜头，整身闪光、迸出星星。转圈是根物体的旋转关键帧，新服装跟着一起转。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li>选中旧模型脚下的根物体，在第 <span class="v">10</span> 帧给 <span class="ui">旋转 Z</span> 打关键帧，
+            第 <span class="v">120</span> 帧改成 <span class="v">720°</span> 再打一个。</li>
+          <li><span class="ui">预设</span> 选 <span class="v">魔法少女</span>。</li>
+          <li>勾选 <span class="ui">留在原地</span>，点 <span class="ui">生成变身效果</span>：脱落位置按世界坐标记录，
+            另有一个隐藏的空物体记下模型每一帧怎么转。</li>
+          <li>新服装的根物体会自动加一个「复制变换」约束跟着旧模型转；生成以后再把整个模型挪到别处，碎片也会跟着挪。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset MAGICAL --set leave_behind=1 --spin 720 --spin-frames 10:120</code></p>
+      </div>
+    </article>
+
+    <article class="effect card" id="sweep">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/sweep_flash.jpg">
+          <source src="../test_output/demo_v6/tifa_sweep_flash_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="ver">1.4</span><span class="tag">球形扩散</span><span class="tag">收尾光扫</span><span class="tag">全屏闪白</span></div>
+        <h3>纳米战衣 · 光扫 + 闪白</h3>
+        <p class="lead">战衣长好的一刻画面闪白，接着一道青色的光从胸口沿球形扩散的路线扫过全身，光经过的地方迸出星星。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+          <li><span class="ui">预设</span> 选 <span class="v">纳米战衣</span>。</li>
+          <li><span class="ui">收尾闪光</span> 面板标题栏勾上，<span class="ui">闪光方式</span> 选 <span class="v">光扫</span>，
+            <span class="ui">闪光时长</span> <span class="v">0.3</span>（扫得慢一点），<span class="ui">光扫宽度</span> 可以调。</li>
+          <li><span class="ui">粒子颜色</span> 改成浅青 <span class="v">R 0.6 / G 0.9 / B 1.0</span>，<span class="ui">粒子发光</span>
+            <span class="v">3</span>，星星和光带同色。</li>
+          <li>点面板最下面的 <span class="ui">添加闪白</span>（合成器里加一个混合节点，用驱动器跟着遮罩走），
+            <span class="ui">闪白强度</span> 默认 <span class="v">0.8</span>。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset NANOTECH --set finale=1 --set finale_style=SWEEP --set finale_length=0.3 --set particle_color=0.6,0.9,1.0 --set particle_glow=3 --white-flash</code></p>
+      </div>
+    </article>
   </div>
 </section>
 
@@ -545,15 +622,16 @@
       </div>
       <div class="opt card">
         <h3>叠加开关 <b>7</b></h3>
-        <ul><li>线框层（六边形 / 三角网）</li><li>全息先行</li><li>故障风</li><li>光剪影</li><li>光带</li><li>收尾闪光</li><li>留在原地</li></ul>
+        <ul><li>线框层（六边形 / 三角网）</li><li>全息先行</li><li>故障风</li><li>光剪影</li><li>光带</li>
+          <li>收尾闪光（整身闪光 / 光扫）</li><li>留在原地（碎片、装甲、粒子；跳舞或整个人移动、转圈）</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
-        <ul><li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散</li></ul>
+        <ul><li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散、全屏闪白</li></ul>
       </div>
     </div>
-    <p class="sum">路径 × 登场 × 退场 × 粒子 = 4 × 2 × 3 × 5 = <b>120</b> 种基本组合；再叠加 7 个开关，理论上有一万多种
-      （「留在原地」只在碎片飞散或开了粒子时起作用）。</p>
+    <p class="sum">路径 × 登场 × 退场 × 粒子 = 4 × 2 × 3 × 5 = <b>120</b> 种基本组合；再叠加 7 个开关
+      （收尾闪光有两种方式），理论上有两万多种（「留在原地」在碎片飞散、装甲弹开或开了粒子时起作用）。</p>
   </div>
 </section>
 
@@ -583,7 +661,7 @@
 <footer>
   <div class="wrap">
     本页在仓库的 <code>docs/</code> 里，用浏览器直接打开即可。视频和缩略图在 <code>test_output/</code>（渲染结果不进 git），
-    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.3.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
+    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.4.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
   </div>
 </footer>
 

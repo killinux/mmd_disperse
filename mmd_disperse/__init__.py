@@ -8,7 +8,7 @@ bl_info = {
     "name": "MMD Disperse",
     "description": "Geometry Nodes suit-up transformation between two MMD outfits",
     "author": "mmd_disperse",
-    "version": (1, 3, 0),
+    "version": (1, 4, 0),
     "blender": (3, 6, 0),
     "location": "3D Viewport > Sidebar > MMD Disperse",
     "category": "Animation",

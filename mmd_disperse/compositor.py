@@ -1,4 +1,5 @@
-"""Optional compositor effects: bloom so the emissive wires glow, and an RGB split for the glitch.
+"""Optional compositor effects: bloom so the emissive wires glow, an RGB split for the glitch and a white flash
+for the finale.
 
 Legacy EEVEE (before 4.2) has its own bloom; newer EEVEE and Cycles need a compositor Glare node."""
 
@@ -7,6 +8,8 @@ import bpy
 GROUP_NAME = "MMD Disperse Compositing"
 GLARE_NAME = "MMD Disperse Bloom"
 GLITCH_NAME = "MMD Disperse Glitch"
+FLASH_NAME = "MMD Disperse White Flash"
+WHITE = 6.0  # scene-linear level the frame flashes to: far above 1, so it is white after the view transform
 
 
 def _set_socket(node, name, value):
@@ -52,8 +55,23 @@ def _tree_and_output(scene):
     return tree, out
 
 
-def _insert_before_output(scene, name, idname):
-    """Our compositor node `name`, spliced in once between the image and the output."""
+def _existing_tree(scene):
+    if hasattr(scene, "compositing_node_group"):  # Blender 5.0+
+        return scene.compositing_node_group
+    return getattr(scene, "node_tree", None)
+
+
+def _sockets(node):
+    """(image input, image output) of a node we splice in; the Mix node of Blender 5.0+ names them by type."""
+    if node.bl_idname == "ShaderNodeMix":
+        return (next(s for s in node.inputs if s.identifier == "A_Color"),
+                next(s for s in node.outputs if s.identifier == "Result_Color"))
+    return node.inputs["Image"], node.outputs["Image"]
+
+
+def _insert_before_output(scene, name, idname, setup=None):
+    """Our compositor node `name`, spliced in once between the image and the output (`setup(node)` runs on a
+    new node before it is linked)."""
     tree, out = _tree_and_output(scene)
     if out is None or not out.inputs:
         raise RuntimeError("Compositor has no output node")
@@ -71,8 +89,11 @@ def _insert_before_output(scene, name, idname):
         node.name = name
         node.location = (out.location.x - 250, out.location.y - 250 * sum(n.name.startswith("MMD Disperse")
                                                                            for n in tree.nodes))
-        tree.links.new(source, node.inputs["Image"])
-        tree.links.new(node.outputs["Image"], target)
+        if setup is not None:
+            setup(node)
+        image_in, image_out = _sockets(node)
+        tree.links.new(source, image_in)
+        tree.links.new(image_out, target)
     scene.render.use_compositing = True
     return node
 
@@ -102,4 +123,59 @@ def add_glitch(scene, start, end, rate=0.5, amount=0.06):
     fcurve = socket.driver_add("default_value")
     fcurve.driver.type = "SCRIPTED"
     fcurve.driver.expression = glitch_expression(start, end, rate, amount)
+    return node
+
+
+def flash_expression(wave, rise, fall, amount):
+    """Driver expression on the mask radius `r`: the frame flashes white where the finale starts (the radius
+    passes `wave`), up within `rise` and gone after `fall` more radius. It runs on the radius like the finale
+    itself, so it follows retimed mask keys; only built-in math, so Blender runs it as a simple expression even
+    with Python scripts off."""
+    return ("{a:.4f} * clamp((r - {w:.5f}) / {rise:.5f}, 0, 1) * pow(clamp(1 - (r - {w:.5f}) / {fall:.5f}, 0, 1), 2)"
+            .format(a=amount, w=wave, rise=max(rise, 1e-5), fall=max(fall, 1e-5)))
+
+
+def _flash_factor(node):
+    if node.bl_idname == "ShaderNodeMix":
+        return next(s for s in node.inputs if s.identifier == "Factor_Float")
+    return node.inputs["Fac"]
+
+
+def add_white_flash(scene):
+    """Mix node that blends the frame towards white; update_white_flash() drives how far."""
+    def setup(node):
+        if node.bl_idname == "ShaderNodeMix":
+            node.data_type = "RGBA"
+            white = next(s for s in node.inputs if s.identifier == "B_Color")
+        else:
+            white = node.inputs[2]
+        node.blend_type = "MIX"
+        white.default_value = (WHITE, WHITE, WHITE, 1.0)
+        _flash_factor(node).default_value = 0.0
+
+    idname = "CompositorNodeMixRGB" if hasattr(bpy.types, "CompositorNodeMixRGB") else "ShaderNodeMix"
+    return _insert_before_output(scene, FLASH_NAME, idname, setup)
+
+
+def update_white_flash(scene, mask, wave, rise, fall, amount):
+    """Drive the white flash from the radius of `mask` (see flash_expression); without a mask it is switched
+    off. Nothing happens when the scene has no white flash node."""
+    tree = _existing_tree(scene)
+    node = tree.nodes.get(FLASH_NAME) if tree is not None else None
+    if node is None:
+        return None
+    socket = _flash_factor(node)
+    socket.driver_remove("default_value")
+    if mask is None or wave <= 0.0:
+        socket.default_value = 0.0
+        return node
+    driver = socket.driver_add("default_value").driver
+    driver.type = "SCRIPTED"
+    var = driver.variables.new()
+    var.name = "r"
+    var.type = "TRANSFORMS"
+    var.targets[0].id = mask
+    var.targets[0].transform_type = "SCALE_AVG"
+    var.targets[0].transform_space = "WORLD_SPACE"
+    driver.expression = flash_expression(wave, rise, fall, amount)
     return node

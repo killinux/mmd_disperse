@@ -7,7 +7,7 @@ import time
 import bpy
 from mathutils import Matrix, Vector
 
-from . import arrival, launch, materials, particles, ribbons
+from . import arrival, compositor, launch, materials, particles, ribbons
 from . import model as mdl
 from .node_groups import BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups, input_identifiers
 
@@ -58,6 +58,7 @@ SIZE_RATIOS = {
     "ribbon_width": 0.004,
     "ribbon_linger": 0.12,
     "finale_distance": 0.17,
+    "finale_width": 0.04,
 }
 HOLO_LINE_SPACING = 0.006  # scan line spacing of the hologram, fraction of the model height
 NOISE_CELLS_PER_HEIGHT = 6.0
@@ -114,7 +115,7 @@ def _insert_scale_keys(mask, frames_values, interpolation):
         prefs.keyframe_new_interpolation_type = old
 
 
-def _create_mask(settings, location, armature, bone, collection, radius_max, path):
+def _create_mask(settings, location, armature, bone, collection, radius_max, path, root=None):
     mask = bpy.data.objects.new(MASK_NAME, None)
     # The scale is how far the wave has travelled; for the sweeps an arrow shows the direction.
     mask.empty_display_type = "SINGLE_ARROW" if path in ("UP", "DOWN") else "SPHERE"
@@ -129,6 +130,15 @@ def _create_mask(settings, location, armature, bone, collection, radius_max, pat
         con = mask.constraints.new("COPY_LOCATION")
         con.target = armature
         con.subtarget = bone
+    elif root is not None:
+        # The centre stays where it is on the body when the whole model moves or turns (object animation);
+        # the scale is the radius, so it is not inherited.
+        con = mask.constraints.new("CHILD_OF")
+        con.name = FOLLOW
+        con.target = root
+        con.use_scale_x = con.use_scale_y = con.use_scale_z = False
+        loc, rot, _scale = root.matrix_world.decompose()
+        con.inverse_matrix = Matrix.LocRotScale(loc, rot, None).inverted()
     start = settings.frame_start
     end = max(settings.frame_end, start + 1)
     keys = [(start, 0.0), (end, radius_max)]
@@ -300,7 +310,9 @@ def _cleanup_mesh(ob):
 
 
 def _restore_root(root):
-    flat = root.get(P_MATRIX)
+    for con in [c for c in root.constraints if c.name.startswith(FOLLOW)]:
+        root.constraints.remove(con)
+    flat = root.get(P_MATRIX)  # effects built before 1.4 moved the root itself
     if flat is not None:
         flat = list(flat)
         root.matrix_basis = Matrix([flat[0:4], flat[4:8], flat[8:12], flat[12:16]])
@@ -322,6 +334,10 @@ def remove_effect(mask):
         arm = bpy.data.objects.get(arm_name)
         if arm is not None and arm.type == "ARMATURE":
             _uncopy_pose(arm)
+    for scene in bpy.data.scenes:  # the white flash node stays, switched off until the next build drives it
+        settings = getattr(scene, "mmd_disperse", None)
+        if settings is not None and settings.mask == mask:
+            compositor.update_white_flash(scene, None, 0.0, 0.0, 0.0, 0.0)
     ribbons.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
     bpy.data.objects.remove(mask)
@@ -390,6 +406,35 @@ def _particle_object(settings):
     return None
 
 
+def _radius_step(mask, radius):
+    """How much the mask radius changes per frame where it passes `radius` (0 when it never does)."""
+    curves = _scale_curves(mask)
+    keys = curves[0].keyframe_points if curves else []
+    if len(keys) < 2:
+        return 0.0
+    fc = curves[0]
+    frame, last = keys[0].co[0], keys[-1].co[0]
+    before = fc.evaluate(frame)
+    while frame < last:
+        after = fc.evaluate(frame + 0.25)
+        if (before - radius) * (after - radius) <= 0.0 and after != before:
+            return abs(after - before) * 4.0
+        before, frame = after, frame + 0.25
+    return 0.0
+
+
+def update_white_flash(settings):
+    """Drive the compositor's white flash (when the scene has one) from the current effect's finale: it comes up
+    within a frame where the finale starts and is gone about six frames later, however long the finale is."""
+    mask = settings.mask
+    wave = float(mask.get(P_WAVE, 0.0)) if mask is not None else 0.0
+    step = _radius_step(mask, wave) if mask is not None else 0.0
+    if step <= 0.0:  # no keys to measure: a share of the finale instead
+        step = 0.05 * settings.finale_length * wave
+    amount = settings.finale_white if settings.finale else 0.0
+    compositor.update_white_flash(settings.id_data, mask, wave, step, 6.0 * step, amount)
+
+
 def sync(settings):
     """Push the panel values to every modifier and material of the current effect."""
     mask = settings.mask
@@ -397,6 +442,7 @@ def sync(settings):
         return
     objects = effect_objects(mask)
     _retime(settings, mask, objects)
+    update_white_flash(settings)
     wire = bpy.data.materials.get(WIRE_MATERIAL)
     materials.update_wire_material(wire, settings)
     shape = _particle_object(settings)
@@ -447,6 +493,8 @@ def sync(settings):
             "Sparkle Object": sparkle,
             "Sparkle Size": settings.particle_size,
             "Sparkle Distance": settings.finale_distance,
+            "Finale Sweep": settings.finale_style == "SWEEP",
+            "Sweep Width": settings.finale_width,
         }),
         BASE_GROUP: dict(common, **{
             "Shrink": settings.base_shrink,
@@ -486,12 +534,19 @@ def sync(settings):
         s = _object_scale(ob)
         own = {"Reach": reach}
         if role == "BASE":
+            # Chunks recorded with another piece size do not match the chunks any more: they are thrown from
+            # the body again until the next build records them.
+            pieces = settings.piece_size / s
+            if launch.has_launch(ob, chunks=True) and abs(launch.piece_size(ob) - pieces) > 1e-4 * pieces:
+                launch.remove(ob, chunks_only=True)
             own.update({
                 "Flight": settings.frag_life * wave,
                 "Particle Flight": settings.particle_life * wave,
                 "Wind": tuple(ob.matrix_world.inverted_safe().to_3x3() @ wind),
                 "Particle Density": density * s * s,
             })
+            if launch.space(ob) is not None:
+                own["Launch Space"] = launch.space(ob)
         elif role == "TARGET":
             own.update({
                 "Finale Start": wave,
@@ -554,8 +609,11 @@ def build(context, settings):
     copied = 0
     if settings.follow_base and base.armature is not None and target.armature is not None:
         if target.root.type in {"EMPTY", "ARMATURE"} and base.root.type in {"EMPTY", "ARMATURE"}:
-            target.root[P_MATRIX] = [v for row in target.root.matrix_basis for v in row]
-            target.root.matrix_world = base.root.matrix_world.copy()
+            # The new outfit takes the old one's place, also while that moves as a whole (object animation:
+            # an armature modifier follows the bones, not the armature object).
+            con = target.root.constraints.new("COPY_TRANSFORMS")
+            con.name = FOLLOW
+            con.target = base.root
             roots.append(target.root.name)
             context.view_layer.update()  # the meshes' matrix_world now include the snap
         unbound = _bind_to_armature(target.meshes, base.armature)
@@ -602,7 +660,7 @@ def build(context, settings):
     radius = wave * (1.0 + _tail(settings, bool(base), bool(target)))
     root = target.root or base.root
     collection = root.users_collection[0] if root.users_collection else context.scene.collection
-    mask = _create_mask(settings, location, owner.armature, bone, collection, radius, path)
+    mask = _create_mask(settings, location, owner.armature, bone, collection, radius, path, owner.root)
     mask[P_ROOTS] = roots
     mask[P_FOLLOWERS] = followers
     mask[P_PATH] = path
@@ -622,7 +680,7 @@ def build(context, settings):
     mask[P_AREA_NEW] = sum(mdl.free_area(ob) for ob in target.meshes)
     sync(settings)
 
-    # Leave behind: play the transformation once and record where the old outfit breaks off.
+    # Leave behind: play the transformation once and record where the old outfit (and each chunk) breaks off.
     recorded, record_seconds = 0, 0.0
     if settings.leave_behind and base.meshes:
         t0 = time.time()
@@ -631,7 +689,7 @@ def build(context, settings):
         start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
         warmup = scene.frame_start if physics and scene.frame_start < start else None
         recorded = launch.record(context, base.meshes, target.meshes + ribbons.ribbon_objects(mask),
-                                 range(start, end + 1), warmup)
+                                 range(start, end + 1), warmup, chunks=settings.exit_style == "CHUNKS")
         record_seconds = time.time() - t0
     return {
         "mask": mask,

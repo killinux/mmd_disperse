@@ -3,7 +3,7 @@ build-time settings, so an effect that is already built gets rebuilt with them."
 
 _OFF = dict(
     entrance="GROW", exit_style="SHRINK", particles="NONE", wire_enable=False, holo_enable=False,
-    glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True, finale=False,
+    glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True, finale=False, finale_style="PULSE",
 )
 
 PRESETS = (

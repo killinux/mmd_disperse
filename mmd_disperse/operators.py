@@ -152,6 +152,28 @@ class MMDDISPERSE_OT_glitch_fx(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class MMDDISPERSE_OT_white_flash(bpy.types.Operator):
+    """Flash the whole picture white as the finale starts (a Mix node in the compositor, driven by the mask)"""
+
+    bl_idname = "mmd_disperse.add_white_flash"
+    bl_label = "Add White Flash"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        settings = context.scene.mmd_disperse
+        try:
+            compositor.add_white_flash(context.scene)
+        except RuntimeError as err:
+            self.report({"ERROR"}, str(err))
+            return {"CANCELLED"}
+        effect.update_white_flash(settings)
+        if settings.mask is None or not settings.finale:
+            self.report({"WARNING"}, "White flash added; it shows once the effect is built with the finale on")
+        else:
+            self.report({"INFO"}, "White flash added to the compositor")
+        return {"FINISHED"}
+
+
 classes = (
     MMDDISPERSE_OT_assign,
     MMDDISPERSE_OT_build,
@@ -159,5 +181,6 @@ classes = (
     MMDDISPERSE_OT_fit,
     MMDDISPERSE_OT_bloom,
     MMDDISPERSE_OT_glitch_fx,
+    MMDDISPERSE_OT_white_flash,
     MMDDISPERSE_OT_preset,
 )

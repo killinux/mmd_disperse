@@ -185,9 +185,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                       update=_sync)
 
     leave_behind: BoolProperty(name="Leave Behind", default=False, update=_sync,
-                               description="Flakes and particles fly on from where they broke off instead of "
-                                           "moving with the dancing body. Building plays the animation once to "
-                                           "record it: rebuild after changing the motion or the timing")
+                               description="Flakes, chunks and particles fly on from where they broke off instead "
+                                           "of moving with the body (dancing, or the whole model moving or "
+                                           "turning). Building plays the animation once to record it: rebuild "
+                                           "after changing the motion or the timing")
 
     silhouette: BoolProperty(name="Glowing Silhouette", default=False, update=_sync,
                              description="The old outfit lights up just before the edge reaches it, so the body "
@@ -208,12 +209,22 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     finale: BoolProperty(name="Finale Flash", default=False, update=_sync,
                          description="When the new outfit is complete it flashes with light and stars burst out "
                                      "of it (uses the glow color; the stars use the particle color)")
+    finale_style: EnumProperty(
+        name="Flash Style",
+        items=(("PULSE", "Whole Outfit Flash", "All of the new outfit lights up at once and fades"),
+               ("SWEEP", "Light Sweep", "A band of light runs from the start point over the new outfit, along "
+                                        "the transformation's path; stars burst out where it passes")),
+        default="PULSE", update=_sync)
     finale_length: FloatProperty(name="Flash Time", default=0.15, min=0.02, max=1.0, subtype="FACTOR",
                                  update=_sync,
                                  description="How long the flash and the sparkles last, as a share of the "
                                              "transformation")
     finale_glow: FloatProperty(name="Flash Glow", default=2.0, min=0.0, soft_max=20.0, update=_sync,
                                description="Brightness of the flash")
+    finale_width: _distance("Sweep Width", "Half width of the band of light", 0.8, soft_max=5.0)
+    finale_white: FloatProperty(name="White Flash", default=0.8, min=0.0, max=1.0, subtype="FACTOR", update=_sync,
+                                description="How far the whole picture flashes to white as the finale starts "
+                                            "(needs the compositor node: Add White Flash)")
     finale_sparkles: IntProperty(name="Sparkle Count", default=300, min=0, soft_max=3000, update=_sync,
                                  description="About how many stars burst out of the new outfit (0 = none)")
     finale_distance: _distance("Sparkle Distance", "How far the stars fly out", 3.5, soft_max=20.0)

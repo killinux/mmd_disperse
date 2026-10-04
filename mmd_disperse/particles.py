@@ -1,4 +1,4 @@
-"""Petal and butterfly shapes the old outfit can turn into.
+"""Petal, butterfly and star shapes the old outfit can turn into.
 
 They are ordinary mesh objects in a hidden collection, so they can be edited (or swapped for any other
 object with the "Custom Object" option); the node tree only reads their geometry.
@@ -69,7 +69,8 @@ def _star():
     return verts, faces, uvs
 
 
-def _collection(scene):
+def asset_collection(scene):
+    """The hidden collection of the particle shapes (and the motion empties of leave behind)."""
     coll = bpy.data.collections.get(COLLECTION)
     if coll is None:
         coll = bpy.data.collections.new(COLLECTION)
@@ -95,7 +96,7 @@ def ensure_asset(kind, scene):
     me.materials.append(materials.ensure_particle_material())
     me.update()
     ob = bpy.data.objects.new(name, me)
-    _collection(scene).objects.link(ob)
+    asset_collection(scene).objects.link(ob)
     return ob
 
 

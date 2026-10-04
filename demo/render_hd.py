@@ -8,7 +8,8 @@ blender -b "Tifa Gantz 18 V2.blend" --factory-startup --python demo/render_hd.py
     --target-blend "Tifa Gantz 18 V1.blend" --target-root "Tifa Gantz 18 V1" \
     --base-root "Tifa Gantz 18 V2" --out test_output/hd --frames 1,100,200
 
-Add --vmd dance.vmd to let the model dance (mmd_tools must be installed).
+Add --vmd dance.vmd to let the model dance (mmd_tools must be installed), --spin 720 to turn the whole model
+while it transforms (object animation) and --white-flash for the finale's compositor flash.
 """
 
 import argparse
@@ -59,8 +60,26 @@ def parse_args():
     p.add_argument("--save", default="")
     p.add_argument("--set", action="append", default=[], help="override a setting, e.g. path=SURFACE")
     p.add_argument("--glitch-fx", action="store_true", help="add the compositor RGB split")
+    p.add_argument("--white-flash", action="store_true", help="add the compositor white flash of the finale")
+    p.add_argument("--spin", type=float, default=0.0,
+                   help="turn the old model this many degrees about Z during the transformation (object animation)")
+    p.add_argument("--spin-frames", default="", help="first:last frame of the turn (default: the transformation)")
     p.add_argument("--preset", default="", help="apply a preset first, e.g. MAGICAL")
     return p.parse_args(argv)
+
+
+def spin_model(root, start, end, degrees):
+    """Object animation: the old model turns about its vertical axis while it transforms (eased in and out)."""
+    prefs = bpy.context.preferences.edit
+    old = prefs.keyframe_new_interpolation_type
+    prefs.keyframe_new_interpolation_type = "BEZIER"
+    try:
+        z = root.rotation_euler.z
+        for frame, angle in ((start, z), (end, z + math.radians(degrees))):
+            root.rotation_euler.z = angle
+            root.keyframe_insert("rotation_euler", index=2, frame=frame)
+    finally:
+        prefs.keyframe_new_interpolation_type = old
 
 
 # --------------------------------------------------------------------------- HD materials
@@ -301,6 +320,9 @@ def main():
     s = scene.mmd_disperse
     s.base, s.target = base_root, target_root
     s.frame_start, s.frame_end = (int(v) for v in args.wave.split(":"))
+    if args.spin:
+        first, last = (int(v) for v in args.spin_frames.split(":")) if args.spin_frames else (s.frame_start, s.frame_end)
+        spin_model(base_root, first, last, args.spin)
     s.use_lock = True
     s.lock_patterns = TIFA_LOCK
     if args.preset:
@@ -313,6 +335,8 @@ def main():
     compositor.add_bloom(scene)
     if args.glitch_fx:
         compositor.add_glitch(scene, s.frame_start, s.frame_end, s.glitch_rate)
+    if args.white_flash:
+        print("WHITE FLASH", bpy.ops.mmd_disperse.add_white_flash())
 
     frames = [int(f) for f in args.frames.split(",") if f]
     if args.anim:

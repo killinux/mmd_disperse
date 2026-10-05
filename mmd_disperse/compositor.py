@@ -148,13 +148,18 @@ def update_glitch(scene, start, end, rate=0.5, amount=0.06, beat=None):
     return node
 
 
-def flash_expression(wave, rise, fall, amount):
+def flash_expression(wave, rise, fall, amount, strike=None):
     """Driver expression on the mask radius `r`: the frame flashes white where the finale starts (the radius
     passes `wave`), up within `rise` and gone after `fall` more radius. It runs on the radius like the finale
     itself, so it follows retimed mask keys; only built-in math, so Blender runs it as a simple expression even
-    with Python scripts off."""
-    return ("{a:.4f} * clamp((r - {w:.5f}) / {rise:.5f}, 0, 1) * pow(clamp(1 - (r - {w:.5f}) / {fall:.5f}, 0, 1), 2)"
+    with Python scripts off. `strike` = (rise, fall, amount): it also flashes as the mask sets off (lightning strikes
+    the start point), up within that rise and gone after that fall."""
+    text = ("{a:.4f} * clamp((r - {w:.5f}) / {rise:.5f}, 0, 1) * pow(clamp(1 - (r - {w:.5f}) / {fall:.5f}, 0, 1), 2)"
             .format(a=amount, w=wave, rise=max(rise, 1e-5), fall=max(fall, 1e-5)))
+    if strike is not None:
+        text += (" + {a:.4f} * clamp(r / {rise:.6f}, 0, 1) * pow(clamp(1 - r / {fall:.5f}, 0, 1), 2)"
+                 .format(a=strike[2], rise=max(strike[0], 1e-6), fall=max(strike[1], 1e-5)))
+    return text
 
 
 def _flash_factor(node):
@@ -179,7 +184,7 @@ def add_white_flash(scene):
     return _insert_before_output(scene, FLASH_NAME, idname, setup)
 
 
-def update_white_flash(scene, mask, wave, rise, fall, amount):
+def update_white_flash(scene, mask, wave, rise, fall, amount, strike=None):
     """Drive the white flash from the radius of `mask` (see flash_expression); without a mask it is switched
     off. Nothing happens when the scene has no white flash node."""
     tree = _existing_tree(scene)
@@ -199,5 +204,5 @@ def update_white_flash(scene, mask, wave, rise, fall, amount):
     var.targets[0].id = mask
     var.targets[0].transform_type = "SCALE_AVG"
     var.targets[0].transform_space = "WORLD_SPACE"
-    driver.expression = flash_expression(wave, rise, fall, amount)
+    driver.expression = flash_expression(wave, rise, fall, amount, strike)
     return node

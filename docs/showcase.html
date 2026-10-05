@@ -231,13 +231,13 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.8：用 Blender 几何节点给 MMD 模型做换装变身。下面四十四段视频都是插件生成的
+    <p>mmd_disperse 1.9：用 Blender 几何节点给 MMD 模型做换装变身。下面五十段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>44</b> 段演示</span>
-      <span><b>20</b> 组效果</span>
-      <span><b>33</b> 个一键预设</span>
-      <span><b>4032</b> 种基本组合</span>
+      <span><b>50</b> 段演示</span>
+      <span><b>22</b> 组效果</span>
+      <span><b>39</b> 个一键预设</span>
+      <span><b>5184</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
     <div class="links">
@@ -266,8 +266,8 @@
     <div class="card">
       <ol class="setup">
         <li><b>安装插件。</b>安装包在 <a href="https://github.com/killinux/mmd_disperse/releases">GitHub Releases</a> 下载。Blender 4.2 及以上：编辑 › 偏好设置 › 获取扩展 › 右上角下拉 › 从磁盘安装，选
-          <code>dist/mmd_disperse-1.8.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
-          <code>mmd_disperse-1.8.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
+          <code>dist/mmd_disperse-1.9.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
+          <code>mmd_disperse-1.9.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
         <li><b>导入两个模型。</b>用 mmd_tools（文件 › 导入 › MikuMikuDance 模型 (.pmd, .pmx)）导入
           旧服装（变身前，视频里是 V2）和新服装（变身后，V1）。位置随意，生成时新服装会自动对齐到旧服装上。</li>
         <li><b>跳舞的话先加载动作。</b>只给旧模型加载：选中旧模型脚下的根物体，文件 › 导入 ›
@@ -335,13 +335,19 @@
       <a href="#tv-barrier"><img src="../test_output/posters/tv_barrier.jpg" alt="" loading="lazy">电视屏障</a>
       <a href="#sketch"><img src="../test_output/posters/sketch.jpg" alt="" loading="lazy">线稿上色</a>
       <a href="#ink-wash"><img src="../test_output/posters/ink_wash.jpg" alt="" loading="lazy">水墨晕染</a>
+      <a href="#matrix"><img src="../test_output/posters/matrix.jpg" alt="" loading="lazy">数字雨</a>
       <a href="#evolution"><img src="../test_output/posters/evolution.jpg" alt="" loading="lazy">进化闪烁</a>
       <a href="#smoke-puff"><img src="../test_output/posters/smoke_puff.jpg" alt="" loading="lazy">忍术烟雾</a>
       <a href="#shadow-rise"><img src="../test_output/posters/shadow_rise.jpg" alt="" loading="lazy">从影子里升起</a>
+      <a href="#transporter"><img src="../test_output/posters/transporter.jpg" alt="" loading="lazy">传送光柱</a>
       <a href="#bats"><img src="../test_output/posters/bats.jpg" alt="" loading="lazy">蝙蝠群</a>
       <a href="#cards"><img src="../test_output/posters/cards.jpg" alt="" loading="lazy">卡牌风暴</a>
       <a href="#feathers"><img src="../test_output/posters/feathers.jpg" alt="" loading="lazy">天使羽毛</a>
       <a href="#notes"><img src="../test_output/posters/notes.jpg" alt="" loading="lazy">跳舞·音符</a>
+      <a href="#lightning"><img src="../test_output/posters/lightning.jpg" alt="" loading="lazy">雷霆变身</a>
+      <a href="#petrify"><img src="../test_output/posters/petrify.jpg" alt="" loading="lazy">石化崩裂</a>
+      <a href="#midas"><img src="../test_output/posters/midas.jpg" alt="" loading="lazy">点金术</a>
+      <a href="#cocoon"><img src="../test_output/posters/cocoon.jpg" alt="" loading="lazy">破茧而出</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -1188,8 +1194,8 @@
 
     <section class="family card" id="fam-paint">
       <div class="family-head">
-        <h3>线稿与水墨</h3>
-        <p>新服装先「画」出来：一种是漫画的线稿再上水彩，一种是国风的水墨。</p>
+        <h3>线稿、水墨与数字雨</h3>
+        <p>新服装先「画」出来：漫画的线稿再上水彩、国风的水墨，或者 1.9 的黑客帝国数字雨。</p>
         <button type="button" class="together">▶ 一起播放</button>
       </div>
       <div class="variants">
@@ -1232,13 +1238,34 @@
             <p class="cmd">演示参数：<code>--preset INK_WASH</code></p>
           </div>
         </article>
+
+        <article class="effect variant" id="matrix">
+          <figure class="clip">
+            <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/matrix.jpg">
+              <source src="../test_output/demo_v11/tifa_matrix_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">数字雨</span><span class="ver">1.9</span><span class="tag">从上往下扫</span><span class="tag">数字雨</span><span class="tag">碎片飞散</span><span class="tag">代码字符</span></div>
+            <h3>数字雨（新预设）</h3>
+            <p class="lead">黑客帝国：从头往下，旧服装先流满一列列发光的绿色字符，再碎成发光的碎片和往下掉的字符（数字和镜像的片假名，边掉边换字）；新服装在边界处先是一列列往下流的字符，颜色再浮上来。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li><span class="ui">预设</span> 选 <span class="v">数字雨</span>：<span class="ui">路径</span> <span class="v">从上往下扫</span>，<span class="ui">旧服装表面</span> <span class="v">数字雨</span>，<span class="ui">画稿</span> <span class="v">数字雨</span>，<span class="ui">退场方式</span> <span class="v">碎片飞散</span>（发光）+ 粒子 <span class="v">代码字符</span>（<span class="ui">数量</span> 900），风往下吹，绿色发光。</li>
+            <li>字符的颜色用线框层的 <span class="ui">发光颜色</span>；<span class="ui">上色范围</span> 调新服装的颜色多久浮满。</li>
+            <li>每一列的速度不同，最下面的字最亮、发白，上面拖着渐暗的尾巴；字按静止姿态排成列，跳舞时贴着身体。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset MATRIX</code></p>
+          </div>
+        </article>
       </div>
     </section>
 
     <section class="family card" id="fam-noedge">
       <div class="family-head">
         <h3>没有边界的变身</h3>
-        <p>这三种没有一道边界扫过身体，而是整个人一起变：越闪越快的光、一团白烟、倒进影子里再站起来。都按时间轴走，缓动用「线性」。</p>
+        <p>这四种没有一道边界扫过身体，而是整个人一起变：越闪越快的光、一团白烟、倒进影子里再站起来，还有 1.9 的传送光柱。都按时间轴走，缓动用「线性」。</p>
         <button type="button" class="together">▶ 一起播放</button>
       </div>
       <div class="variants">
@@ -1299,6 +1326,26 @@
             <li><span class="ui">灯光方向</span> 决定影子倒向哪边（世界坐标，必须朝下）。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset SHADOW_RISE</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="transporter">
+          <figure class="clip">
+            <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/transporter.jpg">
+              <source src="../test_output/demo_v11/tifa_transporter_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">传送光柱</span><span class="ver">1.9</span><span class="tag">传送光柱</span><span class="tag">边缘发光</span></div>
+            <h3>传送光柱（新预设）</h3>
+            <p class="lead">星际迷航的传送：一道光柱罩住全身，光点在里面上下飘；旧服装一片片闪烁着消失（脸和头发也一起），新服装再一片片闪烁着出现，正要消失和刚出现的面发亮，最后光柱淡出。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li><span class="ui">预设</span> 选 <span class="v">传送光柱</span>：<span class="ui">新服装登场</span> <span class="v">传送光柱</span>，<span class="ui">缓动</span> <span class="v">线性</span>，边缘发光（强度 3），淡蓝色。</li>
+            <li><span class="ui">光柱光点数量</span>、<span class="ui">光柱亮度</span> 在 <span class="ui">新服装登场</span> 面板里调；光柱的颜色用 <span class="ui">发光颜色</span>，光点用 <span class="ui">粒子颜色</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset TRANSPORTER</code></p>
           </div>
         </article>
       </div>
@@ -1392,6 +1439,96 @@
         </article>
       </div>
     </section>
+
+    <article class="effect card" id="lightning">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/lightning.jpg">
+          <source src="../test_output/demo_v11/tifa_lightning_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="mode">落雷 + 电弧</span><span class="ver">1.9</span><span class="tag">沿体表流动</span><span class="tag">电弧闪电</span><span class="tag">开场落雷</span><span class="tag">全屏闪白</span><span class="tag">收尾闪光</span></div>
+        <h3>雷霆变身（新预设）</h3>
+        <p class="lead">沙赞、雷神：一道闪电从头顶劈到胸口，画面跟着闪白；变身从胸口沿体表流开，边界上爬满一闪一闪的电弧，旧服装碎成发光的碎片，新服装完整时整身闪光。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+        <li><span class="ui">预设</span> 选 <span class="v">雷霆变身</span>：沿体表流动（只从起点），<span class="ui">电弧闪电</span> 面板勾上、<span class="ui">开场落雷</span> 也勾上，<span class="ui">退场方式</span> <span class="v">碎片飞散</span>（发光），收尾闪光，蓝白色发光，并自动加上闪白。</li>
+        <li><span class="ui">电弧数量</span>、<span class="ui">电弧长度</span>、<span class="ui">电弧范围</span>、<span class="ui">电弧粗细</span> 调电弧的多少、长短、离边界多远、粗细；颜色用线框层的 <span class="ui">发光颜色</span>，<span class="ui">电弧亮度</span> 调亮度。</li>
+        <li>落雷时的闪白和收尾的闪白用同一个合成器节点，强度都是 <span class="ui">闪白强度</span>。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset LIGHTNING --white-flash</code></p>
+      </div>
+    </article>
+
+    <section class="family card" id="fam-shell">
+      <div class="family-head">
+        <h3>石化、镀金、破茧</h3>
+        <p>和冰封碎裂一样，旧服装先整个变成一层外壳，再一起退场：石像崩成碎石，金像炸成金片和金币，蚕茧裂开飞出蝴蝶。外壳看不透，新服装在它退场的那一刻才出现。</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="petrify">
+          <figure class="clip">
+            <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/petrify.jpg">
+              <source src="../test_output/demo_v11/tifa_petrify_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">石化崩裂</span><span class="ver">1.9</span><span class="tag">从下往上扫</span><span class="tag">石化</span><span class="tag">最后一起退场</span><span class="tag">装甲弹开</span><span class="tag">碎石</span></div>
+            <h3>石化崩裂（新预设）</h3>
+            <p class="lead">美杜莎：灰色的石头从脚往上一片片爬满全身，快到边界时裂开纹路，整个人变成一座带裂纹的石像；然后石像碎成大块和碎石往下掉，新服装站在那里。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li><span class="ui">预设</span> 选 <span class="v">石化崩裂</span>：<span class="ui">路径</span> <span class="v">从下往上扫</span>，<span class="ui">旧服装表面</span> <span class="v">石化</span>，<span class="ui">退场方式</span> <span class="v">装甲弹开</span> + <span class="ui">退场时机</span> <span class="v">最后一起退场</span>，粒子 <span class="v">碎石</span>，风往下吹，不发光。</li>
+            <li><span class="ui">颜色</span> 调石头的颜色，<span class="ui">范围</span> 调石头从边界前方多远开始爬。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset PETRIFY</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="midas">
+          <figure class="clip">
+            <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/midas.jpg">
+              <source src="../test_output/demo_v11/tifa_midas_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">点金术</span><span class="ver">1.9</span><span class="tag">只从手脚</span><span class="tag">镀金</span><span class="tag">最后一起退场</span><span class="tag">碎片飞散</span><span class="tag">金币</span></div>
+            <h3>点金术（新预设）</h3>
+            <p class="lead">金子从手脚一片片漫开，正在漫开的那条边像熔化的金子一样发亮，整个人变成一座抛光的金像；然后金像炸成发光的金片和满天金币，往下落。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li><span class="ui">预设</span> 选 <span class="v">点金术</span>：沿体表流动（只从手脚），<span class="ui">旧服装表面</span> <span class="v">镀金</span>，<span class="ui">退场方式</span> <span class="v">碎片飞散</span>（发光）+ <span class="ui">退场时机</span> <span class="v">最后一起退场</span>，粒子 <span class="v">金币</span>（<span class="ui">数量</span> 900），金色发光。</li>
+            <li><span class="ui">颜色</span> 就是金子的颜色，金币用 <span class="ui">粒子颜色</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset MIDAS</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="cocoon">
+          <figure class="clip">
+            <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/cocoon.jpg">
+              <source src="../test_output/demo_v11/tifa_cocoon_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">破茧而出</span><span class="ver">1.9</span><span class="tag">从下往上扫</span><span class="tag">蚕丝茧</span><span class="tag">缠绕丝线</span><span class="tag">装甲弹开</span><span class="tag">蝴蝶</span></div>
+            <h3>破茧而出（新预设）</h3>
+            <p class="lead">白色的丝从脚往上裹，丝线一圈圈缠住手臂、腿和身体，旧服装鼓成一个白色的蚕茧；然后茧裂开掉落，蝴蝶飞出来，新服装闪光出现。灵感是 Framestore 给 Alienware 做的广告。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li><span class="ui">预设</span> 选 <span class="v">破茧而出</span>：<span class="ui">路径</span> <span class="v">从下往上扫</span>，<span class="ui">旧服装表面</span> <span class="v">蚕丝茧</span>（勾上 <span class="ui">缠绕丝线</span>），<span class="ui">退场方式</span> <span class="v">装甲弹开</span> + <span class="ui">退场时机</span> <span class="v">最后一起退场</span>，粒子 <span class="v">蝴蝶</span>，收尾闪光，并自动加上闪白。</li>
+            <li><span class="ui">茧鼓起高度</span> 调茧鼓起多少，<span class="ui">丝线圈数</span> 调每段身体缠几圈；丝线贴着身体的轮廓缠，跳舞时跟着骨骼走。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset COCOON --white-flash</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
   </div>
 </section>
 
@@ -1406,41 +1543,42 @@
           <li>从左往右扫 / 从右往左扫</li><li>从前往后扫 / 从后往前扫</li><li>螺旋上升</li></ul>
       </div>
       <div class="opt card">
-        <h3>新服装登场 <b>8</b></h3>
+        <h3>新服装登场 <b>9</b></h3>
         <ul><li>边缘生长</li><li>零件飞入</li><li>前后两半夹合</li><li>残影汇聚</li><li>鳞片翻转（旧服装一起翻走）</li>
-          <li>进化闪烁</li><li>烟雾一闪</li><li>从影子里升起</li></ul>
+          <li>进化闪烁</li><li>烟雾一闪</li><li>从影子里升起</li><li>传送光柱</li></ul>
       </div>
       <div class="opt card">
         <h3>旧服装退场 <b>4</b></h3>
         <ul><li>收缩消失</li><li>碎片飞散</li><li>装甲弹开</li><li>吸进胸针</li><li>退场时机：随边缘 / 最后一起退场</li></ul>
       </div>
       <div class="opt card">
-        <h3>粒子 <b>13</b></h3>
+        <h3>粒子 <b>15</b></h3>
         <ul><li>花瓣</li><li>蝴蝶（会扇翅膀）</li><li>星光</li><li>方块</li><li>金币</li><li>冰片</li><li>余烬</li>
-          <li>音符</li><li>扑克牌</li><li>羽毛</li><li>蝙蝠（会扇翅膀）</li><li>墨点</li>
-          <li>自定义物体</li><li>也可以不要</li></ul>
+          <li>音符</li><li>扑克牌</li><li>羽毛</li><li>蝙蝠（会扇翅膀）</li><li>墨点</li><li>代码字符（边掉边换字）</li>
+          <li>碎石</li><li>自定义物体</li><li>也可以不要</li></ul>
       </div>
       <div class="opt card">
-        <h3>旧服装表面 <b>4</b></h3>
-        <ul><li>黑色血管</li><li>结霜（冰晶，冰可以是透明的）</li><li>烧焦</li><li>水墨</li><li>也可以不变</li></ul>
+        <h3>旧服装表面 <b>8</b></h3>
+        <ul><li>黑色血管</li><li>结霜（冰晶，冰可以是透明的）</li><li>烧焦</li><li>水墨</li><li>石化</li><li>镀金</li>
+          <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>也可以不变</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>16</b></h3>
+        <h3>叠加开关 <b>17</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行</li><li>故障风</li><li>光剪影</li><li>光带</li>
           <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
           <li>毒液共生体（触手、蹼、黏丝；黑色黏液或液态金属）</li>
           <li>卡音乐节拍（故障风、线框、边缘、收尾闪光、粒子；关键时刻落在拍点上）</li>
           <li>留在原地（碎片、装甲、粒子、新服装的零件和星星；跳舞或整个人移动、转圈）</li>
-          <li>光环（魔法阵 / 火花圈 / 发光面板 / 雪花屏 / 星光彗星）</li><li>画稿（线稿上色 / 水墨）</li>
-          <li>反应堆起手</li><li>装甲板鼓起</li></ul>
+          <li>光环（魔法阵 / 火花圈 / 发光面板 / 雪花屏 / 星光彗星）</li><li>画稿（线稿上色 / 水墨 / 数字雨）</li>
+          <li>反应堆起手</li><li>装甲板鼓起</li><li>电弧闪电（开场落雷）</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
         <ul><li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散、全屏闪白</li></ul>
       </div>
     </div>
-    <p class="sum">路径 × 登场 × 退场 × 粒子 = 9 × 8 × 4 × 14 = <b>4032</b> 种基本组合，再乘旧服装表面的 5 种就是 20160 种；
-      再叠加 16 个开关（收尾闪光有两种方式，内衬有两种样式，光环有五种样式，画稿有两种），组合多到数不过来
+    <p class="sum">路径 × 登场 × 退场 × 粒子 = 9 × 9 × 4 × 16 = <b>5184</b> 种基本组合，再乘旧服装表面的 9 种就是 46656 种；
+      再叠加 17 个开关（收尾闪光有两种方式，内衬有两种样式，光环有五种样式，画稿有三种），组合多到数不过来
       （「留在原地」在碎片飞散、装甲弹开、开了粒子、零件飞入或收尾星星时起作用；光环要配平面扫描或螺旋上升）。</p>
   </div>
 </section>
@@ -1485,6 +1623,12 @@
           <tr><td>卡牌风暴</td><td>球形扩散</td><td>边缘生长</td><td>碎片飞散</td><td>扑克牌，品红色发光</td></tr>
           <tr><td>天使羽毛</td><td>从上往下扫</td><td>边缘生长</td><td>碎片飞散</td><td>白色羽毛、收尾闪光，暖白色发光</td></tr>
           <tr><td>音符</td><td>沿体表流动（起点 + 手脚）</td><td>边缘生长</td><td>碎片飞散</td><td>发光的音符，青色发光</td></tr>
+          <tr><td>雷霆变身</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>碎片飞散</td><td>电弧闪电 + 开场落雷、收尾闪光、全屏闪白，蓝白色发光</td></tr>
+          <tr><td>数字雨</td><td>从上往下扫</td><td>边缘生长</td><td>碎片飞散</td><td>旧服装表面和画稿：数字雨，代码字符往下掉，绿色发光</td></tr>
+          <tr><td>石化崩裂</td><td>从下往上扫</td><td>（旧服装退场时出现）</td><td>装甲弹开（最后一起退场）</td><td>旧服装表面：石化，碎石往下掉，不发光</td></tr>
+          <tr><td>点金术</td><td>沿体表流动（只从手脚）</td><td>（旧服装退场时出现）</td><td>碎片飞散（最后一起退场）</td><td>旧服装表面：镀金，金币，金色发光</td></tr>
+          <tr><td>传送光柱</td><td>（不看路径）</td><td>传送光柱</td><td>（闪烁着消失）</td><td>线性缓动，光柱和光点，淡蓝色发光</td></tr>
+          <tr><td>破茧而出</td><td>从下往上扫</td><td>（旧服装退场时出现）</td><td>装甲弹开（最后一起退场）</td><td>旧服装表面：蚕丝茧 + 缠绕丝线，蝴蝶，收尾闪光、全屏闪白</td></tr>
           <tr><td>魔法少女</td><td>沿体表流动（只从手脚）</td><td>边缘生长</td><td>碎片飞散</td><td>光剪影、光带、星光、收尾闪光，粉色发光</td></tr>
         </tbody>
       </table>
@@ -1497,7 +1641,7 @@
 <footer>
   <div class="wrap">
     本页在仓库的 <code>docs/</code> 里，用浏览器直接打开即可。视频和缩略图在 <code>test_output/</code>（渲染结果不进 git），
-    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.8.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
+    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.9.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
   </div>
 </footer>
 

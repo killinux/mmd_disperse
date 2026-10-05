@@ -82,9 +82,16 @@ SIZE_RATIOS = {
     "plate_size": 0.045,
     "plate_lift": 0.02,
     "plate_width": 0.12,
+    "arc_length": 0.05,
+    "arc_reach": 0.03,
+    "arc_thickness": 0.001,
+    "silk_swell": 0.008,
 }
-PAINT_STYLES = ("NONE", "LINEART", "INK")
+PAINT_STYLES = ("NONE", "LINEART", "INK", "CODE")
 PAINT_CELL = 0.012  # size of the hatching / washes of the drawings, fraction of the model height
+CODE_CELL = 0.015  # width of a column of the digital rain, fraction of the model height
+STRIKE_FRAMES = 8  # how long the lightning strike lasts, in frames from the start
+STRIKE_HEIGHT = 1.4  # how far above the start point the strike comes from, in model heights
 HOLO_LINE_SPACING = 0.006  # scan line spacing of the hologram, fraction of the model height
 LAYER_CELL = 0.012  # cell size of the line web on the undersuit, fraction of the model height
 GOO_CELL = 0.02  # size of the goo's wet and dry smears, fraction of the model height
@@ -94,7 +101,8 @@ ABSORB = 0.6  # how far behind the edge the goo swallows a tendril, in tendril l
 CLAMP_AT = 0.8  # share of the wave at which the halves of the new outfit clamp shut, or the ghosts meet
 # entrances where all of the new outfit is there at that moment (the old one goes then): the halves clamp shut, the
 # ghosts meet, the evolution flash ends, the smoke puff hides the swap, the new outfit has stood up out of the shadow
-AT_ONCE = ("CLAMP", "GHOSTS", "EVOLVE", "POOF", "SHADOW")
+# or shimmered in in the transporter beam
+AT_ONCE = ("CLAMP", "GHOSTS", "EVOLVE", "POOF", "SHADOW", "BEAM")
 SHATTER_AT = 1.0  # share of the wave at which the old outfit goes all at once (exit timing): when the wave is done
 BEAT_REACH = 2.0  # seconds a moment may wait for the next beat
 NOISE_CELLS_PER_HEIGHT = 6.0
@@ -193,6 +201,14 @@ def _old_at_once(settings):
     """True when all of the old outfit goes at one moment: the new outfit's halves clamp shut or its ghosts meet, or
     the old outfit stays (freezing over ...) while the wave crosses it and then goes all at once."""
     return settings.entrance in AT_ONCE or (settings.exit_timing == "AT_ONCE" and settings.entrance != "SCALES")
+
+
+def _held(settings):
+    """True when the new outfit waits under the old one's opaque surface (veins, char, ink, stone, gold, silk, code)
+    until the old outfit goes all at once, instead of growing at the edge and showing through it. (Under clear ice it
+    is seen forming.)"""
+    return (settings.exit_timing == "AT_ONCE" and settings.entrance == "GROW"
+            and settings.old_surface not in ("NONE", "FROST"))
 
 
 def _on_beat(settings, mask, radius):
@@ -465,8 +481,8 @@ def _glow_materials(ob, settings, locked=False):
 
 
 def _update_glow(ob, settings, enabled, strength):
-    # the evolution flash and the shadow light up the locked parts (head, hair) too
-    whole = settings.entrance in ("EVOLVE", "SHADOW") and ob.get(P_ROLE) == "BASE"
+    # the evolution flash, the shadow and the transporter beam light up the locked parts (head, hair) too
+    whole = settings.entrance in ("EVOLVE", "SHADOW", "BEAM") and ob.get(P_ROLE) == "BASE"
     for locked in (False, True):
         for mat in _glow_materials(ob, settings, locked):
             if enabled and (whole or not locked):
@@ -522,23 +538,25 @@ def _update_layer(ob, settings):
 
 
 def _update_paint(ob, settings):
-    cell = PAINT_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob)
+    height = max(settings.size_reference, 1e-3) / _object_scale(ob)  # (the cells sit on the rest position)
     for mat in _glow_materials(ob, settings):
         if settings.paint_style != "NONE":
             materials.add_paint(mat)
-            materials.update_paint(mat, 1.0 if settings.paint_style == "INK" else 0.0, settings.paper_color,
-                                   settings.ink_color, cell)
+            # line art 0, ink wash 1, the digital rain 2
+            materials.update_paint(mat, float(PAINT_STYLES.index(settings.paint_style) - 1), settings.paper_color,
+                                   settings.ink_color, PAINT_CELL * height, settings.glow_color, CODE_CELL * height)
         else:
             materials.remove_paint(mat)
 
 
 def _update_surface(ob, settings):
-    cell = SURFACE_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob)
+    height = max(settings.size_reference, 1e-3) / _object_scale(ob)
+    cell = SURFACE_CELL * height
     for mat in _glow_materials(ob, settings):
         if settings.old_surface != "NONE":
             materials.add_surface(mat, settings.old_surface)
             materials.update_surface(mat, settings.surface_color, settings.glow_color, cell, settings.venom_metallic,
-                                     settings.ice_clarity)
+                                     settings.ice_clarity, CODE_CELL * height)
             if settings.old_surface == "INK":  # its drawing uses the paint colours (and its cells)
                 materials.update_paint(mat, 1.0, settings.paper_color, settings.ink_color,
                                        PAINT_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob))
@@ -578,20 +596,23 @@ def _update_venom(settings, mask, objects):
     return goo
 
 
-def _update_ribbons(settings, mask):
-    """Create / recreate / remove the limb ribbons to match the panel (they need the built effect)."""
-    current = ribbons.ribbon_objects(mask)
-    stale = [ob for ob in current if abs(ob.get(ribbons.P_TURNS, 0.0) - settings.ribbon_turns) > 1e-6]
-    if not settings.ribbon_enable or stale:
-        ribbons.remove(mask)
-        current = []
-    if settings.ribbon_enable and not current:
-        meshes = [ob for ob in effect_objects(mask) if ob.type == "MESH"]
-        owner = next((ob for ob in meshes if ob.get(P_ROLE) == "BASE"), meshes[0] if meshes else None)
-        armature = mdl.find_armature(owner)
-        collection = mask.users_collection[0] if mask.users_collection else settings.id_data.collection
-        ribbons.create(settings, mask, meshes, armature, max(settings.size_reference, 1e-3), collection)
-    ribbons.sync(settings, mask)
+def _update_ribbons(settings, mask, snap):
+    """Create / recreate / remove the limb ribbons and the cocoon's silk threads to match the panel (they need the
+    built effect); the threads snap at the mask radius `snap` (None: after the edge)."""
+    meshes = [ob for ob in effect_objects(mask) if ob.type == "MESH"]
+    old = [ob for ob in meshes if ob.get(P_ROLE) == "BASE"]
+    collection = mask.users_collection[0] if mask.users_collection else settings.id_data.collection
+    height = max(settings.size_reference, 1e-3)
+    for kind, wanted, around in ((ribbons.LIGHT, settings.ribbon_enable, meshes),
+                                 (ribbons.SILK, settings.old_surface == "SILK" and settings.silk_threads, old)):
+        current = ribbons.ribbon_objects(mask, kind)
+        if not wanted or any(ribbons.stale(ob, settings) for ob in current):
+            ribbons.remove(mask, kind)
+            current = []
+        if wanted and not current and around:
+            owner = next((ob for ob in around if ob.get(P_ROLE) == "BASE"), around[0])
+            ribbons.create(settings, mask, around, mdl.find_armature(owner), height, collection, kind)
+    ribbons.sync(settings, mask, snap)
 
 
 def _update_ring(settings, mask, beat):
@@ -635,9 +656,24 @@ def _radius_step(mask, radius):
     return 0.0
 
 
+def _radius_at(mask, frames):
+    """The mask radius `frames` frames after its first key (0 without keys)."""
+    curves = _scale_curves(mask) if mask is not None else []
+    keys = curves[0].keyframe_points if curves else []
+    if len(keys) < 2:
+        return 0.0
+    return float(curves[0].evaluate(keys[0].co[0] + frames))
+
+
+def _striking(settings):
+    """True when lightning strikes the start point as the transformation begins."""
+    return settings.arc_enable and settings.arc_strike and settings.direction == "GROW"
+
+
 def update_white_flash(settings):
     """Drive the compositor's white flash (when the scene has one) from the current effect's finale: it comes up
-    within a frame where the finale starts and is gone about six frames later, however long the finale is."""
+    within a frame where the finale starts and is gone about six frames later, however long the finale is. When
+    lightning strikes at the start the picture flashes white then too, for a frame or two."""
     mask = settings.mask
     wave = float(mask.get(P_WAVE, 0.0)) if mask is not None else 0.0
     start = _finale_start(settings, wave, mask) if wave > 0.0 else 0.0
@@ -645,7 +681,10 @@ def update_white_flash(settings):
     if step <= 0.0:  # no keys to measure: a share of the finale instead
         step = 0.05 * settings.finale_length * wave
     amount = settings.finale_white if settings.finale else 0.0
-    compositor.update_white_flash(settings.id_data, mask, start, step, 6.0 * step, amount)
+    strike = None
+    if _striking(settings) and _radius_at(mask, STRIKE_FRAMES) > 0.0:  # a frame or two, the bolt shows after it
+        strike = (max(_radius_at(mask, 1.0), 1e-6), _radius_at(mask, 3.0), 0.8 * settings.finale_white)
+    compositor.update_white_flash(settings.id_data, mask, start, step, 6.0 * step, amount, strike)
 
 
 def _signatures(settings, role, s):
@@ -714,12 +753,33 @@ def sync(settings):
         sparkle = particles.ensure_asset("STAR", settings.id_data)
     materials.update_particle_material(settings)
     materials.update_outline_material(settings.ink_color)
-    _update_ribbons(settings, mask)
+    wave_now = float(mask.get(P_WAVE, 0.0))
+    _update_ribbons(settings, mask, _moment(settings, wave_now, mask) if _old_at_once(settings) else None)
     goo = _update_venom(settings, mask, objects)
     beat = beats.beat_object() if settings.beat_sync else None
     _update_ring(settings, mask, beat)
     compositor.update_glitch(settings.id_data, settings.frame_start, settings.frame_end, settings.glitch_rate,
                              beat=beat)
+    height = max(settings.size_reference, 1e-3)
+    # Lightning runs over the new outfit (the old one when there is none); one mesh of the effect (the biggest of
+    # those) draws what there is once: the strike, the transporter beam's column.
+    meshes = [ob for ob in objects if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
+    arc_role = "TARGET" if any(ob.get(P_ROLE) == "TARGET" for ob in meshes) else "BASE"
+    main = max((ob for ob in meshes if ob.get(P_ROLE) == arc_role), key=lambda ob: len(ob.data.vertices),
+               default=None)
+    arc_area = float(mask.get(P_AREA_NEW if arc_role == "TARGET" else P_AREA, 0.0))
+    # about Arc Count arcs where the edge crosses the body: the faces within Arc Reach of it are about 2 reach / height
+    # of the outfit
+    arc_density = (settings.arc_count * height / (2.0 * max(settings.arc_reach, 1e-6) * arc_area)
+                   if arc_area > 0.0 else 0.0)
+    if settings.arc_enable:
+        materials.ensure_arc_material()
+    materials.update_arc_material(settings)
+    beam = settings.entrance == "BEAM"
+    if beam:
+        materials.ensure_beam_material()
+    materials.update_beam_material(settings)
+    strike_until = _radius_at(mask, STRIKE_FRAMES) if _striking(settings) else 0.0
     common = {
         "Mask": mask,
         "Use Rest Position": settings.space == "REST",
@@ -750,6 +810,17 @@ def sync(settings):
         "Evolve": settings.entrance == "EVOLVE",
         "Shadow": settings.entrance == "SHADOW",
         "Shadow Direction": tuple(settings.shadow_dir),
+        "Beam": beam,
+        "Arc Length": settings.arc_length,
+        "Arc Reach": settings.arc_reach,
+        "Arc Thickness": settings.arc_thickness,
+        "Arc Material": bpy.data.materials.get(materials.ARC_MATERIAL),
+        "Strike Until": strike_until,
+        "Strike Height": STRIKE_HEIGHT * height,
+        "Beam Count": settings.beam_sparkles,
+        "Beam Material": bpy.data.materials.get(materials.BEAM_MATERIAL),
+        "Star Object": particles.ensure_asset("STAR", settings.id_data) if beam else None,
+        "Star Size": settings.particle_size,
     }
     values = {
         TARGET_GROUP: dict(common, **{
@@ -833,6 +904,8 @@ def sync(settings):
             "Crystal Object": crystal,
             "Crystal Size": settings.crystal_size,
             "Clamp": _old_at_once(settings),  # the old outfit goes all at once
+            "Swell": settings.silk_swell if settings.old_surface == "SILK" else 0.0,
+            "Glyphs": settings.particles in particles.VARIANTS,
         }),
     }
     reach = float(mask.get(P_REACH, 0.0)) or 1e6
@@ -851,7 +924,11 @@ def sync(settings):
         # frequencies grow), so a scaled model looks the same as an unscaled one.
         s = _object_scale(ob)
         skeleton = venom.skeleton(ob)
-        own = {"Reach": reach, "Venom": skeleton is not None, "Venom Skeleton": skeleton, "Clamp Distance": moment}
+        own = {"Reach": reach, "Venom": skeleton is not None, "Venom Skeleton": skeleton, "Clamp Distance": moment,
+               "Main": ob == main, "Arcs": settings.arc_enable and role == arc_role, "Arc Density": arc_density * s * s,
+               "Strike": _striking(settings) and ob == main,
+               "Code": (role == "TARGET" and settings.paint_style == "CODE")
+               or (role == "BASE" and settings.old_surface == "CODE")}
         if role in ("BASE", "TARGET") and launch.space(ob) is not None:
             # A recording made with other settings (piece size, the finale's timing ...) does not match any more:
             # those pieces follow the body again until the next build records them.
@@ -873,6 +950,7 @@ def sync(settings):
             })
         elif role == "TARGET":
             own.update({
+                "Hold Until": moment if _held(settings) else 0.0,
                 "Finale Start": finale_start,
                 "Clamp Offset": settings.clamp_distance,
                 "Finale Length": settings.finale_length * wave,
@@ -906,9 +984,10 @@ def sync(settings):
         elif role == "BASE":
             flakes = settings.exit_style in FLAKES + ("CHUNKS",) and settings.frag_glow
             glint = settings.entrance == "SCALES" and settings.edge_glow  # the turning scales glint
-            shadow = settings.entrance == "SHADOW" and settings.edge_glow  # it glows darkly while it slides
-            _update_glow(ob, settings, flakes or flashes or settings.silhouette or glint or evolve or shadow,
-                         settings.frag_glow_strength if (flakes or settings.silhouette) and not evolve
+            # it glows darkly while it slides into the shadow, or as it shimmers away in the beam
+            timeline = settings.entrance in ("SHADOW", "BEAM") and settings.edge_glow
+            _update_glow(ob, settings, flakes or flashes or settings.silhouette or glint or evolve or timeline,
+                         settings.frag_glow_strength if (flakes or settings.silhouette) and not (evolve or timeline)
                          else settings.edge_glow_strength)
             _update_surface(ob, settings)
         if role in ("TARGET", "BASE"):

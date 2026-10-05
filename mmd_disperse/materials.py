@@ -1,11 +1,11 @@
 """Wire, particle and goo materials, and what we inject into the outfits' own materials: the glowing rim, the
 hologram, the glowing inside (back faces near the cut), the dark undersuit and the old outfit's surface ahead of the
-edge (black veins, frost, char)."""
+edge (black veins, frost, char, ink, stone, gold, silk, digital rain)."""
 
 import bpy
 
-from .node_groups import (ATTR_AHEAD, ATTR_CUT, ATTR_EDGE, ATTR_HOLO, ATTR_LAYER, ATTR_PAINT, ATTR_REST, ATTR_SCREEN,
-                          ATTR_SCREEN_STYLE, ATTR_SHADOW, ATTR_SMOKE)
+from .node_groups import (ATTR_AHEAD, ATTR_BEAM, ATTR_CUT, ATTR_EDGE, ATTR_FRAME, ATTR_HOLO, ATTR_LAYER, ATTR_PAINT,
+                          ATTR_REST, ATTR_SCREEN, ATTR_SCREEN_STYLE, ATTR_SHADOW, ATTR_SMOKE)
 
 WIRE_MATERIAL = "MMD Disperse Wire"
 RIBBON_MATERIAL = "MMD Disperse Ribbon"
@@ -20,6 +20,10 @@ RING_MATERIAL = "MMD Disperse Ring Glow"
 SMOKE_MATERIAL = "MMD Disperse Smoke"
 OUTLINE_MATERIAL = "MMD Disperse Outline"
 SCREEN_MATERIAL = "MMD Disperse Screen"
+ARC_MATERIAL = "MMD Disperse Lightning"
+BEAM_MATERIAL = "MMD Disperse Beam"
+SILK_MATERIAL = "MMD Disperse Silk"
+PEBBLE_MATERIAL = "MMD Disperse Pebble"
 GLOW = "MMDD Edge"  # prefix of every node we add to a user material
 P_GLOW = "mmd_disperse_glow"
 HOLO = "MMDD Holo"
@@ -31,7 +35,8 @@ LAYER = "MMDD Layer"
 P_LAYER = "mmd_disperse_layer"
 SURFACE = "MMDD Surface"
 P_SURFACE = "mmd_disperse_surface"  # the style the surface nodes were made for
-SURFACE_STYLES = ("VEINS", "FROST", "CHAR", "INK")
+SURFACE_STYLES = ("VEINS", "FROST", "CHAR", "INK", "STONE", "GOLD", "SILK", "CODE")
+CODE_ROW = 1.4  # a glyph of the digital rain is this many times as tall as it is wide
 PAINT = "MMDD Paint"
 P_PAINT = "mmd_disperse_paint"
 P_REFRACT = "mmd_disperse_refract"  # material settings to put back once the clear ice is gone
@@ -203,10 +208,31 @@ def _no_shadow(mat):
 def ensure_ring_material():
     """The front's decoration (magic circle, sparks, comet): pure glow in the glow colour, as bright as the stored
     disperse_edge says (it fades in and out with the front), invisible to shadow rays."""
-    mat = bpy.data.materials.get(RING_MATERIAL)
+    return _glow_material(RING_MATERIAL)
+
+
+def ensure_arc_material():
+    """Lightning (the arcs and the strike): pure glow like the ring's, as bright as the arcs' disperse_edge says."""
+    return _glow_material(ARC_MATERIAL)
+
+
+def update_arc_material(settings):
+    mat = bpy.data.materials.get(ARC_MATERIAL)
+    if mat is None or mat.node_tree is None:
+        return
+    nodes = mat.node_tree.nodes
+    nodes["MMDD_Emission"].inputs["Color"].default_value = tuple(settings.glow_color) + (1.0,)
+    nodes["MMDD_Strength"].outputs[0].default_value = settings.arc_strength
+    mat.diffuse_color = tuple(settings.glow_color) + (1.0,)
+
+
+def _glow_material(name):
+    """Pure glow (the value MMDD_Emission's colour) as bright as disperse_edge times the value MMDD_Strength,
+    invisible to shadow rays."""
+    mat = bpy.data.materials.get(name)
     if mat is not None:
         return mat
-    mat = bpy.data.materials.new(RING_MATERIAL)
+    mat = bpy.data.materials.new(name)
     if mat.node_tree is None:
         mat.use_nodes = True
     nt = mat.node_tree
@@ -321,6 +347,109 @@ def ensure_screen_material():
         mat.blend_method = "HASHED"
     _no_shadow(mat)
     return mat
+
+
+def ensure_beam_material():
+    """The transporter beam's column (ATTR_BEAM: x, y round it, z up it): see-through light in the glow colour, in
+    streaks up it that shimmer (a noise round it and up it, changing with the frame), brighter towards its sides,
+    where you look through more of it, and fading out at the top and the bottom; as bright as disperse_edge says (it
+    fades in and out). Invisible to shadow rays."""
+    mat = bpy.data.materials.get(BEAM_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(BEAM_MATERIAL)
+    if mat.node_tree is None:
+        mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = _new(nt, "ShaderNodeOutputMaterial", "Output", 1400, 0)
+    beam = _new(nt, "ShaderNodeAttribute", "Beam", -1400, 0, attribute_type="GEOMETRY", attribute_name=ATTR_BEAM)
+    frame = _new(nt, "ShaderNodeAttribute", "Frame", -1400, -250, attribute_type="GEOMETRY",
+                 attribute_name=ATTR_FRAME).outputs[2]
+    glow = _new(nt, "ShaderNodeAttribute", "Glow", -1400, -450, attribute_type="GEOMETRY",
+                attribute_name=ATTR_EDGE).outputs[2]
+    xyz = _new(nt, "ShaderNodeSeparateXYZ", "Round", -1200, 0)
+    nt.links.new(beam.outputs["Vector"], xyz.inputs[0])
+    around = _new(nt, "ShaderNodeCombineXYZ", "Around", -1000, 100)
+    for i, k in enumerate((2.5, 2.5, 0.5)):
+        nt.links.new(_math(nt, "Beam", "MULTIPLY", xyz.outputs[i], k, x=-1100, y=100 - 150 * i), around.inputs[i])
+    streak = _new(nt, "ShaderNodeTexNoise", "Streaks", -800, 100, noise_dimensions="4D")
+    nt.links.new(around.outputs[0], streak.inputs["Vector"])
+    nt.links.new(_math(nt, "Beam", "MULTIPLY", frame, 0.03, x=-1000, y=-150), streak.inputs["W"])
+    streak.inputs["Scale"].default_value = 1.0
+    streak.inputs["Detail"].default_value = 1.0
+    streaks = _new(nt, "ShaderNodeMapRange", "Streak Level", -600, 100, interpolation_type="SMOOTHSTEP")
+    nt.links.new(streak.outputs[0], streaks.inputs[0])
+    streaks.inputs[1].default_value = 0.4
+    streaks.inputs[2].default_value = 0.68
+    h = xyz.outputs[2]
+    rise = _new(nt, "ShaderNodeMapRange", "Bottom", -800, -350, interpolation_type="SMOOTHSTEP")
+    nt.links.new(h, rise.inputs[0])
+    rise.inputs[2].default_value = 0.1
+    fall = _new(nt, "ShaderNodeMapRange", "Top", -800, -600, interpolation_type="SMOOTHSTEP")
+    nt.links.new(h, fall.inputs[0])
+    fall.inputs[1].default_value = 0.6
+    fall.inputs[3].default_value = 1.0
+    fall.inputs[4].default_value = 0.0
+    # clear where you look straight through it, glowing towards its sides
+    facing = _new(nt, "ShaderNodeLayerWeight", "Sides", -800, -850)
+    facing.inputs["Blend"].default_value = 0.5
+    sides = _math(nt, "Beam", "MULTIPLY_ADD", _math(nt, "Beam", "POWER", facing.outputs["Facing"], 1.5, x=-700,
+                                                    y=-850), 0.92, 0.08, x=-600, y=-850)
+    alpha = _math(nt, "Beam", "MULTIPLY", glow, _math(nt, "Beam", "MULTIPLY", rise.outputs[0], fall.outputs[0], x=-600,
+                                                      y=-450), x=-400, y=-400)
+    alpha = _math(nt, "Beam", "MULTIPLY", alpha, _math(nt, "Beam", "MULTIPLY_ADD", streaks.outputs[0], 0.8, 0.2,
+                                                       x=-400, y=100), x=-200, y=-200)
+    alpha = _math(nt, "Beam", "MULTIPLY", alpha, _math(nt, "Beam", "MULTIPLY", sides, 0.3, x=-400, y=-850), x=0,
+                  y=-300, clamp=True)
+    strength = _new(nt, "ShaderNodeValue", "MMDD_Strength", 0, -600)
+    emission = _new(nt, "ShaderNodeEmission", "MMDD_Emission", 400, -300)
+    nt.links.new(_math(nt, "Beam", "MULTIPLY", strength.outputs[0], 1.5, x=200, y=-400), emission.inputs["Strength"])
+    clear = _new(nt, "ShaderNodeBsdfTransparent", "Clear", 400, -100)
+    mix = _new(nt, "ShaderNodeMixShader", "Light", 800, -200)
+    nt.links.new(alpha, mix.inputs[0])
+    nt.links.new(clear.outputs[0], mix.inputs[1])
+    nt.links.new(emission.outputs[0], mix.inputs[2])
+    nt.links.new(mix.outputs[0], out.inputs["Surface"])
+    # blended, not dithered: a smooth haze of light (it casts no shadow, so nothing needs sorting against it)
+    if hasattr(mat, "surface_render_method"):  # EEVEE Next
+        mat.surface_render_method = "BLENDED"
+    elif hasattr(mat, "blend_method"):
+        mat.blend_method = "BLEND"
+        mat.show_transparent_back = True
+    _no_shadow(mat)
+    return mat
+
+
+def update_beam_material(settings):
+    mat = bpy.data.materials.get(BEAM_MATERIAL)
+    if mat is None or mat.node_tree is None:
+        return
+    nodes = mat.node_tree.nodes
+    nodes["MMDD_Emission"].inputs["Color"].default_value = tuple(settings.glow_color) + (1.0,)
+    nodes["MMDD_Strength"].outputs[0].default_value = settings.beam_strength
+    mat.diffuse_color = tuple(settings.glow_color) + (1.0,)
+
+
+def ensure_silk_material():
+    """The silk threads of the cocoon: soft, sheeny silk that glows faintly (so it reads on a dark stage)."""
+    mat = bpy.data.materials.get(SILK_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = _plain_material(SILK_MATERIAL, (0.93, 0.91, 0.86), 0.4)
+    bsdf = mat.node_tree.nodes["MMDD_BSDF"]
+    _set_input(bsdf, ("Sheen Weight", "Sheen"), 1.0)
+    _set_input(bsdf, ("Emission Strength",), 0.35)
+    return mat
+
+
+def update_silk_material(color):
+    mat = bpy.data.materials.get(SILK_MATERIAL)
+    bsdf = mat.node_tree.nodes.get("MMDD_BSDF") if mat is not None and mat.node_tree else None
+    if bsdf is not None:
+        _set_input(bsdf, ("Base Color",), tuple(color) + (1.0,))
+        _set_input(bsdf, ("Emission Color", "Emission"), tuple(color) + (1.0,))
+        mat.diffuse_color = tuple(color) + (1.0,)
 
 
 def update_ring_materials(settings):
@@ -477,6 +606,11 @@ def ensure_ink_material():
     return _plain_material(INK_MATERIAL, (0.004, 0.004, 0.005), 0.12, coat=0.6)
 
 
+def ensure_pebble_material():
+    """Pebbles: dull stone in the particle colour."""
+    return _plain_material(PEBBLE_MATERIAL, (0.45, 0.43, 0.4), 0.85)
+
+
 def ensure_card_material():
     """Playing cards: the face white with a red border line and a red diamond in the middle, the back red with a white
     border (UV across the card; the back is the face seen from behind). A faint glow keeps them readable."""
@@ -552,7 +686,7 @@ def ensure_card_material():
 
 def update_particle_material(settings):
     color = tuple(settings.particle_color) + (1.0,)
-    for name in (COIN_MATERIAL, ICE_MATERIAL):
+    for name in (COIN_MATERIAL, ICE_MATERIAL, PEBBLE_MATERIAL):
         shiny = bpy.data.materials.get(name)
         bsdf = shiny.node_tree.nodes.get("MMDD_BSDF") if shiny is not None and shiny.node_tree else None
         if bsdf is not None:
@@ -1074,10 +1208,98 @@ def _drawing(nt, prefix, color, rest, x, y):
     return line_art, ink_wash
 
 
+def _code(nt, prefix, rest, frame, x, y):
+    """The digital rain (The Matrix) on the body, as a colour: columns of glyphs on the rest position, a column a cell
+    across and a glyph CODE_ROW cells tall (across a column runs x on faces looking to the front or the back, y on the
+    sides). A bright head rains down each column at its own speed with a fading trail behind it, and every glyph is a
+    random 5 x 7 dot pattern that changes now and then. The trail is in the value prefix + " Code Color", the heads
+    white, bright enough to glow; a cell is 1 / prefix + " Code Scale" across. `frame` scrolls it."""
+    scale = _new(nt, "ShaderNodeValue", prefix + " Code Scale", x, y + 200).outputs[0]
+    cells = _new(nt, "ShaderNodeVectorMath", prefix + " Code Cells", x + 200, y, operation="SCALE")
+    _feed(nt, cells.inputs[0], rest)
+    nt.links.new(scale, cells.inputs[3])
+    xyz = _new(nt, "ShaderNodeSeparateXYZ", prefix + " Code XYZ", x + 400, y)
+    nt.links.new(cells.outputs[0], xyz.inputs[0])
+    qx, qy, qz = xyz.outputs[0], xyz.outputs[1], xyz.outputs[2]
+    looks = _new(nt, "ShaderNodeSeparateXYZ", prefix + " Code Normal", x + 400, y - 300)
+    nt.links.new(_new(nt, "ShaderNodeTexCoord", prefix + " Code Coords", x + 200, y - 300).outputs["Normal"],
+                 looks.inputs[0])
+    side = _math(nt, prefix, "GREATER_THAN", _math(nt, prefix, "ABSOLUTE", looks.outputs[0], x=x + 600, y=y - 300),
+                 _math(nt, prefix, "ABSOLUTE", looks.outputs[1], x=x + 600, y=y - 450), x=x + 800, y=y - 350)
+    u = _math(nt, prefix, "MULTIPLY_ADD", _math(nt, prefix, "SUBTRACT", qy, qx, x=x + 800, y=y - 150), side, qx,
+              x=x + 1000, y=y - 200)
+    rows = _math(nt, prefix, "DIVIDE", qz, CODE_ROW, x=x + 600, y=y + 100)
+    col_x = _math(nt, prefix, "FLOOR", qx, x=x + 600, y=y + 300)
+    col_y = _math(nt, prefix, "FLOOR", qy, x=x + 600, y=y + 450)
+    k = _math(nt, prefix, "FLOOR", rows, x=x + 800, y=y + 100)
+
+    def noise(a, b_, c, name, xx, yy):
+        combined = _new(nt, "ShaderNodeCombineXYZ", prefix + " Code " + name + " At", xx, yy)
+        for sock, value in zip(combined.inputs, (a, b_, c)):
+            _feed(nt, sock, value)
+        n = _new(nt, "ShaderNodeTexWhiteNoise", prefix + " Code " + name, xx + 200, yy, noise_dimensions="3D")
+        nt.links.new(combined.outputs[0], n.inputs["Vector"])
+        return n
+
+    column = noise(col_x, col_y, 0.5, "Column", x + 1000, y + 400)
+    speeds = _new(nt, "ShaderNodeSeparateXYZ", prefix + " Code Speeds", x + 1400, y + 400)
+    nt.links.new(column.outputs["Color"], speeds.inputs[0])
+    r1, r2, r3 = speeds.outputs[0], speeds.outputs[1], speeds.outputs[2]
+    speed = _math(nt, prefix, "MULTIPLY_ADD", r1, 0.5, 0.25, x=x + 1600, y=y + 500)
+    head = _math(nt, prefix, "MULTIPLY_ADD", _math(nt, prefix, "MULTIPLY", frame, speed, x=x + 1800, y=y + 500), -1.0,
+                 _math(nt, prefix, "MULTIPLY", r2, 97.0, x=x + 1800, y=y + 350), x=x + 2000, y=y + 450)
+    period = _math(nt, prefix, "MULTIPLY_ADD", r3, 18.0, 18.0, x=x + 1600, y=y + 250)
+    # rows above the head (0 at the head), the trail fading over 60% of the column's period
+    behind = _math(nt, prefix, "MULTIPLY", _math(nt, prefix, "FRACT", _math(
+        nt, prefix, "DIVIDE", _math(nt, prefix, "SUBTRACT", k, head, x=x + 2200, y=y + 300), period, x=x + 2400,
+        y=y + 300), x=x + 2600, y=y + 300), period, x=x + 2800, y=y + 300)
+    trail = _math(nt, prefix, "SUBTRACT", 1.0, _math(nt, prefix, "DIVIDE", behind, _math(
+        nt, prefix, "MULTIPLY", period, 0.6, x=x + 2800, y=y + 150), x=x + 3000, y=y + 200), x=x + 3200, y=y + 200,
+        clamp=True)
+    trail = _math(nt, prefix, "MULTIPLY", trail, trail, x=x + 3400, y=y + 200)
+    at_head = _math(nt, prefix, "LESS_THAN", behind, 1.0, x=x + 3000, y=y + 400)
+    # the glyph: a 5 x 7 dot pattern picked by the cell and changing every few frames
+    flips = _math(nt, prefix, "FLOOR", _math(nt, prefix, "MULTIPLY", frame, _math(
+        nt, prefix, "MULTIPLY_ADD", r1, 0.1, 0.06, x=x + 1600, y=y - 600), x=x + 1800, y=y - 600), x=x + 2000,
+        y=y - 600)
+    which = _math(nt, prefix, "ADD", _math(nt, prefix, "FLOOR", _math(nt, prefix, "MULTIPLY", noise(
+        col_x, col_y, k, "Glyph", x + 1000, y - 800).outputs[0], 50.0, x=x + 1400, y=y - 800), x=x + 1600, y=y - 800),
+        flips, x=x + 2200, y=y - 700)
+    fu = _math(nt, prefix, "FRACT", u, x=x + 1200, y=y - 200)
+    fv = _math(nt, prefix, "FRACT", rows, x=x + 1000, y=y + 100)
+    ix = _math(nt, prefix, "FLOOR", _math(nt, prefix, "MULTIPLY", _math(nt, prefix, "SUBTRACT", fu, 0.12, x=x + 1400,
+                                                                          y=y - 1000), 6.25, x=x + 1600, y=y - 1000),
+               x=x + 1800, y=y - 1000)
+    iy = _math(nt, prefix, "FLOOR", _math(nt, prefix, "MULTIPLY", _math(nt, prefix, "SUBTRACT", fv, 0.08, x=x + 1400,
+                                                                          y=y - 1150), 8.33, x=x + 1600, y=y - 1150),
+               x=x + 1800, y=y - 1150)
+    dot = _math(nt, prefix, "GREATER_THAN", noise(ix, iy, which, "Dots", x + 2200, y - 1000).outputs[0], 0.45,
+                x=x + 2600, y=y - 1000)
+    # the dots stay off the cell's border, so the glyphs stand apart
+    off_u = _math(nt, prefix, "ABSOLUTE", _math(nt, prefix, "SUBTRACT", fu, 0.5, x=x + 1400, y=y - 1300), x=x + 1600,
+                  y=y - 1300)
+    off_v = _math(nt, prefix, "ABSOLUTE", _math(nt, prefix, "SUBTRACT", fv, 0.5, x=x + 1400, y=y - 1450), x=x + 1600,
+                  y=y - 1450)
+    inside = _math(nt, prefix, "MULTIPLY", _math(nt, prefix, "LESS_THAN", off_u, 0.38, x=x + 1800, y=y - 1300),
+                   _math(nt, prefix, "LESS_THAN", off_v, 0.42, x=x + 1800, y=y - 1450), x=x + 2000, y=y - 1350)
+    lit = _math(nt, prefix, "MULTIPLY", dot, inside, x=x + 2800, y=y - 1100)
+    tint = _new(nt, "ShaderNodeRGB", prefix + " Code Color", x + 3000, y - 300).outputs[0]
+    body = _new(nt, "ShaderNodeVectorMath", prefix + " Code Trail", x + 3600, y - 300, operation="SCALE")
+    nt.links.new(tint, body.inputs[0])
+    nt.links.new(_math(nt, prefix, "MULTIPLY", _math(nt, prefix, "MULTIPLY", lit, trail, x=x + 3400, y=y - 500), 4.0,
+                       x=x + 3600, y=y - 500), body.inputs[3])
+    heads = _new(nt, "ShaderNodeVectorMath", prefix + " Code Heads", x + 3800, y - 100, operation="ADD")
+    nt.links.new(body.outputs[0], heads.inputs[0])
+    white = _math(nt, prefix, "MULTIPLY", _math(nt, prefix, "MULTIPLY", lit, at_head, x=x + 3400, y=y + 100), 6.0,
+                  x=x + 3600, y=y + 100)
+    nt.links.new(white, heads.inputs[1])  # a value into a vector: white, as bright as the value
+    return heads.outputs[0]
+
+
 def add_paint(mat):
-    """New outfit, line art / ink wash: where `disperse_paint` is high the surface is a drawing of itself (line art or
-    ink wash, by the value MMDD Paint Style); the colour comes in where it falls, unevenly like watercolour, with a
-    darker tide line at its edge."""
+    """New outfit, line art / ink wash / digital rain: where `disperse_paint` is high the surface is a drawing of itself
+    (line art, ink wash or the digital rain, by the value MMDD Paint Style: 0, 1, 2); the colour comes in where it
+    falls, unevenly like watercolour, with a darker tide line at its edge."""
     nt = mat.node_tree
     if nt is None or mat.get(P_PAINT):
         return
@@ -1091,8 +1313,14 @@ def add_paint(mat):
     rest = _new(nt, "ShaderNodeAttribute", PAINT + " Rest", x - 2600, y - 200,
                 attribute_type="GEOMETRY", attribute_name=ATTR_REST).outputs["Vector"]
     line_art, ink_wash = _drawing(nt, PAINT, _base_color(nt), rest, x - 2400, y)
+    frame = _new(nt, "ShaderNodeAttribute", PAINT + " Frame", x - 2600, y - 2400, attribute_type="GEOMETRY",
+                 attribute_name=ATTR_FRAME).outputs[2]
+    code = _code(nt, PAINT, rest, frame, x - 6400, y - 2400)
     style = _new(nt, "ShaderNodeValue", PAINT + " Style", x - 800, y - 1400).outputs[0]
-    drawn = _lerp(nt, line_art, ink_wash, style, PAINT + " Drawn", x - 600, y - 900)
+    drawn = _lerp(nt, line_art, ink_wash, _math(nt, PAINT, "MINIMUM", style, 1.0, x=x - 800, y=y - 1550),
+                  PAINT + " Drawn", x - 600, y - 900)
+    drawn = _lerp(nt, drawn, code, _math(nt, PAINT, "SUBTRACT", style, 1.0, x=x - 800, y=y - 1700, clamp=True),
+                  PAINT + " Coded", x - 400, y - 1100)
     # watercolour: the paint value shifted by a noise on the body, a darker line where the colour stops
     bleed = _new(nt, "ShaderNodeTexNoise", PAINT + " Bleed", x - 1400, y + 200, noise_dimensions="3D")
     nt.links.new(rest, bleed.inputs["Vector"])
@@ -1129,8 +1357,9 @@ def add_paint(mat):
     mat[P_PAINT] = 1
 
 
-def update_paint(mat, style, paper, ink, cell):
-    """Line art (0) or ink wash (1), paper and ink colours, the size of the washes / hatching in object units."""
+def update_paint(mat, style, paper, ink, cell, glow=(0.2, 1.0, 0.4), code_cell=1.0):
+    """Line art (0), ink wash (1) or the digital rain (2), paper and ink colours, the size of the washes / hatching in
+    object units, the digital rain's colour and cell size (object units)."""
     nodes = mat.node_tree.nodes if mat.node_tree else {}
     for prefix in (PAINT, SURFACE):
         node = nodes.get(prefix + " Style")
@@ -1144,6 +1373,17 @@ def update_paint(mat, style, paper, ink, cell):
             node = nodes.get(prefix + name)
             if node is not None:
                 node.inputs["Scale"].default_value = scale / max(cell, 1e-6)
+    _set_code(nodes, PAINT, glow, code_cell)
+
+
+def _set_code(nodes, prefix, glow, cell):
+    """Colour and cell size (object units) of the digital rain drawn with `prefix`."""
+    tint = nodes.get(prefix + " Code Color")
+    if tint is not None:
+        tint.outputs[0].default_value = tuple(glow) + (1.0,)
+    scale = nodes.get(prefix + " Code Scale")
+    if scale is not None:
+        scale.outputs[0].default_value = 1.0 / max(cell, 1e-6)
 
 
 def remove_paint(mat):
@@ -1478,10 +1718,124 @@ def _char(nt, near, rest, x, y):
     return fac, bsdf
 
 
+def _tinted(nt, name, factor, x, y):
+    """The colour value `name` (set by update_surface) times `factor`: a vector for a colour input."""
+    color = _new(nt, "ShaderNodeRGB", name, x, y).outputs[0]
+    shade = _new(nt, "ShaderNodeVectorMath", name + " Shade", x + 200, y, operation="SCALE")
+    nt.links.new(color, shade.inputs[0])
+    _feed(nt, shade.inputs[3], factor)
+    return shade.outputs[0]
+
+
+def _stone(nt, near, rest, x, y):
+    """The surface turns to stone in patches: grey, rough and grainy; as the edge comes cracks open in it (cell walls on
+    the rest position), widest right before it. Returns (factor, shader)."""
+    fac = _creeping(nt, near, rest, 0.3, 0.7, x, y + 400)
+    grain = _new(nt, "ShaderNodeTexNoise", SURFACE + " Grain", x - 900, y - 100, noise_dimensions="3D")
+    nt.links.new(rest, grain.inputs["Vector"])
+    grain.inputs["Detail"].default_value = 8.0
+    cracks = _new(nt, "ShaderNodeTexVoronoi", SURFACE + " Cracks", x - 900, y - 400, voronoi_dimensions="3D",
+                  feature="DISTANCE_TO_EDGE")
+    nt.links.new(rest, cracks.inputs["Vector"])
+    opening = _new(nt, "ShaderNodeMapRange", SURFACE + " Opening", x - 900, y - 700, interpolation_type="SMOOTHSTEP")
+    nt.links.new(near, opening.inputs[0])
+    opening.inputs[1].default_value = 0.55
+    opening.inputs[3].default_value = 0.004
+    opening.inputs[4].default_value = 0.07  # crack width, in cells
+    line = _new(nt, "ShaderNodeMapRange", SURFACE + " Crack Line", x - 700, y - 400)
+    nt.links.new(cracks.outputs["Distance"], line.inputs[0])
+    nt.links.new(opening.outputs[0], line.inputs[2])
+    line.inputs[3].default_value = 1.0
+    line.inputs[4].default_value = 0.0
+    tone = _math(nt, SURFACE, "MULTIPLY", _math(nt, SURFACE, "MULTIPLY_ADD", grain.outputs[0], 0.5, 0.62, x=x - 700,
+                                                y=y - 100),
+                 _math(nt, SURFACE, "MULTIPLY_ADD", line.outputs[0], -0.9, 1.0, x=x - 500, y=y - 400), x=x - 500,
+                 y=y - 150)
+    bump = _new(nt, "ShaderNodeBump", SURFACE + " Stone Bump", x - 500, y - 650)
+    bump.inputs["Strength"].default_value = 0.45
+    bump.inputs["Distance"].default_value = 0.02
+    nt.links.new(grain.outputs[0], bump.inputs["Height"])
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", SURFACE + " Stone BSDF", x - 100, y - 200)
+    nt.links.new(_tinted(nt, SURFACE + " Stone Color", tone, x - 500, y + 100), bsdf.inputs["Base Color"])
+    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    _set_input(bsdf, ("Roughness",), 0.9)
+    _set_input(bsdf, ("Specular IOR Level", "Specular"), 0.3)
+    return fac, bsdf
+
+
+def _gold(nt, near, rest, x, y):
+    """Liquid gold spreads over the surface in patches, a bright molten line where it is spreading, and turns it to
+    polished gold, a little hammered (the colour is the value SURFACE + " Gold BSDF"'s). Returns (factor, shader)."""
+    fac = _creeping(nt, near, rest, 0.25, 0.6, x, y + 400)
+    ripple = _new(nt, "ShaderNodeTexNoise", SURFACE + " Ripple", x - 900, y - 100, noise_dimensions="3D")
+    nt.links.new(rest, ripple.inputs["Vector"])
+    ripple.inputs["Detail"].default_value = 3.0
+    rough = _new(nt, "ShaderNodeMapRange", SURFACE + " Gold Rough", x - 700, y - 100)
+    nt.links.new(ripple.outputs[0], rough.inputs[0])
+    for i, value in ((1, 0.3), (2, 0.7), (3, 0.12), (4, 0.32)):
+        rough.inputs[i].default_value = value
+    molten = _math(nt, SURFACE, "MULTIPLY", _math(nt, SURFACE, "MULTIPLY", fac, _math(nt, SURFACE, "SUBTRACT", 1.0, fac,
+                                                                                      x=x - 700, y=y - 400),
+                                                  x=x - 500, y=y - 400), 10.0, x=x - 300, y=y - 400)
+    bump = _new(nt, "ShaderNodeBump", SURFACE + " Gold Bump", x - 500, y - 650)
+    bump.inputs["Strength"].default_value = 0.15
+    bump.inputs["Distance"].default_value = 0.02
+    nt.links.new(ripple.outputs[0], bump.inputs["Height"])
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", SURFACE + " Gold BSDF", x - 100, y - 200)
+    _set_input(bsdf, ("Metallic",), 1.0)
+    nt.links.new(rough.outputs[0], bsdf.inputs["Roughness"])
+    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    nt.links.new(molten, bsdf.inputs["Emission Strength"])
+    return fac, bsdf
+
+
+def _silk(nt, near, rest, x, y):
+    """White silk spreads over the surface in patches: soft and sheeny, fine fibres wound round the body (wavy bands
+    up the rest position), glowing faintly. Returns (factor, shader)."""
+    fac = _creeping(nt, near, rest, 0.2, 0.6, x, y + 400)
+    fibres = _new(nt, "ShaderNodeTexWave", SURFACE + " Fibres", x - 900, y - 100, wave_type="BANDS",
+                  bands_direction="Z")
+    nt.links.new(rest, fibres.inputs["Vector"])
+    fibres.inputs["Distortion"].default_value = 6.0
+    fibres.inputs["Detail"].default_value = 3.0
+    tone = _math(nt, SURFACE, "MULTIPLY_ADD", fibres.outputs[1], 0.16, 0.84, x=x - 700, y=y - 100)
+    color = _tinted(nt, SURFACE + " Silk Color", tone, x - 500, y + 100)
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", SURFACE + " Silk BSDF", x - 100, y - 200)
+    nt.links.new(color, bsdf.inputs["Base Color"])
+    nt.links.new(color, bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission"))
+    _set_input(bsdf, ("Roughness",), 0.45)
+    _set_input(bsdf, ("Sheen Weight", "Sheen"), 1.0)
+    _set_input(bsdf, ("Specular IOR Level", "Specular"), 0.4)
+    _set_input(bsdf, ("Emission Strength",), 0.12)
+    return fac, bsdf
+
+
+def _code_rain(nt, near, rest, x, y):
+    """The digital rain spreads over the surface in patches, brighter right at the edge (the frame comes from
+    ATTR_FRAME, which the Base group stores). Returns (factor, shader)."""
+    fac = _creeping(nt, near, rest, 0.25, 0.6, x, y + 400)
+    frame = _new(nt, "ShaderNodeAttribute", SURFACE + " Frame", x - 1100, y - 800, attribute_type="GEOMETRY",
+                 attribute_name=ATTR_FRAME).outputs[2]
+    color = _code(nt, SURFACE, rest, frame, x - 4900, y - 300)
+    boost = _new(nt, "ShaderNodeVectorMath", SURFACE + " Code Boost", x - 300, y - 300, operation="SCALE")
+    nt.links.new(color, boost.inputs[0])
+    nt.links.new(_math(nt, SURFACE, "MULTIPLY_ADD", near, 0.9, 0.5, x=x - 500, y=y - 450), boost.inputs[3])
+    emission = _new(nt, "ShaderNodeEmission", SURFACE + " Code Emission", x - 100, y - 300)
+    nt.links.new(boost.outputs[0], emission.inputs["Color"])
+    # (an Emission has no Alpha input: wrap it so the cut-outs can be kept)
+    shader = _new(nt, "ShaderNodeMixShader", SURFACE + " Code Shader", x + 100, y - 200)
+    clear = _new(nt, "ShaderNodeBsdfTransparent", SURFACE + " Code Clear", x - 100, y - 500)
+    shader.inputs[0].default_value = 1.0
+    nt.links.new(clear.outputs[0], shader.inputs[1])
+    nt.links.new(emission.outputs[0], shader.inputs[2])
+    return fac, shader
+
+
 def add_surface(mat, style):
     """Ahead of the edge (`disperse_ahead`: 0 far ahead .. 1 at the edge, also behind it) the old outfit's surface
-    changes: black veins spread under it (VEINS, the symbiote), frost creeps over it (FROST) or it chars and
-    smoulders (CHAR)."""
+    changes: black veins spread under it (VEINS, the symbiote), frost creeps over it (FROST), it chars and smoulders
+    (CHAR), turns into an ink wash painting (INK), to stone (STONE) or gold (GOLD), silk wraps it (SILK) or the digital
+    rain runs down it (CODE)."""
     nt = mat.node_tree
     if nt is None or mat.get(P_SURFACE) == style:
         return
@@ -1496,7 +1850,8 @@ def add_surface(mat, style):
     near = attr.outputs[2]  # "Fac" / "Factor"
     rest = _new(nt, "ShaderNodeAttribute", SURFACE + " Rest", x - 1900, y - 100,
                 attribute_type="GEOMETRY", attribute_name=ATTR_REST).outputs["Vector"]
-    make = {"VEINS": _veins, "FROST": _frost, "CHAR": _char, "INK": _ink}[style]
+    make = {"VEINS": _veins, "FROST": _frost, "CHAR": _char, "INK": _ink, "STONE": _stone, "GOLD": _gold,
+            "SILK": _silk, "CODE": _code_rain}[style]
     fac, shader = make(nt, near, rest, x, y)
     alpha = _alpha_source(nt)
     if alpha is not None:  # cut-outs stay see-through
@@ -1509,19 +1864,30 @@ def add_surface(mat, style):
     mat[P_SURFACE] = style
 
 
-def update_surface(mat, color, glow_color, cell, metallic=0.0, clarity=0.0):
-    """Colour of the veins / ice / char, the glow colour of the smouldering char, the cell size (object units), how
-    metallic the veins' goo is and how clear the ice is (clear ice lets EEVEE refract through the material)."""
+def update_surface(mat, color, glow_color, cell, metallic=0.0, clarity=0.0, code_cell=1.0):
+    """Colour of the veins / ice / char / stone / gold / silk, the glow colour of the smouldering char and the digital
+    rain, the cell size (object units), how metallic the veins' goo is, how clear the ice is (clear ice lets EEVEE
+    refract through the material) and the digital rain's cell size (object units)."""
     nodes = mat.node_tree.nodes if mat.node_tree else {}
     clear = nodes.get(SURFACE + " Clarity")
     if clear is not None:
         clear.outputs[0].default_value = clarity
     _refraction(mat, clear is not None and clarity > 0.0)
     for name, scale in ((" Cells", 1.0), (" Fine", 2.6), (" Warp", 0.8), (" Patches", 0.7), (" Noise", 0.5),
-                        (" Facets", 2.0), (" Feathers", 1.2), (" Cracks", 1.5)):
+                        (" Facets", 2.0), (" Feathers", 1.2), (" Cracks", 1.5), (" Grain", 4.0), (" Ripple", 0.9),
+                        (" Fibres", 1.3)):
         node = nodes.get(SURFACE + name)
         if node is not None:
             node.inputs["Scale"].default_value = scale / max(cell, 1e-6)
+    for name in (" Stone Color", " Silk Color"):
+        node = nodes.get(SURFACE + name)
+        if node is not None:
+            node.outputs[0].default_value = tuple(color) + (1.0,)
+    gold = nodes.get(SURFACE + " Gold BSDF")
+    if gold is not None:
+        _set_input(gold, ("Base Color",), tuple(color) + (1.0,))
+        _set_input(gold, ("Emission Color", "Emission"), tuple(color) + (1.0,))
+    _set_code(nodes, SURFACE, glow_color, code_cell)
     amount = nodes.get(SURFACE + " Amount")
     if amount is not None:
         amount.inputs[3].default_value = 0.6 * cell

@@ -27,8 +27,9 @@ from mmd_disperse import (beats, compositor, effect, launch, materials, particle
 from mmd_disperse.arrival import limb_points  # noqa: E402
 from mmd_disperse.model import resolve, rest_points_world  # noqa: E402
 from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_CUT, ATTR_EDGE, ATTR_HOLO, ATTR_LAYER,  # noqa: E402
-                                      ATTR_AHEAD, ATTR_LOCK, ATTR_PAINT, ATTR_SHADOW, BASE_GROUP, RING_STYLES,
-                                      TARGET_GROUP, VENOM_ATTRS, VENOM_ENDS, input_identifiers)
+                                      ATTR_AHEAD, ATTR_FRAME, ATTR_LOCK, ATTR_PAINT, ATTR_SHADOW, ATTR_VARIANT,
+                                      BASE_GROUP, GLYPHS, RING_STYLES, TARGET_GROUP, VENOM_ATTRS, VENOM_ENDS,
+                                      input_identifiers)
 from scene_setup import add_model_args, load_models  # noqa: E402
 
 FAILURES = []
@@ -1183,7 +1184,8 @@ def run():
     ids = input_identifiers(mod.node_group)
     for kind, mat_name in (("NOTE", materials.PARTICLE_MATERIAL), ("CARD", materials.CARD_MATERIAL),
                            ("FEATHER", materials.PARTICLE_MATERIAL), ("BAT", materials.BAT_MATERIAL),
-                           ("INK", materials.INK_MATERIAL)):
+                           ("INK", materials.INK_MATERIAL), ("GLYPH", materials.PARTICLE_MATERIAL),
+                           ("PEBBLE", materials.PEBBLE_MATERIAL)):
         s.particles = kind
         scene.frame_set(51)
         scene.frame_set(50)
@@ -1193,6 +1195,14 @@ def run():
         if kind in ("NOTE", "BAT"):
             check(bool(mod[ids["Flap"]]) == (kind == "BAT") and bool(mod[ids["Upright"]]) == (kind == "NOTE"),
                   "bats flap, notes stand facing the front (%s)" % kind.lower())
+        if kind == "GLYPH":  # (1.9) twelve glyphs in one shape, one shown at a time, standing facing the front
+            variant = shape.data.attributes.get(ATTR_VARIANT)
+            kinds = np.zeros(len(shape.data.polygons), dtype=np.int32)
+            if variant is not None:
+                variant.data.foreach_get("value", kinds)
+            check(variant is not None and set(kinds.tolist()) == set(range(GLYPHS)) and mod[ids["Glyphs"]]
+                  and mod[ids["Upright"]], "code glyphs: %d glyphs in the shape, picked one at a time, upright"
+                  % len(set(kinds.tolist())))
     s.exit_style, s.particles = "SHRINK", "NONE"
 
     # --- sweeps across the body along the model's own axes, and the spiral (at one height the change goes round the
@@ -1381,6 +1391,147 @@ def run():
     scene.frame_set(100)
     check(evaluated_faces_and_edge(new_mesh)[0] == grown_faces, "plates: settled at the end")
     s.plates = False
+
+    # --- 1.9: lightning: a bolt comes down from high above onto the start point for the first frames (the white flash
+    # flashes then), then arcs of electricity crackle along the edge, new ones every frame
+    s.path, s.seeds, s.arc_enable, s.arc_strike = "SURFACE", "ORIGIN", True, True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with lightning")
+    check(not draw_panels(bpy.context), "panels draw with lightning")
+    check(bpy.ops.mmd_disperse.add_white_flash() == {"FINISHED"}, "white flash added for the strike")
+    body_top = float(rest_points_world(new_mesh)[:, 2].max())
+    bolt = {}
+    for f in (1, 2, 4, 14):
+        scene.frame_set(f)
+        pts = material_points(new_mesh, materials.ARC_MATERIAL)
+        bolt[f] = (len(pts), round(float(pts[:, 2].max()), 2) if len(pts) else 0.0, round(white_flash_value(scene), 3))
+    check(bolt[1][0] == 0 and bolt[2][0] > 0 and bolt[2][1] > body_top + 0.5 * height and bolt[4][1] > body_top
+          and 0 < bolt[14][0] and bolt[14][1] < body_top, "lightning: a bolt from high above for the first frames, "
+          "then arcs on the body %s (top of the body %.2f)" % (bolt, body_top))
+    check(bolt[1][2] == 0.0 and bolt[2][2] > 0.3 and bolt[14][2] == 0.0,
+          "lightning: the picture flashes white as it strikes %s" % [bolt[f][2] for f in (1, 2, 4, 14)])
+    mod = our_modifiers(new_mesh)[0]
+    reach = (mod[input_identifiers(mod.node_group)["Arc Reach"]] + 0.5 * mod[input_identifiers(mod.node_group)[
+        "Arc Length"]] + mod[input_identifiers(mod.node_group)["Noise Amount"]]) * effect._object_scale(new_mesh)
+    rest_tree = KDTree(len(new_mesh.data.vertices))
+    mw = np.array(new_mesh.matrix_world)
+    for i, v in enumerate(skinned(new_mesh) @ mw[:3, :3].T + mw[:3, 3]):
+        rest_tree.insert(Vector(v), i)
+    rest_tree.balance()
+    arrival_new = arrival_values(new_mesh) * effect._object_scale(new_mesh)
+    shots = {}
+    for f in (50, 51):
+        scene.frame_set(f)
+        pts = material_points(new_mesh, materials.ARC_MATERIAL)
+        off = np.array([abs(arrival_new[rest_tree.find(Vector(p))[1]] - s.mask.scale.x) for p in pts[::7]])
+        shots[f] = (pts, float(np.median(off)) if len(off) else np.inf)
+    check(len(shots[50][0]) > 200 and shots[50][1] < reach and len(shots[51][0]) > 200 and shots[51][1] < reach,
+          "lightning: arcs along the edge (median %.3f from it, %.3f allowed)" % (shots[50][1], reach))
+    check(len(shots[50][0]) != len(shots[51][0]) or not np.allclose(shots[50][0], shots[51][0]),
+          "lightning: new arcs every frame (%d, %d vertices)" % (len(shots[50][0]), len(shots[51][0])))
+    s.arc_enable = False
+    scene.frame_set(50)
+    check(len(material_points(new_mesh, materials.ARC_MATERIAL)) == 0, "lightning off: no arcs")
+
+    # --- 1.9: the digital rain: code rains down the old outfit ahead of the edge and the new one behind it (both carry
+    # the frame for their materials to scroll it)
+    s.path, s.old_surface, s.paint_style, s.exit_style = "DOWN", "CODE", "CODE", "FRAGMENTS"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the digital rain")
+    check(not draw_panels(bpy.context), "panels draw with the digital rain")
+    scene.frame_set(50)
+    frames = [evaluated_values(ob, ATTR_FRAME) for ob in (old_mesh, new_mesh)]
+    check(all(v is not None and len(v) and abs(float(v.mean()) - 50.0) < 1e-3 for v in frames),
+          "digital rain: both outfits carry the frame for their code")
+    coded = list(effect._glow_materials(old_mesh, s))
+    drawn = list(effect._glow_materials(new_mesh, s))
+    check(all(m.get(materials.P_SURFACE) == "CODE" and m.node_tree.nodes.get(materials.SURFACE + " Code Scale")
+              for m in coded)
+          and all(m.node_tree.nodes.get(materials.PAINT + " Code Scale") is not None
+                  and m.node_tree.nodes[materials.PAINT + " Style"].outputs[0].default_value == 2.0 for m in drawn),
+          "digital rain: in the old outfit's surface (%d) and the new outfit's drawing (%d)" % (len(coded), len(drawn)))
+    s.old_surface, s.paint_style, s.exit_style = "NONE", "NONE", "SHRINK"
+    check(not any(m.get(materials.P_PAINT) for m in drawn) and evaluated_values(old_mesh, ATTR_FRAME) is None,
+          "digital rain taken out again")
+
+    # --- 1.9: stone, gold and silk over the old outfit; going all at once under them, the new outfit waits for that
+    # moment (it would show through as it grows); the silk swells the old outfit out and silk threads wind round it
+    s.path, s.exit_timing = "UP", "AT_ONCE"
+    for style, node in (("STONE", " Stone BSDF"), ("GOLD", " Gold BSDF"), ("SILK", " Silk BSDF")):
+        s.old_surface = style
+        check(all(m.get(materials.P_SURFACE) == style and m.node_tree.nodes.get(materials.SURFACE + node)
+                  for m in coded), "%s over the old outfit's materials" % style.lower())
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the silk cocoon")
+    check(not draw_panels(bpy.context), "panels draw with the silk cocoon")
+    full = len(old_mesh.data.vertices)
+    timing = []
+    for f in range(5, 101, 5):
+        scene.frame_set(f)
+        timing.append((f, evaluated_counts(old_mesh), evaluated_counts(new_mesh)))
+    goes = next((f for f, o, _n in timing if o < full), None)
+    comes = next((f for f, _o, n in timing if n > 0), None)
+    check(goes is not None and comes is not None and abs(goes - comes) <= 5 and goes >= 60,
+          "under the silk the new outfit comes when the old one goes (frames %s, %s)" % (comes, goes))
+    scene.frame_set((goes or 60) - 10)
+    moved = np.linalg.norm(evaluated_positions(old_mesh) - skinned(old_mesh), axis=1)
+    free_old = free_vertices(old_mesh)
+    swell = float(np.median(moved[free_old])) * effect._object_scale(old_mesh)
+    check(abs(swell - s.silk_swell) < 0.2 * s.silk_swell and float(moved[~free_old].max()) < 1e-5,
+          "the silk swells the old outfit out by %.3f (silk swell %.3f), its locked parts stay" % (swell, s.silk_swell))
+    threads = ribbons.ribbon_objects(s.mask, ribbons.SILK)
+    names = {ob.parent_bone for ob in threads}
+    check(len(threads) >= 10 and {"上半身", "下半身"} <= names and not ribbons.ribbon_objects(s.mask, ribbons.LIGHT),
+          "silk threads round the arms, legs and body (%d: %s)" % (len(threads), sorted(names)))
+    tight = []
+    for ob in threads:
+        pts = np.concatenate([np.array([tuple(p.co)[:3] for p in sp.points]) for sp in ob.data.splines])
+        mw = np.array(ob.matrix_world)
+        tight.append(float(np.median(surface_distance(pts[::9] @ mw[:3, :3].T + mw[:3, 3], old_mesh))))
+    check(len(tight) and float(np.median(tight)) < s.silk_swell + 0.012 * height,
+          "the threads wind tight round the body (median %.3f from its surface)" % float(np.median(tight or [0.0])))
+    deps = bpy.context.evaluated_depsgraph_get()
+    wound = []
+    for f in ((goes or 60) - 10, 100):
+        scene.frame_set(f)
+        deps = bpy.context.evaluated_depsgraph_get()
+        count = 0
+        for ob in threads:
+            me = ob.evaluated_get(deps).to_mesh()
+            count += bool(me is not None and len(me.polygons))
+            ob.evaluated_get(deps).to_mesh_clear()
+        wound.append(count)
+    check(wound[0] == len(threads) and wound[1] == 0, "the threads are wound, then snap with the old outfit %s"
+          % wound)
+    s.silk_threads = False
+    check(not ribbons.ribbon_objects(s.mask), "silk threads removed when switched off")
+    s.old_surface, s.exit_timing, s.silk_threads = "NONE", "EDGE", True
+
+    # --- 1.9: the transporter beam: the old outfit shimmers away a few faces at a time and the new one in, inside a
+    # column of light with sparkles; the locked parts go with the old outfit and come back
+    s.entrance, s.easing = "BEAM", "LINEAR"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the transporter beam")
+    check(not draw_panels(bpy.context), "panels draw with the transporter beam")
+    old_faces = len(old_mesh.data.polygons)
+    beamed = []
+    for f in range(1, 101, 3):
+        scene.frame_set(f)
+        beamed.append((f, evaluated_faces_and_edge(old_mesh)[0],
+                       len(material_points(new_mesh, materials.BEAM_MATERIAL, others=True)),
+                       len(material_points(new_mesh, materials.BEAM_MATERIAL)), instance_count(new_mesh)))
+    locked_old = locked_faces(old_mesh)
+    going = [o for _f, o, _n, _c, _i in beamed if 0.1 * old_faces < o < 0.9 * old_faces]
+    gone = min(o for _f, o, _n, _c, _i in beamed)
+    check(beamed[0][1] == old_faces and going and gone < 0.5 * locked_old and beamed[-1][1] == locked_old,
+          "beam: the old outfit shimmers away (%d frames part way), its locked parts too (%d of %d) and they come back"
+          % (len(going), gone, locked_old))
+    coming = [n for _f, _o, n, _c, _i in beamed if 0 < n < 0.9 * len(new_mesh.data.vertices)]
+    check(beamed[0][2] == 0 and coming and evaluated_faces_and_edge(new_mesh)[0] == grown_faces,
+          "beam: the new outfit shimmers in (%d frames part way) and is whole at the end" % len(coming))
+    column = [(c, i) for _f, _o, _n, c, i in beamed]
+    check(column[0] == (0, 0) and column[-1] == (0, 0) and max(c for c, _i in column) > 0
+          and max(i for _c, i in column) >= s.beam_sparkles,
+          "beam: a column of light with %d sparkles while it beams, gone before and after" % s.beam_sparkles)
+    check(any(m.get(materials.P_GLOW) for m in effect._glow_materials(old_mesh, s, True)),
+          "beam: the locked parts glow too")
+    s.entrance, s.easing = "GROW", "EASE"
     for key_, value in saved.items():
         setattr(s, key_, value)
 
@@ -1648,6 +1799,21 @@ def run():
         if key == "MARK50":
             check(s.reactor and s.plates and s.layer_enable and len(white_flash(scene)[1]) == 1,
                   "Mark 50 preset: reactor, plates, undersuit and the white flash")
+        if key == "LIGHTNING":
+            check(s.arc_enable and s.arc_strike and len(white_flash(scene)[1]) == 1,
+                  "lightning preset: arcs, the strike and the white flash")
+        if key == "MATRIX":
+            check(s.old_surface == "CODE" and s.paint_style == "CODE" and s.particles == "GLYPH",
+                  "digital rain preset: code over both outfits, falling glyphs")
+        if key in ("PETRIFY", "MIDAS", "COCOON"):
+            check(s.old_surface == {"PETRIFY": "STONE", "MIDAS": "GOLD", "COCOON": "SILK"}[key]
+                  and s.exit_timing == "AT_ONCE" and effect._held(s), "%s preset: %s, all at once"
+                  % (key, s.old_surface.lower()))
+        if key == "COCOON":
+            check(len(ribbons.ribbon_objects(s.mask, ribbons.SILK)) >= 10 and s.particles == "BUTTERFLY",
+                  "cocoon preset: silk threads, butterflies")
+        if key == "TRANSPORTER":
+            check(s.entrance == "BEAM" and s.easing == "LINEAR", "transporter preset: the beam on a linear timeline")
     s.beat_sync = False  # (the beat drop preset turned it on; the finale checks below are not on the beat)
     check(s.path == "SURFACE" and s.seeds == "LIMBS" and s.ribbon_enable and s.particles == "STAR",
           "magical girl preset applied (and rebuilt)")

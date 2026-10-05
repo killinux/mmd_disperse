@@ -159,6 +159,21 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                              description="Size of the ring (1 fits around the body); the comet's distance from it")
     ring_strength: FloatProperty(name="Ring Glow", default=6.0, min=0.0, soft_max=50.0, update=_sync)
 
+    # --- lightning
+    arc_enable: BoolProperty(name="Lightning Arcs", default=False, update=_sync,
+                             description="Jagged arcs of electricity crackle along the edge, new ones every frame "
+                                         "(Thor, Shazam; uses the glow color)")
+    arc_count: IntProperty(name="Arc Count", default=40, min=0, soft_max=300, update=_sync,
+                           description="About how many arcs crackle at a time where the edge crosses the body")
+    arc_length: _distance("Arc Length", "How long an arc is", 1.0)
+    arc_reach: _distance("Arc Reach", "How far to either side of the edge the arcs crackle", 0.6)
+    arc_thickness: _distance("Arc Thickness", "Radius of the arcs", 0.015, soft_max=0.2)
+    arc_strength: FloatProperty(name="Arc Glow", default=12.0, min=0.0, soft_max=100.0, update=_sync)
+    arc_strike: BoolProperty(name="Lightning Bolt", default=True, update=_sync,
+                             description="A bolt of lightning comes down on the start point as the transformation "
+                                         "begins; with the compositor's white flash the picture flashes white then "
+                                         "(as bright as the finale's White Flash)")
+
     # --- how the new outfit arrives
     entrance: EnumProperty(
         name="New Outfit Entrance",
@@ -181,8 +196,16 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                       "outfits swap, then drifts up and thins out (a ninja's transformation)"),
                ("SHADOW", "Rise from the Shadow",
                 "No edge: the body sinks into its own black shadow on the floor, head first, and the new outfit stands "
-                "up out of it, feet first")),
+                "up out of it, feet first"),
+               ("BEAM", "Transporter Beam",
+                "No edge: a column of light comes down round the body with sparkles drifting up and down in it; the "
+                "old outfit shimmers away and the new one shimmers in (Star Trek; uses the glow color, the sparkles "
+                "the particle color)")),
         default="GROW", update=_sync)
+    beam_sparkles: IntProperty(name="Beam Sparkles", default=250, min=0, soft_max=2000, update=_sync,
+                               description="How many sparkles drift up and down in the column of light")
+    beam_strength: FloatProperty(name="Beam Glow", default=2.0, min=0.0, soft_max=20.0, update=_sync,
+                                 description="Brightness of the column of light")
     smoke_count: IntProperty(name="Smoke Puffs", default=120, min=1, soft_max=2000, update=_sync,
                              description="About how many balls of smoke the puff is made of")
     smoke_size: _distance("Smoke Size", "How big the balls of smoke are", 1.8)
@@ -267,12 +290,31 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                 "(uses the glow color)"),
                ("INK", "Ink Wash", "Ink spreads over the old outfit in patches and turns it into an ink wash painting "
                                    "of itself, soaking it dark right at the edge (uses the drawing's paper and ink "
-                                   "colors)")),
+                                   "colors)"),
+               ("STONE", "Turn to Stone", "The old outfit turns to grey stone in patches and cracks open just before "
+                                          "the edge reaches it (Medusa; with Cast Off and Together at the End the "
+                                          "statue crumbles)"),
+               ("GOLD", "Turn to Gold", "Liquid gold spreads over the old outfit and turns it into polished gold, a "
+                                        "molten line where it spreads (King Midas; the surface color is the gold)"),
+               ("SILK", "Silk Cocoon", "White silk spreads over the old outfit and swells it into a cocoon, threads "
+                                       "of silk winding round the body (with Cast Off and Together at the End the "
+                                       "cocoon breaks open)"),
+               ("CODE", "Digital Rain", "Columns of glowing code rain down the old outfit (The Matrix; uses the glow "
+                                        "color)")),
         default="NONE", update=_sync)
     surface_width: _distance("Surface Reach", "How far ahead of the edge the old outfit starts to change", 3.0)
     surface_color: FloatVectorProperty(name="Surface Color", subtype="COLOR", size=3, min=0.0, max=1.0,
                                        default=(0.006, 0.006, 0.009), update=_sync,
-                                       description="Color of the veins, the ice or the char")
+                                       description="Color of the veins, the ice, the char, the stone, the gold or the "
+                                                   "silk")
+    silk_swell: _distance("Silk Swell", "With the silk cocoon: how far the silk swells the old outfit out", 0.15,
+                          min_value=-10.0)
+    silk_threads: BoolProperty(name="Silk Threads", default=True, update=_sync,
+                               description="With the silk cocoon: threads of silk wind round the body, arms and legs "
+                                           "as the silk spreads, and snap when the old outfit goes (needs an MMD "
+                                           "skeleton)")
+    thread_turns: FloatProperty(name="Thread Turns", default=9.0, min=0.5, soft_max=20.0, update=_sync,
+                                description="Turns of the silk threads round each part of the body")
     ice_crystals: IntProperty(name="Ice Crystals", default=600, min=0, soft_max=3000, update=_sync,
                               description="With frost: about how many ice crystals grow out of the old outfit before "
                                           "the edge shatters it (0 = none; they use the particle color)")
@@ -289,7 +331,9 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                                       "paper (outlined, screentone where it is dark), then its colours "
                                                       "flood in behind the edge like watercolour"),
                ("INK", "Ink Wash", "The new outfit appears at the edge as an ink wash painting, then its colours bloom "
-                                   "behind it (pair it with the old outfit's Ink Wash surface and ink drops)")),
+                                   "behind it (pair it with the old outfit's Ink Wash surface and ink drops)"),
+               ("CODE", "Digital Rain", "The new outfit appears at the edge as columns of glowing code raining down "
+                                        "it, then its colours come in behind it (The Matrix; uses the glow color)")),
         default="NONE", update=_sync)
     paint_width: _distance("Color Bleed", "How far behind the edge the colours have filled in", 2.5)
     sketch_width: _distance("Sketch Ahead", "Line art: how far ahead of the edge the drawing shows", 3.0)
@@ -349,8 +393,9 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
         name="Exit Timing",
         items=(("EDGE", "With the Edge", "Each part of the old outfit goes where the edge passes"),
                ("AT_ONCE", "Together at the End",
-                "The old outfit stays while the wave crosses it (frost, veins or char cover all of it, the new outfit "
-                "forms underneath) and goes all at once when the wave is done: freeze, then shatter")),
+                "The old outfit stays while the wave crosses it and goes all at once when the wave is done: freeze, "
+                "then shatter. Under clear ice the new outfit forms as the wave passes; under a surface you cannot see "
+                "through (stone, gold, silk ...) it is there when the old outfit goes")),
         default="EDGE", update=_sync)
     frag_size: FloatProperty(name="Flake Size", default=0.85, min=0.05, max=1.0, subtype="FACTOR", update=_sync,
                              description="Size of each flake relative to the face it breaks from")
@@ -411,8 +456,8 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                description="Brightness of the flash")
     finale_width: _distance("Sweep Width", "Half width of the band of light", 0.8, soft_max=5.0)
     finale_white: FloatProperty(name="White Flash", default=0.8, min=0.0, max=1.0, subtype="FACTOR", update=_sync,
-                                description="How far the whole picture flashes to white as the finale starts "
-                                            "(needs the compositor node: Add White Flash)")
+                                description="How far the whole picture flashes to white as the finale starts, and as "
+                                            "the lightning bolt strikes (needs the compositor node: Add White Flash)")
     finale_sparkles: IntProperty(name="Sparkle Count", default=300, min=0, soft_max=3000, update=_sync,
                                  description="About how many stars burst out of the new outfit (0 = none)")
     finale_distance: _distance("Sparkle Distance", "How far the stars fly out", 3.5, soft_max=20.0)
@@ -435,6 +480,9 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                        "black for a black swan)"),
                ("BAT", "Bats", "Black bats flapping their wings (vampire)"),
                ("INK", "Ink Drops", "Splashes of black ink (ink wash)"),
+               ("GLYPH", "Code Glyphs", "Glowing glyphs of code that fall and change as they go (The Matrix; let the "
+                                        "wind blow down)"),
+               ("PEBBLE", "Pebbles", "Small stones that tumble down (crumbling stone; the particle color tints them)"),
                ("OBJECT", "Custom Object", "Copies of any mesh object")),
         default="NONE", update=_sync)
     particle_object: PointerProperty(name="Particle Object", type=bpy.types.Object, poll=_mesh_object,

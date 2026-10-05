@@ -1,5 +1,5 @@
-"""Petal, butterfly, star, cube, coin, ice shard, ember, music note, playing card, feather, bat and ink drop shapes the
-old outfit can turn into, and the ice crystals that grow on it with frost.
+"""Petal, butterfly, star, cube, coin, ice shard, ember, music note, playing card, feather, bat, ink drop, code glyph
+and pebble shapes the old outfit can turn into, and the ice crystals that grow on it with frost.
 
 They are ordinary mesh objects in a hidden collection, so they can be edited (or swapped for any other
 object with the "Custom Object" option); the node tree only reads their geometry.
@@ -10,6 +10,7 @@ import math
 import bpy
 
 from . import materials
+from .node_groups import ATTR_VARIANT, GLYPHS
 
 COLLECTION = "MMD Disperse Particles"
 PETAL = "MMD Disperse Petal"
@@ -25,10 +26,31 @@ CARD = "MMD Disperse Card"
 FEATHER = "MMD Disperse Feather"
 BAT = "MMD Disperse Bat"
 INK = "MMD Disperse Ink Drop"
+GLYPH = "MMD Disperse Glyphs"
+PEBBLE = "MMD Disperse Pebble"
 NAMES = {"PETAL": PETAL, "BUTTERFLY": BUTTERFLY, "STAR": STAR, "CUBE": CUBE, "COIN": COIN, "SHARD": SHARD,
-         "EMBER": EMBER, "CRYSTAL": CRYSTAL, "NOTE": NOTE, "CARD": CARD, "FEATHER": FEATHER, "BAT": BAT, "INK": INK}
+         "EMBER": EMBER, "CRYSTAL": CRYSTAL, "NOTE": NOTE, "CARD": CARD, "FEATHER": FEATHER, "BAT": BAT, "INK": INK,
+         "GLYPH": GLYPH, "PEBBLE": PEBBLE}
 FLAPPING = ("BUTTERFLY", "BAT")  # shapes with two wings in the XY plane (x > 0, x < 0) that flap
-UPRIGHT = ("NOTE",)  # shapes that stand facing the front (-Y) and only sway
+UPRIGHT = ("NOTE", "GLYPH")  # shapes that stand facing the front (-Y) and only sway
+VARIANTS = ("GLYPH",)  # shapes made of several (ATTR_VARIANT on their faces), one shown at a time
+
+# The code glyphs: digits and mirrored half-width katakana as 5 x 7 dot patterns (top row first), like The Matrix's.
+GLYPH_ROWS = (
+    (".###.", "#...#", "#..##", "#.#.#", "##..#", "#...#", ".###."),  # 0
+    ("..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."),  # 1
+    ("#####", "#....", "#....", "####.", "....#", "#...#", ".###."),  # 5
+    ("#####", "....#", "...#.", "..#..", ".#...", ".#...", ".#..."),  # 7
+    ("#####", "#....", "#####", "#....", ".#...", "..#..", "...#."),  # wo (mirrored)
+    (".###.", "#....", ".###.", "#....", ".###.", "#....", "....."),  # mi
+    ("#.#.#", "#.#.#", "#....", ".#...", "..#..", "...#.", "....#"),  # tsu
+    ("#...#", "#...#", "#...#", "#....", ".#...", "..#..", "...#."),  # ri
+    ("..#..", "#####", ".#...", "..#..", ".###.", "#.#.#", "..#.."),  # ne
+    ("#####", "..#..", "#####", "..#..", "..#..", "..#..", "###.."),  # mo
+    ("#####", "#....", "#....", "#....", "#....", "#....", "#####"),  # ko
+    ("...##", "#....", "#..##", "#....", ".#...", "..#..", "...##"),  # shi
+)
+assert len(GLYPH_ROWS) == GLYPHS
 
 
 def _petal():
@@ -252,9 +274,43 @@ def _ink_drop(sides=18):
     return verts, faces, [(1.0, 0.5)] * len(verts)
 
 
+def _glyphs():
+    """The code glyphs, each 1 unit tall standing in the XZ plane facing the front (-Y), all at the origin: a square
+    dot per pixel of its pattern. Returns (verts, faces, uvs, the glyph of each face)."""
+    pixel = 1.0 / 7.0
+    dot = 0.4 * pixel
+    verts, faces, variants = [], [], []
+    for k, rows in enumerate(GLYPH_ROWS):
+        for row, line in enumerate(rows):
+            for col, mark in enumerate(line):
+                if mark != "#":
+                    continue
+                cx, cz = (col - 2.0) * pixel, (3.0 - row) * pixel
+                start = len(verts)
+                verts += [(cx - dot, 0.0, cz - dot), (cx + dot, 0.0, cz - dot), (cx + dot, 0.0, cz + dot),
+                          (cx - dot, 0.0, cz + dot)]
+                faces.append((start, start + 1, start + 2, start + 3))
+                variants.append(k)
+    return verts, faces, [(1.0, 0.5)] * len(verts), variants
+
+
+def _pebble():
+    """Pebble about 1 unit across: an icosahedron with its corners pushed in and out a little, flattened."""
+    t = (1.0 + math.sqrt(5.0)) / 2.0
+    corners = [(-1, t, 0), (1, t, 0), (-1, -t, 0), (1, -t, 0), (0, -1, t), (0, 1, t), (0, -1, -t), (0, 1, -t),
+               (t, 0, -1), (t, 0, 1), (-t, 0, -1), (-t, 0, 1)]
+    bumps = (1.0, 0.82, 0.93, 1.08, 0.86, 1.04, 0.9, 1.1, 0.84, 0.97, 1.06, 0.88)
+    size = 0.5 / math.sqrt(1.0 + t * t)
+    verts = [(x * size * r, y * size * r * 0.85, z * size * r * 0.7) for (x, y, z), r in zip(corners, bumps)]
+    faces = [(0, 11, 5), (0, 5, 1), (0, 1, 7), (0, 7, 10), (0, 10, 11), (1, 5, 9), (5, 11, 4), (11, 10, 2),
+             (10, 7, 6), (7, 1, 8), (3, 9, 4), (3, 4, 2), (3, 2, 6), (3, 6, 8), (3, 8, 9), (4, 9, 5), (2, 4, 11),
+             (6, 2, 10), (8, 6, 7), (9, 8, 1)]
+    return verts, faces, [(1.0, 0.5)] * len(verts)
+
+
 _SHAPES = {"PETAL": _petal, "BUTTERFLY": _butterfly, "STAR": _star, "CUBE": _cube, "COIN": _coin, "SHARD": _shard,
            "EMBER": _ember, "CRYSTAL": _crystal, "NOTE": _note, "CARD": _card, "FEATHER": _feather, "BAT": _bat,
-           "INK": _ink_drop}
+           "INK": _ink_drop, "GLYPH": _glyphs, "PEBBLE": _pebble}
 
 
 def _material(kind):
@@ -268,6 +324,8 @@ def _material(kind):
         return materials.ensure_bat_material()
     if kind == "INK":
         return materials.ensure_ink_material()
+    if kind == "PEBBLE":
+        return materials.ensure_pebble_material()
     return materials.ensure_particle_material()
 
 
@@ -289,12 +347,15 @@ def ensure_asset(kind, scene):
     ob = bpy.data.objects.get(name)
     if ob is not None and ob.type == "MESH":
         return ob
-    verts, faces, uvs = _SHAPES[kind]()
+    shape = _SHAPES[kind]()
+    verts, faces, uvs = shape[:3]
     me = bpy.data.meshes.new(name)
     me.from_pydata(verts, [], faces)
     layer = me.uv_layers.new(name="UVMap")
     for loop in me.loops:
         layer.data[loop.index].uv = uvs[loop.vertex_index]
+    if len(shape) > 3:  # which of its shapes each face belongs to
+        me.attributes.new(ATTR_VARIANT, "INT", "FACE").data.foreach_set("value", shape[3])
     me.materials.append(_material(kind))
     me.update()
     ob = bpy.data.objects.new(name, me)
@@ -314,7 +375,8 @@ def remove_assets():
     if coll is not None and not coll.all_objects:
         bpy.data.collections.remove(coll)
     for name in (materials.PARTICLE_MATERIAL, materials.COIN_MATERIAL, materials.ICE_MATERIAL, materials.CARD_MATERIAL,
-                 materials.BAT_MATERIAL, materials.INK_MATERIAL, materials.SMOKE_MATERIAL):
+                 materials.BAT_MATERIAL, materials.INK_MATERIAL, materials.SMOKE_MATERIAL, materials.PEBBLE_MATERIAL,
+                 materials.ARC_MATERIAL, materials.BEAM_MATERIAL):
         mat = bpy.data.materials.get(name)
         if mat is not None and mat.users == 0:
             bpy.data.materials.remove(mat)

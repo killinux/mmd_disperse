@@ -150,6 +150,34 @@ class MMDDISPERSE_PT_ring(_Panel, bpy.types.Panel):
             layout.label(text="Uses the glow color of the wire layer", icon="INFO")
 
 
+class MMDDISPERSE_PT_lightning(_Panel, bpy.types.Panel):
+    bl_label = "Lightning Arcs"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "arc_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.arc_enable
+        col = layout.column(align=True)
+        col.prop(s, "arc_count")
+        col.prop(s, "arc_length")
+        col.prop(s, "arc_reach")
+        col.prop(s, "arc_thickness")
+        col.prop(s, "arc_strength")
+        col = layout.column()
+        col.prop(s, "arc_strike")
+        if s.arc_strike:
+            col.prop(s, "finale_white")
+            col.operator("mmd_disperse.add_white_flash", icon="NODE_COMPOSITING")
+        layout.label(text="Uses the glow color of the wire layer", icon="INFO")
+
+
 class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
     bl_label = "New Outfit Entrance"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -203,6 +231,13 @@ class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
             col.prop(s, "smoke_size")
         elif s.entrance == "SHADOW":
             layout.prop(s, "shadow_dir")
+        elif s.entrance == "BEAM":
+            col = layout.column(align=True)
+            col.prop(s, "beam_sparkles")
+            col.prop(s, "beam_strength")
+            col.prop(s, "particle_size")
+            layout.prop(s, "particle_color")
+            layout.label(text="The column uses the glow color", icon="INFO")
 
 
 class MMDDISPERSE_PT_paint(_Panel, bpy.types.Panel):
@@ -216,6 +251,10 @@ class MMDDISPERSE_PT_paint(_Panel, bpy.types.Panel):
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
         layout.prop(s, "paint_style")
+        if s.paint_style == "CODE":
+            layout.prop(s, "paint_width")
+            layout.label(text="Uses the glow color of the wire layer", icon="INFO")
+            return
         if s.paint_style == "NONE" and s.old_surface != "INK":
             return
         col = layout.column(align=True)
@@ -298,12 +337,22 @@ class MMDDISPERSE_PT_surface(_Panel, bpy.types.Panel):
             return
         col = layout.column(align=True)
         col.prop(s, "surface_width")
-        col.prop(s, "surface_color")
+        if s.old_surface == "CODE":
+            layout.label(text="Uses the glow color of the wire layer", icon="INFO")
+        elif s.old_surface != "INK":
+            col.prop(s, "surface_color")
         if s.old_surface == "FROST":
             col = layout.column(align=True)
             col.prop(s, "ice_clarity")
             col.prop(s, "ice_crystals")
             col.prop(s, "crystal_size")
+        elif s.old_surface == "SILK":
+            col = layout.column(align=True)
+            col.prop(s, "silk_swell")
+            col.prop(s, "silk_threads")
+            sub = col.column(align=True)
+            sub.active = s.silk_threads
+            sub.prop(s, "thread_turns")
 
 
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
@@ -522,6 +571,7 @@ classes = (
     MMDDISPERSE_PT_edge,
     MMDDISPERSE_PT_wire,
     MMDDISPERSE_PT_ring,
+    MMDDISPERSE_PT_lightning,
     MMDDISPERSE_PT_entrance,
     MMDDISPERSE_PT_paint,
     MMDDISPERSE_PT_undersuit,

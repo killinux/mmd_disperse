@@ -18,14 +18,15 @@ over it) and burst into sparkles (finale). The new outfit can first form as a da
 trailing behind, and both outfits mark how close each vertex is to the cut so materials can light up the inside
 seen through it. Both outfits can also break into scales that turn over as the edge passes, the old outfit on one
 side of every scale and the new one on the other (Mystique), and the wires, the rim, the finale and the particles
-can pulse on the beats of the music.
+can pulse on the beats of the music. Arcs of lightning can crackle along the edge after a bolt strikes the start
+point, and a transporter beam can shimmer one outfit away and the other in inside a column of light.
 """
 
 import math
 
 import bpy
 
-VERSION = 13
+VERSION = 14
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
@@ -66,11 +67,19 @@ ATTR_SHADOW = "disperse_shadow"  # rising from the shadow: 1 where the outfit is
 ATTR_SCREEN = "mmdd_screen"  # the front's panel / TV static (rings.py): x, y across it (-1 .. 1), z the frame
 ATTR_SCREEN_STYLE = "mmdd_screen_style"  # ... 0 the glowing panel, 1 the static
 ATTR_SMOKE = "mmdd_smoke_clear"  # smoke puff (on its instances): 0 dense .. 1 cleared (0 when missing: still dense)
+ATTR_FRAME = "mmdd_frame"  # the frame, on what the materials animate: the digital rain, the transporter beam's column
+ATTR_BEAM = "mmdd_beam"  # the beam's column: x, y round it (cosine, sine), z up it (0 at the bottom .. 1 at the top)
+ATTR_VARIANT = "mmdd_variant"  # particle shapes made of several (the code glyphs): which one a face belongs to
+_ARC_DIR = "mmdd_arc_dir"  # scratch: the way the distance grows over the surface, where the arcs crackle
+_ARC_ATTRS = ("mmdd_arc_normal", "mmdd_arc_side", "mmdd_arc_len", "mmdd_arc_rnd")  # scratch: each arc's own values
 
 # Wing angles (degrees) of the poses a butterfly cycles through.
 FLAP_ANGLES = (70.0, 45.0, 15.0, -10.0, 15.0, 45.0)
 # Share of the finale the light sweep takes to cross the outfit; the last sparkles fade in the rest.
 SWEEP_SHARE = 0.7
+GLYPHS = 12  # code glyphs in the glyph particle shape (particles.py)
+ARC_POINTS = 14  # points along an arc of lightning
+STRIKE_POINTS = 120  # ... and along the bolt of the strike
 
 # (name, socket type, default, min, max, subtype)
 FIELD_INPUTS = (
@@ -103,12 +112,34 @@ VENOM_INPUTS = (
 )
 
 # Entrances without a front, timed by the mask radius against Clamp Distance (the moment): the evolution flash
-# (the outfits flash in turn, faster and faster) and rising from the shadow (the body sinks into its shadow, the new
-# outfit stands up out of it).
+# (the outfits flash in turn, faster and faster), rising from the shadow (the body sinks into its shadow, the new
+# outfit stands up out of it) and the transporter beam (the outfits shimmer out and in inside a column of light).
 TIMELINE_INPUTS = (
     ("Evolve", "NodeSocketBool", False, None, None, None),
     ("Shadow", "NodeSocketBool", False, None, None, None),
     ("Shadow Direction", "NodeSocketVector", (0.35, 0.55, -1.0), None, None, None),
+    ("Beam", "NodeSocketBool", False, None, None, None),
+)
+
+# Both outfits. Lightning: arcs crackling along the edge over the new outfit (over the old one when there is no new
+# one) and the bolt that strikes the start point first. One mesh of the effect (Main) draws what there is once: the
+# strike and the transporter beam's column with its sparkles. Code: store the frame for the digital rain.
+EXTRA_INPUTS = (
+    ("Main", "NodeSocketBool", False, None, None, None),
+    ("Arcs", "NodeSocketBool", False, None, None, None),
+    ("Arc Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Arc Length", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
+    ("Arc Reach", "NodeSocketFloat", 0.8, 0.0, 1e9, "DISTANCE"),
+    ("Arc Thickness", "NodeSocketFloat", 0.015, 0.0, 1e9, "DISTANCE"),
+    ("Arc Material", "NodeSocketMaterial", None, None, None, None),
+    ("Strike", "NodeSocketBool", False, None, None, None),
+    ("Strike Until", "NodeSocketFloat", 0.0, 0.0, 1e9, "DISTANCE"),
+    ("Strike Height", "NodeSocketFloat", 30.0, 0.0, 1e9, "DISTANCE"),
+    ("Beam Count", "NodeSocketInt", 250, 0, 100000, None),
+    ("Beam Material", "NodeSocketMaterial", None, None, None, None),
+    ("Star Object", "NodeSocketObject", None, None, None, None),
+    ("Star Size", "NodeSocketFloat", 0.35, 0.0, 1e9, "DISTANCE"),
+    ("Code", "NodeSocketBool", False, None, None, None),
 )
 
 # Scales (Mystique): both outfits break into scales that turn over where the edge passes.
@@ -168,16 +199,17 @@ TARGET_INPUTS = FIELD_INPUTS + (
     ("Plate Size", "NodeSocketFloat", 0.7, 0.0, 1e9, "DISTANCE"),
     ("Plate Lift", "NodeSocketFloat", 0.25, -1e9, 1e9, "DISTANCE"),
     ("Plate Width", "NodeSocketFloat", 1.6, 0.0, 1e9, "DISTANCE"),
-    ("Paint Style", "NodeSocketInt", 0, 0, 2, None),
+    ("Paint Style", "NodeSocketInt", 0, 0, 3, None),
     ("Paint Width", "NodeSocketFloat", 2.0, 0.0, 1e9, "DISTANCE"),
     ("Sketch Width", "NodeSocketFloat", 3.0, 0.0, 1e9, "DISTANCE"),
     ("Outline Width", "NodeSocketFloat", 0.03, 0.0, 1e9, "DISTANCE"),
     ("Outline Material", "NodeSocketMaterial", None, None, None, None),
+    ("Hold Until", "NodeSocketFloat", 0.0, 0.0, 1e9, "DISTANCE"),
     ("Poof", "NodeSocketBool", False, None, None, None),
     ("Smoke Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
     ("Smoke Size", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
     ("Smoke Material", "NodeSocketMaterial", None, None, None, None),
-) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS
+) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS
 
 BASE_INPUTS = FIELD_INPUTS + (
     ("Shrink", "NodeSocketFloat", 0.08, -10000.0, 10000.0, "DISTANCE"),
@@ -221,7 +253,9 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Suck Target", "NodeSocketVector", (0.0, 0.0, 0.0), None, None, None),
     ("Suck Turns", "NodeSocketFloat", 1.5, -100.0, 100.0, None),
     ("Brooch Object", "NodeSocketObject", None, None, None, None),
-) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS
+    ("Swell", "NodeSocketFloat", 0.0, -1e9, 1e9, "DISTANCE"),
+    ("Glyphs", "NodeSocketBool", False, None, None, None),
+) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS
 
 # The probe takes these from the modifier it stands in for (the new outfit's finale and fly-in settings are
 # missing on the old outfit's, which does not use them).
@@ -267,6 +301,7 @@ RIBBON_INPUTS = (
     ("Start", "NodeSocketFloat", 0.0, -1e9, 1e9, "DISTANCE"),
     ("End", "NodeSocketFloat", 1.0, -1e9, 1e9, "DISTANCE"),
     ("Lead", "NodeSocketFloat", 1.0, 0.0, 10000.0, "DISTANCE"),
+    ("Fade From", "NodeSocketFloat", 1.0, -1e9, 1e9, "DISTANCE"),
     ("Linger", "NodeSocketFloat", 2.0, 0.0, 10000.0, "DISTANCE"),
     ("Width", "NodeSocketFloat", 0.15, 0.0, 10000.0, "DISTANCE"),
     ("Material", "NodeSocketMaterial", None, None, None, None),
@@ -886,6 +921,10 @@ def build_target_group(field_group, venom_group):
     sketch_width = b.switch("FLOAT", line_art, 0.0, sketch_width, x=-550, y=-700)
     front = b.math("ADD", radius, b.math("MAXIMUM", holo_width, sketch_width, x=-450, y=-600), x=-400, y=-500)
     shown = b.compare("LESS_EQUAL", d, front, x=-700, y=150)
+    # Under an opaque shell of the old outfit that goes all at once (stone, gold, silk ...) the new outfit waits for
+    # that moment instead of showing through it as it grows (Hold Until: 0 = no waiting).
+    shown = b.boolean("AND", shown, b.compare("GREATER_EQUAL", radius, gi.outputs["Hold Until"], x=-700, y=300),
+                      x=-650, y=200)
     # Reactor (Mark 50): the patch of the suit around the start point(s) is there first, glowing and pulsing, and the
     # suit flows out of it. Its glow fades once the wave is a few patch sizes on.
     reactor_stat = b.node("GeometryNodeAttributeStatistic", -1300, 1800, data_type="FLOAT", domain="POINT")
@@ -1250,6 +1289,13 @@ def build_target_group(field_group, venom_group):
     risen = _shadow_place(b, gi, me, risen, geo, anchor, _shadow_amount(b, geo, anchor, p, True, 4000, 13200), 4400,
                           12800)
     suit = b.switch("GEOMETRY", gi.outputs["Shadow"], suit, risen, x=6350, y=1000)
+    # --- Transporter beam: the new outfit shimmers in a few faces at a time, glowing, inside a column of light.
+    beam_shown, beam_glow = _beam_faces(b, gi, anchor, p, 4000, 22000)[1]
+    beamed = b.delete(geo, b.boolean("NOT", beam_shown, x=6400, y=22000), "FACE", x=6600, y=22000)
+    beamed = b.store(beamed, ATTR_EDGE, b.math("MAXIMUM", b.on_domain(beam_glow, "FACE", x=6600, y=21800), flash,
+                                               x=6800, y=21800), x=6800, y=22000)
+    suit = b.switch("GEOMETRY", gi.outputs["Beam"], suit, beamed, x=6375, y=1000)
+    column = _beam_column(b, gi, geo, p, me, 4000, 24000)
 
     # --- Scales (Mystique): the new outfit turns in scale by scale, each scale the second half of its turn (the old
     # outfit shows the first): edge-on to flat, glinting as it goes.
@@ -1284,10 +1330,16 @@ def build_target_group(field_group, venom_group):
     inked = b.node("GeometryNodeSetMaterial", 8000, 13800)
     b.feed(inked.inputs["Geometry"], flip.outputs["Mesh"])
     b.feed(inked.inputs["Material"], gi.outputs["Outline Material"])
-    outlined = b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Outline Width"], 0.0, x=8000, y=14100),
-                        painted, b.join([painted, inked.outputs["Geometry"]], x=8200, y=13700), x=8400, y=13600)
+    # (drawings only: the digital rain has no outline)
+    drawn = b.boolean("AND", b.compare("GREATER_THAN", gi.outputs["Outline Width"], 0.0, x=8000, y=14100),
+                      b.compare("LESS_THAN", gi.outputs["Paint Style"], 2.5, x=8000, y=14250), x=8200, y=14150)
+    outlined = b.switch("GEOMETRY", drawn, painted, b.join([painted, inked.outputs["Geometry"]], x=8200, y=13700),
+                        x=8400, y=13600)
     suit = b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Paint Style"], 0.5, x=6400, y=1300), suit,
                     outlined, x=6500, y=1000)
+    # The digital rain scrolls with the frame (the material reads it).
+    suit = b.switch("GEOMETRY", gi.outputs["Code"], suit, b.store(suit, ATTR_FRAME, b.node(
+        "GeometryNodeInputSceneTime", 6400, 1500).outputs["Frame"], x=6500, y=1500), x=6550, y=1000)
 
     # --- Wire layer: keep a band around the boundary.
     t = b.math("SUBTRACT", d, radius, x=-700, y=-500)
@@ -1329,7 +1381,7 @@ def build_target_group(field_group, venom_group):
     b.feed(mat.inputs["Geometry"], tube)
     b.feed(mat.inputs["Material"], gi.outputs["Wire Material"])
     timeline = b.boolean("OR", b.boolean("OR", gi.outputs["Evolve"], gi.outputs["Poof"], x=1150, y=100),
-                         gi.outputs["Shadow"], x=1350, y=100)
+                         b.boolean("OR", gi.outputs["Shadow"], gi.outputs["Beam"], x=1150, y=250), x=1350, y=100)
     wire_on = b.boolean("AND", gi.outputs["Wire"], b.boolean("NOT", timeline, x=1550, y=100), x=1750, y=150)
     wire_on = b.boolean("AND", wire_on, b.boolean("NOT", b.boolean("OR", gi.outputs["Clamp"],
                                                                                 gi.outputs["Ghosts"], x=1550, y=-50),
@@ -1415,14 +1467,13 @@ def build_target_group(field_group, venom_group):
     # Symbiote: with no old outfit the tendrils run over the new one (the skeleton is bound to its original vertices).
     aged = b.store(gi.outputs["Geometry"], ATTR_AGE, b.math("SUBTRACT", radius, d, x=1300, y=-4300), x=1500, y=-4200)
     venom = _venom(b, gi, venom_group, aged, 1700, -4200)
+    # Lightning: arcs crackling along the edge, the strike at the start.
+    arcs = _arcs(b, gi, geo, d, radius, beat, 4000, 27000)
+    strike = _strike(b, gi, radius, me, 4000, 30000)
 
     join = b.node("GeometryNodeJoinGeometry", 2000, 250)
-    b.feed(join.inputs["Geometry"], wire)
-    b.feed(join.inputs["Geometry"], suit)
-    b.feed(join.inputs["Geometry"], sparkles)
-    b.feed(join.inputs["Geometry"], venom)
-    b.feed(join.inputs["Geometry"], frames)
-    b.feed(join.inputs["Geometry"], smoke)
+    for part in (wire, suit, sparkles, venom, frames, smoke, column, arcs, strike):
+        b.feed(join.inputs["Geometry"], part)
     b.feed(go.inputs["Geometry"], join.outputs["Geometry"])
     return ng
 
@@ -1558,6 +1609,374 @@ def _smoke(b, gi, geometry, p, me, x, y):
                                                              x=x + 2200, y=y + 250), x=x + 2400, y=y + 250)
     clearing = b.store(cloud.outputs["Instances"], ATTR_SMOKE, fade, domain="INSTANCE", x=x + 2400, y=y)
     return b.switch("GEOMETRY", puffing, None, clearing, x=x + 2600, y=y)
+
+
+def _beam_faces(b, gi, anchor, p, x, y):
+    """Transporter beam (Star Trek), face fields ((old shown, old glow), (new shown, new glow)), p running 0 -> 1 up
+    to the moment: a flickering noise on each face (its rest position, changing with the frame) against a threshold
+    that sweeps through, so an outfit shimmers away or in a few faces at a time. The old outfit goes over 0.08 .. 0.5
+    of the timeline, the new one comes over 0.45 .. 0.95. Faces about to go or just come glow (stored as
+    glow^(1/8))."""
+    face = b.on_domain(anchor, "FACE", "FLOAT_VECTOR", x=x, y=y)
+    frame = b.node("GeometryNodeInputSceneTime", x, y - 200).outputs["Frame"]
+    shimmer = b.node("ShaderNodeTexNoise", x + 200, y, noise_dimensions="4D")
+    b.feed(shimmer.inputs["Vector"], face)
+    b.feed(shimmer.inputs["W"], b.math("MULTIPLY", frame, 0.07, x=x + 200, y=y - 300))
+    b.feed(shimmer.inputs["Scale"], b.math("MULTIPLY", gi.outputs["Noise Scale"], 3.0, x=x, y=y - 400))
+    shimmer.inputs["Detail"].default_value = 2.0
+    # the noise sits around 0.5: spread it out, half of it each face's own
+    spread = b.math("MULTIPLY_ADD", shimmer.outputs[0], 2.2, -0.6, x=x + 400, y=y, clamp=True)
+    own = b.white_noise(b.vmath("SCALE", face, scale=11.3, x=x + 200, y=y - 550), x=x + 400, y=y - 550)[0]
+    n = b.math("MULTIPLY_ADD", spread, 0.55, b.math("MULTIPLY", own, 0.45, x=x + 600, y=y - 550), x=x + 800, y=y)
+    sides = []
+    for i, (lo, hi, gone_at, there) in enumerate(((0.08, 0.5, -0.05, 1.05), (0.45, 0.95, 1.05, -0.05))):
+        yy = y - 800 - 700 * i
+        threshold = b.map_range(p, lo, hi, gone_at, there, x=x + 600, y=yy, smooth=True)
+        shown = b.compare("GREATER_THAN", n, threshold, x=x + 1000, y=yy)
+        edge = b.math("SUBTRACT", 1.0, b.math("DIVIDE", b.math("ABSOLUTE", b.math("SUBTRACT", n, threshold, x=x + 800,
+                                                                               y=yy - 150), x=x + 1000, y=yy - 150),
+                                                0.07, x=x + 1200, y=yy - 150), x=x + 1400, y=yy - 150, clamp=True)
+        # (no glow over the rest of it: on dark clothes even a faint one washes them out)
+        glow = b.math("MULTIPLY", edge, 0.9, x=x + 1600, y=yy - 150)
+        sides.append((shown, b.math("POWER", glow, 0.125, x=x + 2000, y=yy - 250)))
+    return sides
+
+
+def _beam_column(b, gi, geometry, p, me, x, y):
+    """Transporter beam: a column of light round the body (from its rest pose, so it stays put while the body moves)
+    with sparkles drifting up and down in it (Star Object, in the particle colour), there from just before the old
+    outfit starts to shimmer away until a little after the new one is in. The column carries ATTR_BEAM (round it and
+    up it), ATTR_FRAME and how bright it is (ATTR_EDGE) for its material."""
+    rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=x, y=y)
+    still = b.switch("VECTOR", has_rest, b.node("GeometryNodeInputPosition", x, y - 150).outputs[0], rest, x=x + 200,
+                     y=y)
+    stat = b.node("GeometryNodeAttributeStatistic", x + 400, y, data_type="FLOAT_VECTOR", domain="POINT")
+    b.feed(stat.inputs["Geometry"], geometry)
+    b.feed(_enabled(stat.inputs, "Attribute")[0], still)
+    lo, hi = _enabled(stat.outputs, "Min")[0], _enabled(stat.outputs, "Max")[0]
+    lo_x, lo_y, lo_z = b.split_xyz(lo, x=x + 600, y=y)
+    hi_x, hi_y, hi_z = b.split_xyz(hi, x=x + 600, y=y - 200)
+    # round the body, but no wider than a quarter of its height (arms held out reach through it)
+    tall = b.math("MULTIPLY", b.math("SUBTRACT", hi_z, lo_z, x=x + 800, y=y - 300), 1.08, x=x + 1000, y=y - 300)
+    radius = b.math("MINIMUM", b.math("MULTIPLY", b.math("MAXIMUM", b.math("SUBTRACT", hi_x, lo_x, x=x + 800, y=y),
+                                                         b.math("SUBTRACT", hi_y, lo_y, x=x + 800, y=y - 150),
+                                                         x=x + 1000, y=y), 0.62, x=x + 1100, y=y),
+                    b.math("MULTIPLY", tall, 0.22, x=x + 1100, y=y - 150), x=x + 1200, y=y)
+    bottom = b.math("MULTIPLY_ADD", tall, -0.02, lo_z, x=x + 1200, y=y - 300)
+    mid_x = b.math("MULTIPLY", b.math("ADD", lo_x, hi_x, x=x + 800, y=y - 450), 0.5, x=x + 1000, y=y - 450)
+    mid_y = b.math("MULTIPLY", b.math("ADD", lo_y, hi_y, x=x + 800, y=y - 600), 0.5, x=x + 1000, y=y - 600)
+    # fades in as the outfit starts to shimmer, out after the new one is there
+    vis = b.math("MINIMUM", b.map_range(p, 0.0, 0.08, x=x + 1200, y=y - 750, smooth=True),
+                 b.map_range(p, 1.0, 1.15, 1.0, 0.0, x=x + 1200, y=y - 900, smooth=True), x=x + 1400, y=y - 800)
+    frame = b.node("GeometryNodeInputSceneTime", x + 1200, y - 1050).outputs["Frame"]
+
+    tube = b.node("GeometryNodeMeshCylinder", x + 1400, y, fill_type="NONE")
+    tube.inputs["Vertices"].default_value = 48
+    tube.inputs["Side Segments"].default_value = 1
+    b.feed(tube.inputs["Radius"], radius)
+    b.feed(tube.inputs["Depth"], tall)
+    centre = b.combine(mid_x, mid_y, b.math("MULTIPLY_ADD", tall, 0.5, bottom, x=x + 1400, y=y - 300), x=x + 1600,
+                       y=y - 300)
+    column = b.set_position(tube.outputs["Mesh"], centre, x=x + 1600, y=y)
+    cx, cy, cz = b.split_xyz(b.node("GeometryNodeInputPosition", x + 1600, y - 500).outputs[0], x=x + 1800, y=y - 500)
+    across = b.combine(b.math("DIVIDE", b.math("SUBTRACT", cx, mid_x, x=x + 2000, y=y - 450), radius, x=x + 2200,
+                              y=y - 450),
+                       b.math("DIVIDE", b.math("SUBTRACT", cy, mid_y, x=x + 2000, y=y - 600), radius, x=x + 2200,
+                              y=y - 600),
+                       b.math("DIVIDE", b.math("SUBTRACT", cz, bottom, x=x + 2000, y=y - 750), tall, x=x + 2200,
+                              y=y - 750), x=x + 2400, y=y - 600)
+    column = b.store(column, ATTR_BEAM, across, "FLOAT_VECTOR", x=x + 1800, y=y)
+    column = b.store(column, ATTR_FRAME, frame, x=x + 2000, y=y)
+    column = b.store(column, ATTR_EDGE, vis, x=x + 2200, y=y)
+    shaded = b.node("GeometryNodeSetMaterial", x + 2400, y)
+    b.feed(shaded.inputs["Geometry"], column)
+    b.feed(shaded.inputs["Material"], gi.outputs["Beam Material"])
+
+    # sparkles inside it, each rising or falling at its own speed, wrapping round at the top / bottom
+    dots = b.node("GeometryNodePoints", x + 1400, y - 1300)
+    b.feed(dots.inputs["Count"], gi.outputs["Beam Count"])
+    index = b.node("GeometryNodeInputIndex", x + 1000, y - 1500).outputs[0]
+    rnd, rnd_color = b.white_noise(b.combine(index, 0.61, 0.23, x=x + 1200, y=y - 1500), x=x + 1400, y=y - 1500)
+    r1, r2, r3 = b.split_xyz(rnd_color, x=x + 1600, y=y - 1500)
+    angle = b.math("MULTIPLY", r1, 2.0 * math.pi, x=x + 1800, y=y - 1400)
+    out = b.math("MULTIPLY", radius, b.math("MULTIPLY", b.math("SQRT", r2, x=x + 1800, y=y - 1550), 0.9, x=x + 2000,
+                                            y=y - 1550), x=x + 2200, y=y - 1550)
+    way = b.math("MULTIPLY_ADD", b.math("GREATER_THAN", r3, 0.5, x=x + 1800, y=y - 1700), 2.0, -1.0, x=x + 2000,
+                 y=y - 1700)
+    speed = b.math("MULTIPLY", way, b.math("MULTIPLY_ADD", rnd, 0.012, 0.004, x=x + 2000, y=y - 1850), x=x + 2200,
+                   y=y - 1750)
+    climb = b.math("FRACT", b.math("MULTIPLY_ADD", frame, speed, b.math("MULTIPLY", rnd, 7.13, x=x + 2200, y=y - 1950),
+                                   x=x + 2400, y=y - 1850), x=x + 2600, y=y - 1850)
+    spot = b.combine(b.math("MULTIPLY_ADD", b.math("COSINE", angle, x=x + 2000, y=y - 1300), out, mid_x, x=x + 2400,
+                            y=y - 1300),
+                     b.math("MULTIPLY_ADD", b.math("SINE", angle, x=x + 2000, y=y - 1450), out, mid_y, x=x + 2400,
+                            y=y - 1450),
+                     b.math("MULTIPLY_ADD", climb, tall, bottom, x=x + 2800, y=y - 1700), x=x + 3000, y=y - 1400)
+    b.feed(dots.inputs["Position"], spot)
+    twinkle = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.9, b.math(
+        "MULTIPLY", rnd, 2.0 * math.pi, x=x + 2600, y=y - 2150), x=x + 2800, y=y - 2100), x=x + 3000, y=y - 2100),
+                         0.4, 0.6, x=x + 3200, y=y - 2100)
+    # (thinner near the top and the bottom, where the column fades)
+    ends = b.math("MULTIPLY", b.map_range(climb, 0.0, 0.1, x=x + 3000, y=y - 1950),
+                  b.map_range(climb, 0.85, 1.0, 1.0, 0.0, x=x + 3000, y=y - 2250), x=x + 3200, y=y - 2250)
+    size = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Star Size"], b.math("MULTIPLY_ADD", r2, 0.5, 0.25,
+                                                                                     x=x + 3200, y=y - 2400),
+                                     x=x + 3400, y=y - 2350),
+                  b.math("MULTIPLY", b.math("MULTIPLY", twinkle, vis, x=x + 3400, y=y - 2100), ends, x=x + 3600,
+                         y=y - 2200), x=x + 3800, y=y - 2300)
+    star = b.node("GeometryNodeObjectInfo", x + 3000, y - 900, transform_space="ORIGINAL")
+    b.feed(star.inputs["Object"], gi.outputs["Star Object"])
+    stars = b.node("GeometryNodeInstanceOnPoints", x + 3400, y - 1300)
+    b.feed(stars.inputs["Points"], dots.outputs["Geometry"])
+    b.feed(stars.inputs["Instance"], star.outputs["Geometry"])
+    b.feed(stars.inputs["Rotation"], b.combine(math.pi / 2, b.math("MULTIPLY", r3, 2.0 * math.pi, x=x + 3200,
+                                                                   y=y - 1100), 0.0, x=x + 3400, y=y - 1100))
+    b.feed(stars.inputs["Scale"], size)
+    sparkles = _world_instances(b, stars.outputs["Instances"], me, x + 3600, y - 1300)
+    there = b.boolean("AND", b.boolean("AND", gi.outputs["Beam"], gi.outputs["Main"], x=x + 3800, y=y + 300),
+                      b.boolean("AND", b.compare("GREATER_THAN", p, 0.0, x=x + 3800, y=y + 150),
+                                b.compare("LESS_THAN", p, 1.15, x=x + 3800, y=y), x=x + 4000, y=y + 100),
+                      x=x + 4200, y=y + 200)
+    return b.switch("GEOMETRY", there, None, b.join([shaded.outputs["Geometry"], sparkles], x=x + 4200, y=y),
+                    x=x + 4400, y=y)
+
+
+def _arcs(b, gi, geometry, d, radius, beat, x, y):
+    """Lightning: jagged arcs of electricity crackle along the edge, new ones every frame (Arc Density per area of
+    the faces within Arc Reach of it, a new seed every frame). An arc lies along the edge, across the way the wave
+    runs: the gradient of the distance `d`, estimated per vertex from its edges (the mean of (d2 - d1)(p2 - p1) /
+    |p2 - p1|^2). It bows out of the surface and is broken into a zigzag: a big bend and small kinks, its ends on the
+    surface. In the arc material; ATTR_EDGE carries how bright each arc is (flaring on a beat)."""
+    reach = b.math("MAXIMUM", gi.outputs["Arc Reach"], 1e-4, x=x, y=y - 200)
+    off = b.on_domain(b.math("ABSOLUTE", b.math("SUBTRACT", d, radius, x=x, y=y), x=x + 200, y=y), "FACE", x=x + 400,
+                      y=y)
+    band = b.separate(geometry, b.compare("LESS_THAN", off, reach, x=x + 600, y=y), "FACE", x=x + 800, y=y)[0]
+    ends = b.node("GeometryNodeInputMeshEdgeVertices", x, y - 400)
+
+    def d_at(index, yy):
+        n = b.node("GeometryNodeFieldAtIndex", x + 200, yy, data_type="FLOAT", domain="POINT")
+        b.feed(n.inputs["Index"], index)
+        b.feed(_enabled(n.inputs, "Value")[0], d)
+        return _enabled(n.outputs, "Value")[0]
+
+    step = b.vmath("SUBTRACT", ends.outputs["Position 2"], ends.outputs["Position 1"], x=x + 200, y=y - 300)
+    rise = b.math("SUBTRACT", d_at(ends.outputs["Vertex Index 2"], y - 500),
+                  d_at(ends.outputs["Vertex Index 1"], y - 650), x=x + 400, y=y - 550)
+    slope = b.vmath("SCALE", step, scale=b.math("DIVIDE", rise, b.math(
+        "MAXIMUM", b.vmath("DOT_PRODUCT", step, step, x=x + 400, y=y - 750), 1e-12, x=x + 600, y=y - 750), x=x + 800,
+        y=y - 650), x=x + 1000, y=y - 400)
+    band = b.store(band, _ARC_DIR, b.on_domain(slope, "EDGE", "FLOAT_VECTOR", x=x + 1200, y=y - 400), "FLOAT_VECTOR",
+                   x=x + 1000, y=y)
+    frame = b.node("GeometryNodeInputSceneTime", x + 1000, y + 300).outputs["Frame"]
+    spots = b.node("GeometryNodeDistributePointsOnFaces", x + 1200, y, distribute_method="RANDOM")
+    b.feed(spots.inputs["Mesh"], band)
+    b.feed(spots.inputs["Density"], gi.outputs["Arc Density"])
+    b.feed(spots.inputs["Seed"], frame)
+    normal = spots.outputs["Normal"]
+    index = b.node("GeometryNodeInputIndex", x + 1200, y - 1000).outputs[0]
+    rnd, rnd_color = b.white_noise(b.combine(index, frame, 0.37, x=x + 1400, y=y - 1000), x=x + 1600, y=y - 1000)
+    twist = b.split_xyz(rnd_color, x=x + 1800, y=y - 1000)[0]
+    across = b.vmath("CROSS_PRODUCT", normal, b.named_attribute(_ARC_DIR, "FLOAT_VECTOR", x=x + 1400, y=y - 700)[0],
+                     x=x + 1600, y=y - 700)
+    # (where the distance does not change along the surface any way will do)
+    flat = b.compare("LESS_THAN", b.vmath("LENGTH", across, x=x + 1800, y=y - 800), 1e-9, x=x + 2000, y=y - 800)
+    across = b.switch("VECTOR", flat, across, b.vmath("CROSS_PRODUCT", normal, (0.31, 0.53, 0.79), x=x + 1800,
+                                                      y=y - 650), x=x + 2000, y=y - 700)
+    # along the edge, give or take 25 degrees
+    along = b.rotate(b.vmath("NORMALIZE", across, x=x + 2200, y=y - 700), (0.0, 0.0, 0.0), normal,
+                     b.math("MULTIPLY_ADD", twist, 0.9, -0.45, x=x + 2000, y=y - 1000), x=x + 2400, y=y - 700)
+    side = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", along, normal, x=x + 2600, y=y - 850), x=x + 2800, y=y - 850)
+    length = b.math("MULTIPLY", gi.outputs["Arc Length"], b.math("ADD", rnd, 0.5, x=x + 1800, y=y - 1150), x=x + 2000,
+                    y=y - 1150)
+    spots_out = b.set_position(spots.outputs["Points"], b.vmath("SCALE", normal, scale=b.math(
+        "MULTIPLY", gi.outputs["Arc Thickness"], 2.0, x=x + 1400, y=y + 200), x=x + 1600, y=y + 200), x=x + 1800, y=y)
+    for name, value, kind in zip(_ARC_ATTRS, (normal, side, length, rnd),
+                                 ("FLOAT_VECTOR", "FLOAT_VECTOR", "FLOAT", "FLOAT")):
+        spots_out = b.store(spots_out, name, value, kind, x=x + 2000, y=y)
+    first = b.node("FunctionNodeAlignEulerToVector", x + 2600, y - 400, axis="X")
+    b.feed(first.inputs["Vector"], along)
+    turned = b.node("FunctionNodeAlignEulerToVector", x + 2800, y - 400, axis="Z", pivot_axis="X")
+    b.feed(turned.inputs["Rotation"], first.outputs[0])
+    b.feed(turned.inputs["Vector"], normal)
+    line = b.node("GeometryNodeCurvePrimitiveLine", x + 2400, y + 400)
+    line.inputs["Start"].default_value = (-0.5, 0.0, 0.0)
+    line.inputs["End"].default_value = (0.5, 0.0, 0.0)
+    points = b.node("GeometryNodeResampleCurve", x + 2600, y + 400)
+    b.feed(points.inputs["Curve"], line.outputs["Curve"])
+    points.inputs["Count"].default_value = ARC_POINTS
+    laid = b.node("GeometryNodeInstanceOnPoints", x + 3000, y)
+    b.feed(laid.inputs["Points"], spots_out)
+    b.feed(laid.inputs["Instance"], points.outputs["Curve"])
+    b.feed(laid.inputs["Rotation"], turned.outputs[0])
+    b.feed(laid.inputs["Scale"], b.named_attribute("mmdd_arc_len", "FLOAT", x=x + 2800, y=y - 200)[0])
+    curves = b.node("GeometryNodeRealizeInstances", x + 3200, y)
+    b.feed(curves.inputs["Geometry"], laid.outputs["Instances"])
+    # each arc's own values, by the curve it is (the n-th point became the n-th curve)
+    which = b.on_domain(b.node("GeometryNodeInputIndex", x + 3200, y - 300).outputs[0], "CURVE", "INT", x=x + 3400,
+                        y=y - 300)
+
+    def own(name, data_type, yy):
+        n = b.node("GeometryNodeSampleIndex", x + 3600, yy, data_type=data_type, domain="POINT")
+        b.feed(n.inputs["Geometry"], spots_out)
+        b.feed(_enabled(n.inputs, "Value")[0], b.named_attribute(name, data_type, x=x + 3400, y=yy)[0])
+        b.feed(n.inputs["Index"], which)
+        return _enabled(n.outputs, "Value")[0]
+
+    arc_normal = own("mmdd_arc_normal", "FLOAT_VECTOR", y - 500)
+    arc_side = own("mmdd_arc_side", "FLOAT_VECTOR", y - 700)
+    arc_len = own("mmdd_arc_len", "FLOAT", y - 900)
+    arc_rnd = own("mmdd_arc_rnd", "FLOAT", y - 1100)
+    t = b.node("GeometryNodeSplineParameter", x + 3600, y - 1300).outputs["Factor"]
+    bump = b.math("SINE", b.math("MULTIPLY", t, math.pi, x=x + 3800, y=y - 1300), x=x + 4000, y=y - 1300)
+    kink = b.white_noise(b.combine(b.node("GeometryNodeInputIndex", x + 3600, y - 1500).outputs[0],
+                                   b.math("MULTIPLY", frame, 1.37, x=x + 3600, y=y - 1650), 0.71, x=x + 3800,
+                                   y=y - 1550), x=x + 4000, y=y - 1550)[1]
+    bend = b.node("ShaderNodeTexNoise", x + 4000, y - 1800, noise_dimensions="3D")
+    b.feed(bend.inputs["Vector"], b.combine(b.math("MULTIPLY_ADD", t, 1.8, b.math("MULTIPLY", arc_rnd, 17.0, x=x + 3600,
+                                                                                    y=y - 1850), x=x + 3800,
+                                                   y=y - 1800),
+                                            b.math("MULTIPLY", arc_rnd, 31.0, x=x + 3600, y=y - 2000),
+                                            b.math("MULTIPLY", frame, 0.43, x=x + 3600, y=y - 2150), x=x + 3800,
+                                            y=y - 2000))
+    bend.inputs["Scale"].default_value = 1.0
+    bend.inputs["Detail"].default_value = 1.0
+    kx, ky, _kz = b.split_xyz(kink, x=x + 4200, y=y - 1550)
+    bx, by, _bz = b.split_xyz(bend.outputs[1], x=x + 4200, y=y - 1800)
+    sideways = b.math("ADD", b.math("MULTIPLY_ADD", bx, 2.0, -1.0, x=x + 4400, y=y - 1800),
+                      b.math("MULTIPLY_ADD", kx, 0.7, -0.35, x=x + 4400, y=y - 1550), x=x + 4600, y=y - 1700)
+    outward = b.math("ADD", b.math("MULTIPLY_ADD", by, 1.0, -0.2, x=x + 4400, y=y - 2000),
+                     b.math("MULTIPLY_ADD", ky, 0.5, -0.25, x=x + 4400, y=y - 2150), x=x + 4600, y=y - 2050)
+    amount = b.math("MULTIPLY", b.math("MULTIPLY", arc_len, bump, x=x + 4600, y=y - 1300), 0.3, x=x + 4800, y=y - 1300)
+    zigzag = b.vmath("ADD", b.vmath("SCALE", arc_side, scale=sideways, x=x + 4800, y=y - 1700),
+                     b.vmath("SCALE", arc_normal, scale=outward, x=x + 4800, y=y - 2000), x=x + 5000, y=y - 1850)
+    curves = b.set_position(curves.outputs["Geometry"], b.vmath("SCALE", zigzag, scale=amount, x=x + 5200, y=y - 1600),
+                            x=x + 5200, y=y)
+    width = b.node("GeometryNodeSetCurveRadius", x + 5400, y)
+    b.feed(width.inputs["Curve"], curves)
+    b.feed(width.inputs["Radius"], b.math("MULTIPLY", b.math("MULTIPLY_ADD", b.math("POWER", bump, 0.6, x=x + 5200,
+                                                                                    y=y - 200), 0.7, 0.3,
+                                                             x=x + 5400, y=y - 200),
+                                          b.math("MULTIPLY_ADD", beat, 0.4, 1.0, x=x + 5400, y=y - 350), x=x + 5600,
+                                          y=y - 250))
+    bright = b.math("MULTIPLY", b.math("MULTIPLY_ADD", arc_rnd, 0.9, 0.55, x=x + 5400, y=y - 500),
+                    b.math("MULTIPLY_ADD", beat, 0.8, 1.0, x=x + 5400, y=y - 650), x=x + 5600, y=y - 550)
+    lit = b.store(width.outputs["Curve"], ATTR_EDGE, bright, x=x + 5600, y=y)
+    lit = _remove_attributes(b, lit, _ARC_ATTRS + (_ARC_DIR,), x + 5800, y)
+    tube = b.curve_to_mesh(lit, _circle(b, gi.outputs["Arc Thickness"], 4, x + 6400, y - 300), x=x + 6600, y=y)
+    shaded = b.node("GeometryNodeSetMaterial", x + 6800, y)
+    b.feed(shaded.inputs["Geometry"], tube)
+    b.feed(shaded.inputs["Material"], gi.outputs["Arc Material"])
+    on = b.boolean("AND", gi.outputs["Arcs"], b.compare("GREATER_THAN", radius, 0.0, x=x + 6800, y=y + 300),
+                   x=x + 7000, y=y + 300)
+    return b.switch("GEOMETRY", on, None, shaded.outputs["Geometry"], x=x + 7200, y=y)
+
+
+def _strike(b, gi, radius, me, x, y):
+    """The lightning strike: while the mask grows to Strike Until (the first few frames) a bolt comes down from Strike
+    Height above the start point (the mask's centre) onto it, with three forks, a new shape every other frame and
+    flickering like lightning does; in the arc material."""
+    info = b.node("GeometryNodeObjectInfo", x, y, transform_space="RELATIVE")
+    b.feed(info.inputs["Object"], gi.outputs["Mask"])
+    hit = info.outputs["Location"]
+    up = b.vmath("NORMALIZE", _unrotate(b, me, (0.0, 0.0, 1.0), x, y - 200), x=x + 200, y=y - 200)
+    frame = b.node("GeometryNodeInputSceneTime", x, y - 400).outputs["Frame"]
+    shape = b.math("FLOOR", b.math("MULTIPLY", frame, 0.5, x=x + 200, y=y - 400), x=x + 400, y=y - 400)
+    height = gi.outputs["Strike Height"]
+
+    def level(vector, xx, yy):
+        """`vector` without its part along up (sideways)."""
+        along = b.vmath("DOT_PRODUCT", vector, up, x=xx, y=yy - 150)
+        return b.vmath("SUBTRACT", vector, b.vmath("SCALE", up, scale=along, x=xx + 200, y=yy - 150), x=xx + 400,
+                       y=yy)
+
+    lean = b.vmath("SUBTRACT", b.white_noise(b.combine(shape, 0.53, 0.29, x=x + 600, y=y - 600), x=x + 800,
+                                             y=y - 600)[1], (0.5, 0.5, 0.5), x=x + 1000, y=y - 600)
+    top = b.vmath("ADD", b.vmath("ADD", hit, b.vmath("SCALE", up, scale=height, x=x + 1000, y=y - 200), x=x + 1200,
+                                 y=y - 200),
+                  b.vmath("SCALE", level(lean, x + 1200, y - 600), scale=b.math("MULTIPLY", height, 0.5, x=x + 1400,
+                                                                                    y=y - 750), x=x + 1800, y=y - 600),
+                  x=x + 2000, y=y - 300)
+
+    def jagged(start, end, size, pin_start, pin_end, count, salt, xx, yy):
+        """A line from `start` to `end` broken into a zigzag `size` wide (a big bend and small kinks, sideways), held
+        still at the pinned ends."""
+        line = b.node("GeometryNodeCurvePrimitiveLine", xx, yy)
+        points = b.node("GeometryNodeResampleCurve", xx + 200, yy)
+        b.feed(points.inputs["Curve"], line.outputs["Curve"])
+        points.inputs["Count"].default_value = count
+        t = b.node("GeometryNodeSplineParameter", xx, yy - 200).outputs["Factor"]
+        straight = b.vmath("ADD", start, b.vmath("SCALE", b.vmath("SUBTRACT", end, start, x=xx + 200, y=yy - 300),
+                                                 scale=t, x=xx + 400, y=yy - 300), x=xx + 600, y=yy - 300)
+        kink = b.white_noise(b.combine(b.node("GeometryNodeInputIndex", xx, yy - 500).outputs[0], shape, salt,
+                                       x=xx + 200, y=yy - 500), x=xx + 400, y=yy - 500)[1]
+        # a few big bends, finer crackle on them and a small kink at every point, like a real bolt
+        wiggle = b.vmath("SCALE", b.vmath("SUBTRACT", kink, (0.5, 0.5, 0.5), x=xx + 600, y=yy - 500), scale=0.35,
+                         x=xx + 800, y=yy - 500)
+        for i, (often, how_far) in enumerate(((2.2, 2.4), (11.0, 1.2))):
+            bend = b.node("ShaderNodeTexNoise", xx + 400, yy - 700 - 300 * i, noise_dimensions="3D")
+            b.feed(bend.inputs["Vector"], b.combine(b.math("MULTIPLY", t, often, x=xx + 200, y=yy - 700 - 300 * i),
+                                                    b.math("MULTIPLY_ADD", shape, 0.37, salt + 5.0 * i, x=xx + 200,
+                                                           y=yy - 850 - 300 * i),
+                                                    salt * 3.1 + 7.0 * i, x=xx + 400, y=yy - 850 - 300 * i))
+            bend.inputs["Detail"].default_value = 2.0
+            wiggle = b.vmath("ADD", wiggle, b.vmath("SCALE", b.vmath("SUBTRACT", bend.outputs[1], (0.5, 0.5, 0.5),
+                                                                     x=xx + 600, y=yy - 700 - 300 * i),
+                                                    scale=how_far, x=xx + 800, y=yy - 700 - 300 * i),
+                             x=xx + 1000, y=yy - 600 - 300 * i)
+        hold = 1.0
+        if pin_start:
+            hold = b.math("MULTIPLY", t, 6.0, x=xx + 600, y=yy - 1000, clamp=True)
+        if pin_end:
+            hold = b.math("MULTIPLY", hold, b.math("MULTIPLY", b.math("SUBTRACT", 1.0, t, x=xx + 600, y=yy - 1150), 6.0,
+                                                   x=xx + 800, y=yy - 1150, clamp=True), x=xx + 1000, y=yy - 1100)
+        moved = b.vmath("SCALE", level(wiggle, xx + 1200, yy - 600), scale=b.math("MULTIPLY", size, hold, x=xx + 1200,
+                                                                                   y=yy - 1000), x=xx + 1600,
+                        y=yy - 700)
+        return b.set_position(points.outputs["Curve"], position=b.vmath("ADD", straight, moved, x=xx + 1800,
+                                                                          y=yy - 400), x=xx + 1800, y=yy)
+
+    main = jagged(top, hit, b.math("MULTIPLY", height, 0.06, x=x + 2000, y=y - 1000), False, True, STRIKE_POINTS, 0.11,
+                  x + 2200, y)
+    bolts = [main]
+    for k, (at, salt) in enumerate(((0.3, 1.7), (0.5, 2.9), (0.68, 4.3))):
+        yy = y - 1500 - 1500 * k
+        start = b.node("GeometryNodeSampleCurve", x + 2200, yy)
+        b.feed(start.inputs["Curves"], main)
+        start.inputs["Factor"].default_value = at
+        way = b.vmath("SUBTRACT", b.white_noise(b.combine(shape, k + 0.5, 0.77, x=x + 2000, y=yy - 300),
+                                                x=x + 2200, y=yy - 300)[1], (0.5, 0.5, 0.5), x=x + 2400, y=yy - 300)
+        way = b.vmath("SUBTRACT", b.vmath("NORMALIZE", level(way, x + 2600, yy - 300), x=x + 3000, y=yy - 300),
+                      b.vmath("SCALE", up, scale=0.7, x=x + 3000, y=yy - 450), x=x + 3200, y=yy - 350)
+        reach = b.math("MULTIPLY", height, 0.1 + 0.03 * k, x=x + 3200, y=yy - 550)
+        end = b.vmath("ADD", start.outputs["Position"], b.vmath("SCALE", way, scale=reach, x=x + 3400, y=yy - 450),
+                      x=x + 3600, y=yy - 350)
+        fork = jagged(start.outputs["Position"], end, b.math("MULTIPLY", height, 0.025, x=x + 3600, y=yy - 600), True,
+                      False, 30, salt, x + 3800, yy)
+        taper = b.node("GeometryNodeSetCurveRadius", x + 5800, yy)
+        b.feed(taper.inputs["Curve"], fork)
+        b.feed(taper.inputs["Radius"], b.math("MULTIPLY_ADD", b.node("GeometryNodeSplineParameter", x + 5600,
+                                                                     yy - 200).outputs["Factor"], -0.35, 0.55,
+                                              x=x + 5800, y=yy - 200))
+        bolts.append(taper.outputs["Curve"])
+    thick = b.node("GeometryNodeSetCurveRadius", x + 5800, y)
+    b.feed(thick.inputs["Curve"], main)
+    thick.inputs["Radius"].default_value = 1.0
+    bolts[0] = thick.outputs["Curve"]
+    # lightning flickers: bright on most frames, dim on some
+    flicker = b.white_noise(b.combine(frame, 0.91, 0.17, x=x + 5800, y=y + 300), x=x + 6000, y=y + 300)[0]
+    bright = b.math("MULTIPLY_ADD", b.math("GREATER_THAN", flicker, 0.3, x=x + 6200, y=y + 300), 1.4, 0.4, x=x + 6400,
+                    y=y + 300)
+    lit = b.store(b.join(bolts, x=x + 6000, y=y), ATTR_EDGE, bright, x=x + 6400, y=y)
+    tube = b.curve_to_mesh(lit, _circle(b, b.math("MULTIPLY", gi.outputs["Arc Thickness"], 2.5, x=x + 6400, y=y - 300),
+                                        5, x + 6600, y - 300), x=x + 6800, y=y)
+    shaded = b.node("GeometryNodeSetMaterial", x + 7000, y)
+    b.feed(shaded.inputs["Geometry"], tube)
+    b.feed(shaded.inputs["Material"], gi.outputs["Arc Material"])
+    striking = b.boolean("AND", b.boolean("AND", gi.outputs["Strike"], gi.outputs["Main"], x=x + 7000, y=y + 400),
+                         b.boolean("AND", b.compare("GREATER_THAN", radius, 0.0, x=x + 7000, y=y + 250),
+                                   b.compare("LESS_THAN", radius, gi.outputs["Strike Until"], x=x + 7000, y=y + 100),
+                                   x=x + 7200, y=y + 200), x=x + 7400, y=y + 300)
+    return b.switch("GEOMETRY", striking, None, shaded.outputs["Geometry"], x=x + 7400, y=y)
 
 
 def _fly(b, gi, t, normal, seed, rnd, wind, me, x, y):
@@ -1841,6 +2260,21 @@ def build_base_group(field_group, venom_group):
     # Rest position seeds the per-piece random numbers, so they do not flicker while the body moves.
     rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=-1700, y=-1100)
     anchor = b.switch("VECTOR", has_rest, position, rest, x=-1500, y=-1100)
+    # The surface ahead of the edge (black veins, frost, char, stone, gold, silk, code: materials draw it from
+    # disperse_ahead, 0 far ahead .. 1 at the edge). The zone grows in with the radius, so nothing shows at the very
+    # start. It follows the wave also when the old outfit goes all at once (Clamp): it freezes over, then shatters.
+    reach = b.math("MINIMUM", gi.outputs["Surface Reach"],
+                   b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=-2000, y=-2900), 2.0, x=-1800, y=-2900),
+                   x=-1600, y=-2850)
+    wave_d = b.switch("FLOAT", gi.outputs["Clamp"], d, field["Distance"], x=-1600, y=-3100)
+    ahead = b.map_range(wave_d, b.math("ADD", radius, reach, x=-1400, y=-2950), radius, x=-1200, y=-2950,
+                        smooth=True)
+    # Silk cocoon: where the silk spreads it swells the old outfit out (locked parts stay).
+    puff = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Swell"], ahead, x=-1000, y=-3100),
+                  b.switch("FLOAT", free, 0.0, 1.0, x=-1000, y=-3250), x=-800, y=-3150)
+    swollen = b.set_position(geometry, b.vmath("SCALE", normal, scale=puff, x=-600, y=-3150), x=-600, y=-2900)
+    geometry = b.switch("GEOMETRY", b.compare("NOT_EQUAL", gi.outputs["Swell"], 0.0, x=-600, y=-2700), geometry,
+                        swollen, x=-400, y=-2800)
     # Leave behind: flakes, chunks and particles start from where the body was when they broke off (recorded
     # in world space at build time, see launch.py) instead of riding along with the dancing body.
     space, has_space = _launch_space(b, gi, -1700, -1500)
@@ -2025,6 +2459,15 @@ def build_base_group(field_group, venom_group):
                                         y=8300), "FACE", x=6000, y=8300)
     sunk = _shadow_place(b, gi, me, sunk, geometry, anchor, amount, 6200, 8000)
     old = b.switch("GEOMETRY", gi.outputs["Shadow"], old, sunk, x=4660, y=600)
+    # Transporter beam: it shimmers away a few faces at a time, glowing; the locked parts shimmer away with it and back
+    # in with the new outfit.
+    (old_shown, old_glow), (new_shown, new_glow) = _beam_faces(b, gi, anchor, t_p, 3800, 9200)
+    back_in = b.boolean("AND", b.compare("GREATER_EQUAL", t_p, 0.5, x=5600, y=9200), lock, x=5800, y=9200)
+    beam_shown = b.switch("BOOLEAN", back_in, old_shown, new_shown, x=6000, y=9200)
+    beamed = b.delete(geometry, b.boolean("NOT", beam_shown, x=6200, y=9200), "FACE", x=6400, y=9200)
+    beamed = b.store(beamed, ATTR_EDGE, b.on_domain(b.switch("FLOAT", back_in, old_glow, new_glow, x=6200, y=9000),
+                                                     "FACE", x=6400, y=9000), x=6600, y=9200)
+    old = b.switch("GEOMETRY", gi.outputs["Beam"], old, beamed, x=4670, y=550)
 
     # --- Particles: some faces release a petal / butterfly / custom object where the front passes.
     tp = lifetime(gi.outputs["Particle Flight"], -1800)
@@ -2106,12 +2549,27 @@ def build_base_group(field_group, venom_group):
     frame = b.node("GeometryNodeInputSceneTime", 2400, -2600).outputs["Frame"]
     pose_index = b.math("MULTIPLY_ADD", frame, gi.outputs["Flap Speed"],
                         b.math("MULTIPLY", prnd, float(len(FLAP_ANGLES)), x=2400, y=-2800), x=2600, y=-2700)
+    # Code glyphs: one instance per glyph (its faces carry its number); each particle shows one at a time and changes
+    # to another every few frames as it falls.
+    variant = b.named_attribute(ATTR_VARIANT, "INT", x=2000, y=-4400)[0]
+    glyphs = b.node("GeometryNodeGeometryToInstance", 2800, -4400)
+    for k in range(GLYPHS):
+        piece = b.separate(shape, b.compare("EQUAL", variant, float(k), x=2200, y=-4400 - 150 * k), "FACE",
+                           x=2400, y=-4400 - 150 * k)[0]
+        b.ng.links.new(piece, glyphs.inputs["Geometry"])
+    instance = b.switch("GEOMETRY", gi.outputs["Glyphs"], instance, glyphs.outputs["Instances"], x=3300, y=-3500)
+    glyph_index = b.math("FLOOR", b.math("MULTIPLY_ADD", frame, b.math("MULTIPLY_ADD", prnd, 0.2, 0.15, x=2400,
+                                                                       y=-4100),
+                                         b.math("MULTIPLY", prnd, float(GLYPHS), x=2400, y=-4250), x=2600, y=-4150),
+                         x=2800, y=-4150)
 
     on_points = b.node("GeometryNodeInstanceOnPoints", 3200, -1600)
     b.feed(on_points.inputs["Points"], pts)
     b.feed(on_points.inputs["Instance"], instance)
-    b.feed(on_points.inputs["Pick Instance"], gi.outputs["Flap"])
-    b.feed(on_points.inputs["Instance Index"], pose_index)
+    b.feed(on_points.inputs["Pick Instance"], b.boolean("OR", gi.outputs["Flap"], gi.outputs["Glyphs"], x=3000,
+                                                        y=-1900))
+    b.feed(on_points.inputs["Instance Index"], b.switch("FLOAT", gi.outputs["Glyphs"], pose_index, glyph_index,
+                                                        x=3000, y=-2050))
     b.feed(on_points.inputs["Rotation"], rotation)
     b.feed(on_points.inputs["Scale"], size)
     # Upright in the world, also when the model turns.
@@ -2137,16 +2595,12 @@ def build_base_group(field_group, venom_group):
                                          x=4200, y=-750, clamp=True), x=4400, y=-750)
     old = b.switch("GEOMETRY", gi.outputs["Inner Glow"], old, b.store(old, ATTR_CUT, cut, x=4500, y=200),
                    x=4600, y=150)
-    # The surface ahead of the edge (black veins, frost, char: materials draw it from disperse_ahead, 0 far ahead .. 1
-    # at the edge). The zone grows in with the radius, so nothing shows at the very start. It follows the wave also
-    # when the old outfit goes all at once (Clamp): it freezes over, then shatters.
-    reach = b.math("MINIMUM", gi.outputs["Surface Reach"],
-                   b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=4000, y=-1100), 2.0, x=4200, y=-1100),
-                   x=4400, y=-1050)
-    wave_d = b.switch("FLOAT", gi.outputs["Clamp"], d, field["Distance"], x=4400, y=-1400)
-    ahead = b.map_range(wave_d, b.math("ADD", radius, reach, x=4400, y=-1250), radius, x=4600, y=-1150, smooth=True)
+    # The surface ahead of the edge (computed above).
     old = b.switch("GEOMETRY", gi.outputs["Surface Ahead"], old, b.store(old, ATTR_AHEAD, ahead, x=4700, y=350),
                    x=4800, y=150)
+    # The digital rain scrolls with the frame (the material reads it).
+    old = b.switch("GEOMETRY", gi.outputs["Code"], old, b.store(old, ATTR_FRAME, b.node(
+        "GeometryNodeInputSceneTime", 4700, 700).outputs["Frame"], x=4800, y=550), x=4850, y=150)
     venom = _venom(b, gi, venom_group, geometry, 4200, -600)
 
     # --- Ice crystals (with frost): they grow out of the old outfit ahead of the edge, along the normals, and are gone
@@ -2209,15 +2663,22 @@ def build_base_group(field_group, venom_group):
                         x=6000, y=-5900)
     brooch = b.switch("GEOMETRY", shining, None, _world_instances(b, brooch.outputs["Instances"], me, 5800, -5400),
                       x=6800, y=-5400)
-    b.feed(tidy.inputs["Geometry"], b.join([old, particles, venom, crystals, brooch], x=4400, y=-150))
+    # With no new outfit: the transporter beam's column, the lightning over the old outfit (not its locked parts).
+    column = _beam_column(b, gi, geometry, t_p, me, 3800, 10600)
+    arcs = _arcs(b, gi, b.delete(geometry, lock, "FACE", x=3600, y=13000), field["Distance"], radius, beat, 3800,
+                 13000)
+    strike = _strike(b, gi, radius, me, 3800, 16000)
+    b.feed(tidy.inputs["Geometry"], b.join([old, particles, venom, crystals, brooch, column, arcs, strike], x=4400,
+                                           y=-150))
     tidy.inputs["Name"].default_value = ATTR_AGE
     b.feed(go.inputs["Geometry"], tidy.outputs["Geometry"])
     return ng
 
 
 def build_ribbon_group():
-    """Modifier for a ribbon curve (a helix around one limb): draw it along the limb as the transformation
-    passes from Start to End (mask radius), then let it thin out and vanish."""
+    """Modifier for a ribbon curve (a helix around one limb, or a silk thread): draw it along the limb as the
+    transformation passes from Start to End (mask radius, Lead ahead of it), then once the mask is past Fade From let it
+    thin out and vanish over Linger."""
     ng = _new_group(RIBBON_GROUP, is_modifier=True)
     _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
     for spec in RIBBON_INPUTS:
@@ -2234,7 +2695,7 @@ def build_ribbon_group():
                   x=-600, y=100)
     grow = b.math("DIVIDE", b.math("SUBTRACT", b.math("ADD", radius, gi.outputs["Lead"], x=-600, y=300),
                                    gi.outputs["Start"], x=-400, y=300), span, x=-200, y=250, clamp=True)
-    gone = b.math("DIVIDE", b.math("SUBTRACT", radius, gi.outputs["End"], x=-600, y=-100),
+    gone = b.math("DIVIDE", b.math("SUBTRACT", radius, gi.outputs["Fade From"], x=-600, y=-100),
                   b.math("MAXIMUM", gi.outputs["Linger"], 1e-4, x=-600, y=-250), x=-400, y=-150, clamp=True)
     fade = b.math("SUBTRACT", 1.0, gone, x=-200, y=-150)
 

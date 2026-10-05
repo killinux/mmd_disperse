@@ -7,7 +7,7 @@ _OFF = dict(
     glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True, finale=False, finale_style="PULSE",
     finale_length=0.15, layer_enable=False, layer_style="NANO", inner_glow=False, venom_enable=False,
     venom_metallic=0.0, old_surface="NONE", particle_count=600, easing="EASE", ring_enable=False, paint_style="NONE",
-    reactor=False, plates=False,
+    reactor=False, plates=False, arc_enable=False,
 )
 
 PRESETS = (
@@ -142,6 +142,40 @@ PRESETS = (
      dict(_OFF, path="SURFACE", seeds="ORIGIN_LIMBS", exit_style="FRAGMENTS", frag_glow=True, particles="NOTE",
           particle_count=500, particle_color=(0.45, 0.9, 1.0), particle_glow=4.0, glow_color=(0.45, 0.8, 1.0),
           frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("LIGHTNING", "Lightning Strike", "A bolt of lightning strikes the chest with a white flash and the change flows "
+                                      "over the body from there, arcs of electricity crackling along its edge; the "
+                                      "new outfit flashes when it is complete (Shazam, Thor)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", arc_enable=True, arc_strike=True, exit_style="FRAGMENTS",
+          frag_glow=True, edge_glow_strength=6.0, finale=True, finale_white=0.7, particle_color=(0.7, 0.85, 1.0),
+          particle_glow=3.0, glow_color=(0.45, 0.65, 1.0), frag_wind_dir=(0.0, 0.3, 1.0))),
+    ("MATRIX", "Digital Rain", "Code rains down the old outfit from the head down and it falls apart into glyphs; the "
+                               "new outfit appears as code, then its colours come in (The Matrix)",
+     dict(_OFF, path="DOWN", old_surface="CODE", paint_style="CODE", exit_style="FRAGMENTS", frag_glow=True,
+          particles="GLYPH", particle_count=900, particle_color=(0.35, 1.0, 0.5), particle_glow=3.0,
+          glow_color=(0.2, 1.0, 0.4), frag_wind_dir=(0.0, 0.0, -1.0))),
+    ("PETRIFY", "Petrify and Crumble", "Stone creeps up the old outfit from the feet and turns it into a cracked "
+                                       "statue; the statue crumbles into chunks and pebbles and the new outfit stands "
+                                       "there (Medusa)",
+     dict(_OFF, path="UP", old_surface="STONE", surface_color=(0.42, 0.4, 0.37), exit_style="CHUNKS",
+          exit_timing="AT_ONCE", frag_glow=False, particles="PEBBLE", particle_count=700,
+          particle_color=(0.45, 0.43, 0.4), edge_glow=False, frag_wind_dir=(0.0, 0.0, -1.0))),
+    ("MIDAS", "Midas Touch", "Liquid gold spreads over the old outfit from the hands and feet until it is a gold "
+                             "statue, which bursts into glittering gold and a shower of coins (King Midas)",
+     dict(_OFF, path="SURFACE", seeds="LIMBS", old_surface="GOLD", surface_color=(1.0, 0.71, 0.29),
+          exit_style="FRAGMENTS", exit_timing="AT_ONCE", frag_glow=True, frag_glow_strength=2.0, particles="COIN",
+          particle_count=900, particle_color=(1.0, 0.72, 0.22), glow_color=(1.0, 0.7, 0.25),
+          frag_wind_dir=(0.0, 0.3, -1.0))),
+    ("TRANSPORTER", "Transporter Beam", "A column of light comes down round the body with sparkles drifting in it; the "
+                                        "old outfit shimmers away and the new one shimmers in (Star Trek)",
+     dict(_OFF, entrance="BEAM", easing="LINEAR", edge_glow=True, edge_glow_strength=3.0,
+          particle_color=(0.75, 0.88, 1.0), particle_glow=4.0, glow_color=(0.5, 0.75, 1.0))),
+    ("COCOON", "Break the Cocoon", "White silk spreads up the old outfit from the feet and threads wind round it until "
+                                   "it is a cocoon; the cocoon cracks open, falls away and butterflies fly out "
+                                   "(Alienware's ad by Framestore)",
+     dict(_OFF, path="UP", old_surface="SILK", surface_color=(0.93, 0.91, 0.86), silk_threads=True,
+          exit_style="CHUNKS", exit_timing="AT_ONCE", frag_glow=False, particles="BUTTERFLY", particle_count=250,
+          particle_color=(0.35, 0.75, 1.0), particle_glow=2.0, finale=True, finale_white=0.4,
+          glow_color=(0.6, 0.85, 1.0), frag_wind_dir=(0.0, 0.3, 1.0))),
     ("MAGICAL", "Magical Girl", "Hands and feet first: the body lights up, ribbons of light wrap the limbs, "
                                 "the old outfit bursts into sparkles and the new one flashes when it is complete",
      dict(_OFF, path="SURFACE", seeds="LIMBS", exit_style="FRAGMENTS", frag_glow=True, silhouette=True,
@@ -152,7 +186,8 @@ PRESETS = (
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
 BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles", "spiral_pitch"}
-WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPARKLE_SPIRAL", "BROOCH", "MARK50"}
+WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPARKLE_SPIRAL", "BROOCH", "MARK50",
+               "LIGHTNING", "COCOON"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

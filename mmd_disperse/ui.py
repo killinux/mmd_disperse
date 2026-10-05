@@ -152,6 +152,11 @@ class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
             col.prop(s, "ghost_distance")
             if not s.holo_enable:
                 layout.label(text="Turn on the hologram for see-through ghosts", icon="INFO")
+        elif s.entrance == "SCALES":
+            col = layout.column(align=True)
+            col.prop(s, "scale_size")
+            col.prop(s, "flip_width")
+            layout.label(text="The old outfit turns away on the other side", icon="INFO")
 
 
 class MMDDISPERSE_PT_undersuit(_Panel, bpy.types.Panel):
@@ -198,8 +203,11 @@ class MMDDISPERSE_PT_venom(_Panel, bpy.types.Panel):
         col.prop(s, "venom_length")
         col.prop(s, "venom_thickness")
         col.prop(s, "venom_speed")
+        layout.prop(s, "venom_webs")
         layout.prop(s, "venom_strands")
-        layout.prop(s, "venom_color")
+        col = layout.column(align=True)
+        col.prop(s, "venom_color")
+        col.prop(s, "venom_metallic")
         if not (s.layer_enable and s.layer_style == "GOO"):
             layout.label(text="Goo coat: Dark Undersuit, Symbiote Goo style", icon="INFO")
         if s.old_surface != "VEINS":
@@ -224,6 +232,7 @@ class MMDDISPERSE_PT_surface(_Panel, bpy.types.Panel):
         col.prop(s, "surface_color")
         if s.old_surface == "FROST":
             col = layout.column(align=True)
+            col.prop(s, "ice_clarity")
             col.prop(s, "ice_crystals")
             col.prop(s, "crystal_size")
 
@@ -270,17 +279,32 @@ class MMDDISPERSE_PT_glitch(_Panel, bpy.types.Panel):
         col.prop(s, "glitch_shift")
         layout.prop(s, "glitch_flash")
         layout.operator("mmd_disperse.add_glitch_fx", icon="SEQ_CHROMA_SCOPE")
+
+
+class MMDDISPERSE_PT_beats(_Panel, bpy.types.Panel):
+    bl_label = "Music Beats"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "beat_sync", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
         col = layout.column()
         col.prop(s, "beat_audio")
         row = col.row(align=True)
         row.prop(s, "beat_sensitivity")
         row.operator("mmd_disperse.find_beats", text="", icon="SOUND")
         found = beats.beat_object()
-        sub = col.column()
-        sub.active = found is not None
-        sub.prop(s, "beat_sync")
         if found is not None:
             col.label(text="{} beats".format(found.get(beats.P_BEATS, 0)), icon="CHECKMARK")
+        elif s.beat_sync:
+            col.label(text="Find the beats first", icon="INFO")
+        layout.label(text="Glitch, wires, rim, finale and particles follow them", icon="INFO")
 
 
 class MMDDISPERSE_PT_ribbons(_Panel, bpy.types.Panel):
@@ -347,7 +371,12 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
-        layout.prop(s, "exit_style")
+        if s.entrance == "SCALES":
+            layout.label(text="The old outfit turns over with the scales", icon="INFO")
+        col = layout.column()
+        col.active = s.entrance != "SCALES"
+        col.prop(s, "exit_style")
+        col.prop(s, "exit_timing")
         if s.exit_style == "SHRINK":
             col = layout.column(align=True)
             col.prop(s, "base_shrink")
@@ -422,6 +451,7 @@ classes = (
     MMDDISPERSE_PT_surface,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
+    MMDDISPERSE_PT_beats,
     MMDDISPERSE_PT_ribbons,
     MMDDISPERSE_PT_finale,
     MMDDISPERSE_PT_old,

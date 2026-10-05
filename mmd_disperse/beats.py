@@ -1,4 +1,6 @@
-"""Beats of the music, for the glitch: slices jump, flash and reshuffle, and the RGB split spikes, on the beat.
+"""Beats of the music: the glitch slices jump, flash and reshuffle and the RGB split spikes on the beat; the wires, the
+rim, the finale and the particles pulse with it, and the big moments (the finale, the halves clamping shut, the old
+outfit shattering) wait for the next beat (effect.py).
 
 The music is read with Audaspace (`aud`, part of Blender), mixed to mono and cut into windows of half a frame. The
 loudness of each window (in a log scale, the bass weighted up so the kick drum counts most) rises sharply where a
@@ -19,7 +21,8 @@ from . import particles
 
 BEAT = "MMD Disperse Beat"
 P_BEATS = "mmd_disperse_beats"  # on the empty: how many beats
-P_SOURCE = "mmd_disperse_beat_source"  # ... and where they came from
+P_SOURCE = "mmd_disperse_beat_source"  # ... where they came from
+P_FRAMES = "mmd_disperse_beat_frames"  # ... and the frames they are on
 DECAY = 3.0  # frames for the pulse to fade to a third
 MIN_GAP = 0.2  # seconds between two beats at least
 
@@ -172,9 +175,16 @@ def write(scene, times, start, source=""):
     ob.location = (0.0, 0.0, 0.0)
     ob[P_BEATS] = len(times)
     ob[P_SOURCE] = source
+    ob[P_FRAMES] = [float(f) for f in beat_frames]
     return ob
 
 
 def beat_object():
     ob = bpy.data.objects.get(BEAT)
     return ob if ob is not None and ob.type == "EMPTY" else None
+
+
+def beat_frames():
+    """Frames of the beats found (whole frames, in order); empty when there are none."""
+    ob = beat_object()
+    return [float(f) for f in ob.get(P_FRAMES, ())] if ob is not None else []

@@ -1,12 +1,12 @@
 """One-click looks. A preset only sets panel values (sizes stay fitted to the model); some of them are
 build-time settings, so an effect that is already built gets rebuilt with them. Presets in WHITE_FLASH also want
-the compositor's white flash (the operator adds it)."""
+the compositor's white flash, those in REFRACTION EEVEE's refraction (the operator adds them)."""
 
 _OFF = dict(
-    entrance="GROW", exit_style="SHRINK", particles="NONE", wire_enable=False, holo_enable=False,
+    entrance="GROW", exit_style="SHRINK", exit_timing="EDGE", particles="NONE", wire_enable=False, holo_enable=False,
     glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True, finale=False, finale_style="PULSE",
     finale_length=0.15, layer_enable=False, layer_style="NANO", inner_glow=False, venom_enable=False,
-    old_surface="NONE", particle_count=600,
+    venom_metallic=0.0, old_surface="NONE", particle_count=600,
 )
 
 PRESETS = (
@@ -32,13 +32,20 @@ PRESETS = (
           particle_glow=3.0, glow_color=(0.1, 0.75, 1.0))),
     ("VENOM", "Symbiote", "Black veins spread under the old outfit from the chest, tendrils of goo crawl ahead, sticky "
                           "strands stretch across the gaps, and the goo that covers the body turns into the new suit",
-     dict(_OFF, path="SURFACE", seeds="ORIGIN", venom_enable=True, old_surface="VEINS",
-          surface_color=(0.006, 0.006, 0.009), layer_enable=True, layer_style="GOO", edge_glow=False)),
-    ("ICE", "Freeze and Shatter", "Frost creeps up from the feet and ice crystals grow out of the old outfit, which "
-                                  "shatters into chunks and splinters of ice",
-     dict(_OFF, path="UP", old_surface="FROST", surface_color=(0.72, 0.86, 1.0), exit_style="CHUNKS",
-          frag_glow=False, particles="SHARD", particle_color=(0.75, 0.9, 1.0), particle_glow=1.0,
-          glow_color=(0.55, 0.85, 1.0))),
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", venom_enable=True, venom_color=(0.006, 0.006, 0.009),
+          old_surface="VEINS", surface_color=(0.006, 0.006, 0.009), layer_enable=True, layer_style="GOO",
+          edge_glow=False)),
+    ("LIQUID_METAL", "Liquid Metal", "Liquid metal runs over the body from the chest in silver veins and tendrils, "
+                                     "coats it and turns into the new outfit (Terminator 2's T-1000)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", venom_enable=True, venom_metallic=1.0, venom_color=(0.85, 0.87, 0.9),
+          old_surface="VEINS", surface_color=(0.85, 0.87, 0.9), layer_enable=True, layer_style="GOO",
+          edge_glow=False)),
+    ("ICE", "Freeze and Shatter", "Frost creeps up from the feet and freezes the old outfit to clear ice, crystals "
+                                  "grow out of it, the new outfit forms underneath; then all of it shatters into "
+                                  "chunks and splinters of ice",
+     dict(_OFF, path="UP", old_surface="FROST", surface_color=(0.72, 0.86, 1.0), ice_clarity=0.7, exit_style="CHUNKS",
+          exit_timing="AT_ONCE", frag_glow=False, particles="SHARD", particle_color=(0.75, 0.9, 1.0),
+          particle_glow=1.0, glow_color=(0.55, 0.85, 1.0))),
     ("BURN", "Burn to Ash", "The old outfit chars from the hands and feet, glowing cracks open, it crumbles into ash "
                             "and embers drift up; the new outfit appears behind a fiery edge",
      dict(_OFF, path="SURFACE", seeds="LIMBS", old_surface="CHAR", surface_color=(0.03, 0.022, 0.016),
@@ -61,6 +68,15 @@ PRESETS = (
                                     "into it; the suit flashes on as they meet (Kamen Rider Decade)",
      dict(_OFF, entrance="GHOSTS", holo_enable=True, finale=True, finale_white=0.5, particle_color=(1.0, 0.6, 0.9),
           particle_glow=3.0, glow_color=(1.0, 0.2, 0.7))),
+    ("MYSTIQUE", "Mystique Scales", "Scales ripple over the body from the chest and turn over one by one, the old "
+                                    "outfit on one side of every scale and the new one on the other (X-Men)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", entrance="SCALES", edge_glow=True, glow_color=(0.25, 0.55, 1.0))),
+    ("BEAT_DROP", "Beat Drop", "Everything on the beats of the music: the wires flare, the slices glitch, the old "
+                               "outfit bursts into sparkles that pop, and the finale flashes white on a beat (Find "
+                               "Beats first)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN_LIMBS", wire_enable=True, glitch_enable=True, glitch_flash=True,
+          exit_style="FRAGMENTS", frag_glow=True, particles="STAR", finale=True, finale_white=0.8, beat_sync=True,
+          particle_color=(0.6, 0.9, 1.0), particle_glow=3.0, glow_color=(1.0, 0.2, 0.6))),
     ("MAGICAL", "Magical Girl", "Hands and feet first: the body lights up, ribbons of light wrap the limbs, "
                                 "the old outfit bursts into sparkles and the new one flashes when it is complete",
      dict(_OFF, path="SURFACE", seeds="LIMBS", exit_style="FRAGMENTS", frag_glow=True, silhouette=True,
@@ -71,7 +87,8 @@ PRESETS = (
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
 BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles"}
-WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS"}
+WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP"}
+REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 
 def apply(settings, key):

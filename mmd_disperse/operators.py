@@ -1,7 +1,7 @@
 import bpy
 from bpy.props import EnumProperty
 
-from . import beats, compositor, effect, presets
+from . import beats, compositor, effect, materials, presets
 
 
 class MMDDISPERSE_OT_assign(bpy.types.Operator):
@@ -137,6 +137,8 @@ class MMDDISPERSE_OT_preset(bpy.types.Operator):
             except RuntimeError as err:
                 self.report({"WARNING"}, str(err))
             effect.update_white_flash(settings)
+        if self.preset in presets.REFRACTION and materials.enable_refraction(context.scene):
+            self.report({"INFO"}, "EEVEE refraction turned on for the clear ice")
         return {"FINISHED"}
 
 
@@ -161,7 +163,7 @@ class MMDDISPERSE_OT_glitch_fx(bpy.types.Operator):
 
 
 class MMDDISPERSE_OT_find_beats(bpy.types.Operator):
-    """Find the beats of the music (the file, or the first sound strip of the Video Sequencer) for the glitch to
+    """Find the beats of the music (the file, or the first sound strip of the Video Sequencer) for the effect to
     follow"""
 
     bl_idname = "mmd_disperse.find_beats"

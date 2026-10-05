@@ -137,8 +137,14 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                 "and clamp shut with a flash; the old outfit goes at that moment (Kamen Rider Build)"),
                ("GHOSTS", "Converging Ghosts",
                 "Copies of the new outfit stand around the body and converge into it; where they meet the outfit is "
-                "there and the old one goes (Kamen Rider Decade; see-through with the hologram on)")),
+                "there and the old one goes (Kamen Rider Decade; see-through with the hologram on)"),
+               ("SCALES", "Flipping Scales",
+                "Both outfits break into scales that turn over in a wave where the edge passes, the old outfit on one "
+                "side of every scale and the new one on the other (Mystique); the old outfit leaves this way too")),
         default="GROW", update=_sync)
+    scale_size: _distance("Scale Size", "How big the scales are", 0.5)
+    flip_width: _distance("Flip Width", "How far the edge moves while one scale turns over: wider means slower, "
+                                        "with more scales turning at once", 1.5)
     clamp_distance: _distance("Slide Distance", "How far in front of and behind the body the halves form", 5.0,
                               soft_max=50.0)
     ghost_count: IntProperty(name="Ghost Count", default=6, min=1, max=32, update=_sync,
@@ -182,9 +188,14 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     venom_strands: IntProperty(name="Strand Count", default=60, min=0, soft_max=400, update=_sync,
                                description="About how many sticky strands stretch across gaps (armpits, between the "
                                            "legs, skirt and legs ...); they sag, thin out and snap")
+    venom_webs: BoolProperty(name="Webbing", default=True, update=_sync,
+                             description="A web of goo fills the fork where a tendril branches")
     venom_color: FloatVectorProperty(name="Goo Color", subtype="COLOR", size=3, min=0.0, max=1.0,
                                      default=(0.006, 0.006, 0.009), update=_sync,
                                      description="Color of the tendrils, strands and the goo undersuit")
+    venom_metallic: FloatProperty(name="Goo Metallic", default=0.0, min=0.0, max=1.0, subtype="FACTOR", update=_sync,
+                                  description="Turns the goo (tendrils, strands, goo undersuit, black veins) into "
+                                              "liquid metal: 1 with a silver color is the T-1000")
 
     # --- the old outfit's surface ahead of the edge
     old_surface: EnumProperty(
@@ -205,6 +216,9 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                               description="With frost: about how many ice crystals grow out of the old outfit before "
                                           "the edge shatters it (0 = none; they use the particle color)")
     crystal_size: _distance("Crystal Size", "How tall the ice crystals grow", 0.6)
+    ice_clarity: FloatProperty(name="Ice Clarity", default=0.5, min=0.0, max=1.0, subtype="FACTOR", update=_sync,
+                               description="With frost: how clear the ice is between the white frost, like glass that "
+                                           "shows what is under it (EEVEE needs raytracing or screen space refraction)")
 
     # --- hologram ahead of the edge
     holo_enable: BoolProperty(name="Hologram", default=False, update=_sync,
@@ -228,8 +242,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     glitch_flash: BoolProperty(name="Flashes", default=True, update=_sync,
                                description="Some slices flash in the glow color")
     beat_sync: BoolProperty(name="Sync to Beat", default=False, update=_sync,
-                            description="The slices reshuffle on every beat of the music and jump, flash and split "
-                                        "most on it (Find Beats first)")
+                            description="Follow the beats of the music (Find Beats first): the glitch slices "
+                                        "reshuffle, jump and flash on them, the wires and the rim flare, the particles "
+                                        "pop, and the finale, the halves clamping shut, the ghosts meeting and the old "
+                                        "outfit shattering all at once land on a beat")
     beat_audio: StringProperty(name="Music", subtype="FILE_PATH",
                                description="Music to find the beats in, starting with the scene; leave empty to use "
                                            "the first sound strip of the Video Sequencer")
@@ -246,6 +262,13 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("FRAGMENTS", "Disintegrate", "Break into flakes that blow away"),
                ("CHUNKS", "Cast Off", "Break into armour-like chunks that are thrown off and fall")),
         default="SHRINK", update=_sync)
+    exit_timing: EnumProperty(
+        name="Exit Timing",
+        items=(("EDGE", "With the Edge", "Each part of the old outfit goes where the edge passes"),
+               ("AT_ONCE", "Together at the End",
+                "The old outfit stays while the wave crosses it (frost, veins or char cover all of it, the new outfit "
+                "forms underneath) and goes all at once when the wave is done: freeze, then shatter")),
+        default="EDGE", update=_sync)
     frag_size: FloatProperty(name="Flake Size", default=0.85, min=0.05, max=1.0, subtype="FACTOR", update=_sync,
                              description="Size of each flake relative to the face it breaks from")
     frag_subdivide: IntProperty(name="Flake Subdivide", default=0, min=0, max=2, update=_sync,

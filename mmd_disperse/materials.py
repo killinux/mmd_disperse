@@ -24,6 +24,8 @@ P_LAYER = "mmd_disperse_layer"
 SURFACE = "MMDD Surface"
 P_SURFACE = "mmd_disperse_surface"  # the style the surface nodes were made for
 SURFACE_STYLES = ("VEINS", "FROST", "CHAR")
+P_REFRACT = "mmd_disperse_refract"  # material settings to put back once the clear ice is gone
+ICE_IOR = 1.31
 
 # The shader nodes we splice in front of a material output always run in this order, whatever order they are added
 # in: the surface ahead of the edge and the undersuit (replace the surface) -> inner glow (replaces it on back faces) ->
@@ -37,6 +39,36 @@ def _set_input(node, names, value):
         if sock is not None:
             sock.default_value = value
             return
+
+
+def _refraction(mat, on):
+    """Let EEVEE refract through `mat` (clear ice): raytraced transmission (4.2+) or screen space refraction with
+    alpha-hashed blending (before). Off puts back what the material had."""
+    if on and P_REFRACT not in mat:
+        if hasattr(mat, "use_raytrace_refraction"):  # EEVEE Next
+            mat[P_REFRACT] = {"use_raytrace_refraction": int(mat.use_raytrace_refraction)}
+            mat.use_raytrace_refraction = True
+        elif hasattr(mat, "use_screen_refraction"):
+            mat[P_REFRACT] = {"use_screen_refraction": int(mat.use_screen_refraction), "blend_method": mat.blend_method}
+            mat.use_screen_refraction = True
+            if mat.blend_method == "OPAQUE":
+                mat.blend_method = "HASHED"
+    elif not on and P_REFRACT in mat:
+        for name, value in mat[P_REFRACT].to_dict().items():
+            setattr(mat, name, bool(value) if name.startswith("use_") else value)
+        del mat[P_REFRACT]
+
+
+def enable_refraction(scene):
+    """Scene settings EEVEE needs to refract through clear ice: raytracing (4.2+) or screen space reflections with
+    refraction (before). Returns True when something was turned on."""
+    ee = scene.eevee
+    changed = False
+    for name in ("use_raytracing", "use_ssr", "use_ssr_refraction"):
+        if hasattr(ee, name) and not getattr(ee, name):
+            setattr(ee, name, True)
+            changed = True
+    return changed
 
 
 def _new(nt, idname, name, x, y, **props):
@@ -193,7 +225,8 @@ def ensure_coin_material():
 
 
 def ensure_ice_material():
-    """Ice shards and crystals: clear glossy ice in the particle colour with a faint cold glow."""
+    """Ice shards and crystals: clear ice like glass (it refracts what is behind it), tinted in the particle colour,
+    with a faint cold glow so it still reads against a dark background."""
     mat = bpy.data.materials.get(ICE_MATERIAL)
     if mat is not None:
         return mat
@@ -204,11 +237,15 @@ def ensure_ice_material():
     nt.nodes.clear()
     out = _new(nt, "ShaderNodeOutputMaterial", "Output", 400, 0)
     bsdf = _new(nt, "ShaderNodeBsdfPrincipled", "MMDD_BSDF", 100, 0)
-    _set_input(bsdf, ("Roughness",), 0.04)
-    _set_input(bsdf, ("Coat Weight", "Clearcoat"), 1.0)
+    _set_input(bsdf, ("Roughness",), 0.05)
+    _set_input(bsdf, ("IOR",), ICE_IOR)
+    _set_input(bsdf, ("Transmission Weight", "Transmission"), 1.0)
     _set_input(bsdf, ("Specular IOR Level", "Specular"), 1.0)
-    _set_input(bsdf, ("Emission Strength",), 0.25)
+    _set_input(bsdf, ("Emission Strength",), 0.3)
     nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
+    _refraction(mat, True)
+    if hasattr(mat, "shadow_method"):  # legacy EEVEE: a light, see-through shadow
+        mat.shadow_method = "HASHED"
     return mat
 
 
@@ -218,8 +255,9 @@ def update_particle_material(settings):
         shiny = bpy.data.materials.get(name)
         bsdf = shiny.node_tree.nodes.get("MMDD_BSDF") if shiny is not None and shiny.node_tree else None
         if bsdf is not None:
-            if name == ICE_MATERIAL:  # deep, clear ice with a faint glow (coins do not glow; 3.x's Emission is a colour)
-                _set_input(bsdf, ("Base Color",), tuple(0.35 * c for c in color[:3]) + (1.0,))
+            # clear ice tinted the colour, a faint glow (coins do not glow; 3.x's Emission is a colour)
+            if name == ICE_MATERIAL:
+                _set_input(bsdf, ("Base Color",), color)
                 _set_input(bsdf, ("Emission Color", "Emission"), color)
             else:
                 _set_input(bsdf, ("Base Color",), color)
@@ -261,14 +299,20 @@ def _goo_shader(nt, prefix, coord, x, y):
     return bsdf
 
 
-def _set_goo(nodes, prefix, color, cell):
-    """Goo colour, and the size of its wet / dry smears (`cell`, in the units of the noise's coordinates)."""
+def _set_goo(nodes, prefix, color, cell, metallic=0.0):
+    """Goo colour, the size of its wet / dry smears (`cell`, in the units of the noise's coordinates) and how metallic
+    it is (liquid metal: polished, with only faint smears)."""
     bsdf = nodes.get(prefix + " BSDF")
     if bsdf is not None:
         _set_input(bsdf, ("Base Color",), tuple(color) + (1.0,))
+        _set_input(bsdf, ("Metallic",), metallic)
     smear = nodes.get(prefix + " Smear")
     if smear is not None:
         smear.inputs["Scale"].default_value = 1.0 / max(cell, 1e-6)
+    wet = nodes.get(prefix + " Wet")
+    if wet is not None:  # roughness range of the smears (metal: brushed enough to catch the lights)
+        wet.inputs[3].default_value = 0.04 + 0.08 * metallic
+        wet.inputs[4].default_value = 0.45 - 0.17 * metallic
 
 
 def ensure_goo_material():
@@ -288,12 +332,13 @@ def ensure_goo_material():
     return mat
 
 
-def update_goo_material(color, cell):
+def update_goo_material(color, cell, metallic=0.0):
     mat = bpy.data.materials.get(GOO_MATERIAL)
     if mat is None or mat.node_tree is None:
         return
-    _set_goo(mat.node_tree.nodes, "MMDD Goo", color, cell)
+    _set_goo(mat.node_tree.nodes, "MMDD Goo", color, cell, metallic)
     mat.diffuse_color = tuple(color) + (1.0,)
+    mat.metallic = metallic
 
 
 def _alpha_source(nt):
@@ -623,8 +668,8 @@ def add_layer(mat):
 
 
 def update_layer(mat, color, glow_color, lines, cell, goo=None):
-    """Undersuit colour, colour and brightness of its lines, cell size in object units; `goo` = (colour, smear size)
-    for the symbiote's goo instead."""
+    """Undersuit colour, colour and brightness of its lines, cell size in object units; `goo` = (colour, smear size,
+    metallic) for the symbiote's goo instead."""
     nodes = mat.node_tree.nodes if mat.node_tree else {}
     bsdf = nodes.get(LAYER + " BSDF")
     if bsdf is not None:
@@ -745,7 +790,8 @@ def _creeping(nt, near, rest, low, high, x, y):
 def _frost(nt, near, rest, x, y):
     """Frost creeps over the surface in patches and freezes it to ice: clear, glossy, deep-coloured ice with white
     frost grown over it in feathery patches (a fine noise on the rest position), a faint cold glow and a few sparkling
-    facets. Returns (factor, shader)."""
+    facets. Between the frost the ice is as clear as SURFACE + " Clarity" says: glass that refracts what is under it.
+    Returns (factor, shader)."""
     fac = _creeping(nt, near, rest, 0.35, 0.7, x, y + 400)
     feathers = _new(nt, "ShaderNodeTexNoise", SURFACE + " Feathers", x - 900, y + 100, noise_dimensions="3D")
     nt.links.new(rest, feathers.inputs["Vector"])
@@ -755,11 +801,23 @@ def _frost(nt, near, rest, x, y):
     nt.links.new(feathers.outputs[0], white.inputs[0])  # "Fac" / "Factor"
     white.inputs[1].default_value = 0.47
     white.inputs[2].default_value = 0.62
-    # deep ice is the colour darkened to a quarter, frost the colour itself (the colour goes into Shade's vector)
+    clarity = _new(nt, "ShaderNodeValue", SURFACE + " Clarity", x - 900, y - 650)
+    # deep ice is the colour darkened to a quarter, frost the colour itself (the colour goes into Shade's vector); clear
+    # ice lets the light through, so it takes the colour itself too
+    lighter = _new(nt, "ShaderNodeMath", SURFACE + " Lighter", x - 700, y - 50, operation="MAXIMUM")
+    nt.links.new(white.outputs[0], lighter.inputs[0])
+    nt.links.new(clarity.outputs[0], lighter.inputs[1])
     tint = _new(nt, "ShaderNodeMath", SURFACE + " Tint", x - 500, y + 100, operation="MULTIPLY_ADD")
-    nt.links.new(white.outputs[0], tint.inputs[0])
+    nt.links.new(lighter.outputs[0], tint.inputs[0])
     tint.inputs[1].default_value = 0.75
     tint.inputs[2].default_value = 0.25
+    # light goes through the ice between the frost
+    open_ice = _new(nt, "ShaderNodeMath", SURFACE + " Open", x - 700, y - 650, operation="SUBTRACT")
+    open_ice.inputs[0].default_value = 1.0
+    nt.links.new(white.outputs[0], open_ice.inputs[1])
+    through = _new(nt, "ShaderNodeMath", SURFACE + " Through", x - 500, y - 650, operation="MULTIPLY")
+    nt.links.new(open_ice.outputs[0], through.inputs[0])
+    nt.links.new(clarity.outputs[0], through.inputs[1])
     shade = _new(nt, "ShaderNodeVectorMath", SURFACE + " Shade", x - 300, y + 100, operation="SCALE")
     nt.links.new(tint.outputs[0], shade.inputs[3])
     rough = _new(nt, "ShaderNodeMapRange", SURFACE + " Rough", x - 500, y - 100)
@@ -785,9 +843,12 @@ def _frost(nt, near, rest, x, y):
     _set_input(bsdf, ("Coat Weight", "Clearcoat"), 1.0)
     _set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.02)
     _set_input(bsdf, ("Specular IOR Level", "Specular"), 0.9)
+    _set_input(bsdf, ("IOR",), ICE_IOR)
     nt.links.new(shade.outputs[0], bsdf.inputs["Base Color"])
     nt.links.new(rough.outputs[0], bsdf.inputs["Roughness"])
     nt.links.new(glow.outputs[0], bsdf.inputs["Emission Strength"])
+    transmission = bsdf.inputs.get("Transmission Weight") or bsdf.inputs.get("Transmission")
+    nt.links.new(through.outputs[0], transmission)
     return fac, bsdf
 
 
@@ -857,9 +918,14 @@ def add_surface(mat, style):
     mat[P_SURFACE] = style
 
 
-def update_surface(mat, color, glow_color, cell):
-    """Colour of the veins / ice / char, the glow colour of the smouldering char, and the cell size (object units)."""
+def update_surface(mat, color, glow_color, cell, metallic=0.0, clarity=0.0):
+    """Colour of the veins / ice / char, the glow colour of the smouldering char, the cell size (object units), how
+    metallic the veins' goo is and how clear the ice is (clear ice lets EEVEE refract through the material)."""
     nodes = mat.node_tree.nodes if mat.node_tree else {}
+    clear = nodes.get(SURFACE + " Clarity")
+    if clear is not None:
+        clear.outputs[0].default_value = clarity
+    _refraction(mat, clear is not None and clarity > 0.0)
     for name, scale in ((" Cells", 1.0), (" Fine", 2.6), (" Warp", 0.8), (" Patches", 0.7), (" Noise", 0.5),
                         (" Facets", 2.0), (" Feathers", 1.2), (" Cracks", 1.5)):
         node = nodes.get(SURFACE + name)
@@ -868,7 +934,7 @@ def update_surface(mat, color, glow_color, cell):
     amount = nodes.get(SURFACE + " Amount")
     if amount is not None:
         amount.inputs[3].default_value = 0.6 * cell
-    _set_goo(nodes, SURFACE + " Goo", color, cell * 0.5)
+    _set_goo(nodes, SURFACE + " Goo", color, cell * 0.5, metallic)
     ice = nodes.get(SURFACE + " Ice BSDF")
     if ice is not None:
         _set_input(ice, ("Emission Color", "Emission"), tuple(color) + (1.0,))
@@ -882,6 +948,7 @@ def update_surface(mat, color, glow_color, cell):
 
 
 def remove_surface(mat):
+    _refraction(mat, False)
     nt = mat.node_tree
     if nt is None or not mat.get(P_SURFACE):
         return

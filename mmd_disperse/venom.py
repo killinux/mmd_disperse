@@ -12,9 +12,15 @@ is bound to the triangle it lies on (three vertex indices and barycentric weight
 the dancing body. Strands join two facing surfaces close to each other (armpits, between the legs, skirt and legs),
 each end bound the same way.
 
-The result is a hidden mesh, the skeleton: one chain of vertices per tendril, branch or strand, with the bindings and
-the timing as point attributes. It holds for the settings it was traced with (its signature); effect.sync() traces it
-again when they change.
+Where a branch splits off a tendril, a web of goo fills the fork (Venom: The Last Dance's webbing between tendrils): a
+small grid of faces between the two, its free edge curved in, every vertex bound to the surface the same way and
+timed like the tendril. Strands are also looked for in poses the body takes while it transforms (sampled frames of
+its animation): arms down against the body, legs together. There they are bound where the two surfaces face each
+other, so they stretch when the body opens up again.
+
+The result is a hidden mesh, the skeleton: one chain of vertices per tendril, branch or strand and a grid of faces
+per web, with the bindings and the timing as point attributes. It holds for the settings it was traced with (its
+signature); effect.sync() traces it again when they change.
 """
 
 import math
@@ -35,16 +41,20 @@ P_VERTICES = "mmd_disperse_venom_vertices"  # ... and the vertex count of the me
 # Point attributes of the skeleton (besides the bindings of end A, a tendril point or the first end of a strand, and
 # end B, the other end of a strand: VENOM_ENDS, three vertex indices and their weights each).
 ATTR_T = "mmdd_t"  # strands: 0 at end A .. 1 at end B
-ATTR_KIND = "mmdd_kind"  # 0 tendril, 1 strand
-ATTR_S = "mmdd_s"  # tendrils: length along the tendril from its root (object units)
-ATTR_LENGTH = "mmdd_len"  # tendrils: s at the end of the branch; strands: rest length
-ATTR_ROOT = "mmdd_root"  # tendrils: skeleton index of the root, whose age times the whole tendril
+ATTR_KIND = "mmdd_kind"  # 0 tendril, 1 strand, 2 web
+ATTR_S = "mmdd_s"  # tendrils, webs: length along the tendril from its root (object units)
+ATTR_LENGTH = "mmdd_len"  # tendrils, webs: s at the end of the branch; strands: rest length
+ATTR_ROOT = "mmdd_root"  # tendrils, webs: skeleton index of the root, whose age times the whole tendril
 ATTR_RND = "mmdd_rnd"  # random number per tendril / strand
 
 STEPS = 24  # trace steps per tendril length
 STRAND_POINTS = 8
 COVER = 0.012  # a surface with another one this close above it (fraction of the model height) is hidden: no seeds
 BRANCHES = (0.7, 0.3)  # chance of a first and a second branch
+WEB_ROWS, WEB_COLUMNS = 6, 4  # faces of a web along the fork and across it
+WEB_REACH = 0.5  # how far up the fork a web reaches (share of the shorter side)
+WEB_CURVE = 0.6  # how far its free edge curves in, in the middle (share of the reach)
+POSES = 4  # frames of the animation the strands are also looked for in
 
 
 def skeleton(ob):
@@ -53,8 +63,10 @@ def skeleton(ob):
 
 
 def signature(settings, s):
-    """What the skeleton of a mesh with scale `s` depends on (object units)."""
-    return (float(settings.venom_tendrils), float(settings.venom_strands), settings.venom_length / s)
+    """What the skeleton of a mesh with scale `s` depends on (object units; the frames the strands are looked for in
+    come from the transformation's frame range)."""
+    return (float(settings.venom_tendrils), float(settings.venom_strands), settings.venom_length / s,
+            float(settings.venom_webs), float(settings.frame_start), float(settings.frame_end))
 
 
 def _encode(values):
@@ -108,14 +120,15 @@ def _turn(v, axis, angle):
 
 
 class _Surface:
-    """Rest-pose triangles of a mesh with a BVH, the arrival field's gradient per triangle and which ones may carry
-    goo (not locked, not degenerate)."""
+    """Rest-pose triangles of a mesh (or posed: vertex positions `co`) with a BVH, the arrival field's gradient per
+    triangle and which ones may carry goo (not locked, not degenerate)."""
 
-    def __init__(self, ob, values):
+    def __init__(self, ob, values, co=None):
         me = ob.data
-        co = np.empty(len(me.vertices) * 3, dtype=np.float32)
-        me.vertices.foreach_get("co", co)
-        self.co = co.reshape(-1, 3).astype(np.float64)
+        if co is None:
+            co = np.empty(len(me.vertices) * 3, dtype=np.float32)
+            me.vertices.foreach_get("co", co)
+        self.co = np.asarray(co).reshape(-1, 3).astype(np.float64)
         if hasattr(me, "calc_loop_triangles"):
             me.calc_loop_triangles()
         tris = np.empty(len(me.loop_triangles) * 3, dtype=np.int64)
@@ -214,7 +227,7 @@ def _spaced(candidates, spacing):
 
 
 class _Chain:
-    """One tendril branch or strand, in skeleton point attributes."""
+    """One tendril branch, strand or web, in skeleton point attributes."""
 
     def __init__(self, kind, rnd):
         self.kind = kind
@@ -225,7 +238,8 @@ class _Chain:
         self.t = []
         self.s = []
         self.length = 0.0
-        self.root = None  # chain whose first point is the root (tendrils), filled in later
+        self.root = None  # chain whose first point is the root (tendrils, webs), filled in later
+        self.faces = []  # webs: faces, indices into points
 
 
 def _trace(surface, k, p, heading, length, step, rng, s0=0.0):
@@ -262,7 +276,49 @@ def _trace(surface, k, p, heading, length, step, rng, s0=0.0):
     return path
 
 
-def _tendrils(surface, count, length, height, rng):
+def _web(surface, side_a, side_b, trunk, step):
+    """Web in the fork between two paths from the same point (lists of (point, triangle, s)): WEB_ROWS x WEB_COLUMNS
+    faces between them reaching WEB_REACH of the way up the shorter one, the free edge curved in, every vertex dropped
+    onto the surface and bound there, timed by the trunk's root. None when it does not fit."""
+    m = min(len(side_a), len(side_b)) - 1
+    reach = WEB_REACH * m
+    if reach < 1.5:
+        return None
+    sides = [(np.array([p for p, _k, _s in side]), np.array([s for _p, _k, s in side]), [k for _p, k, _s in side])
+             for side in (side_a, side_b)]
+
+    def at(values, index):
+        i = min(int(index), len(values) - 2)
+        f = index - i
+        return values[i] * (1.0 - f) + values[i + 1] * f
+
+    web = _Chain(2, trunk.rnd)
+    web.root = trunk
+    grid = {}
+    for r in range(WEB_ROWS + 1):
+        for c in range(WEB_COLUMNS + 1):
+            t = c / WEB_COLUMNS
+            k = reach * r / WEB_ROWS * (1.0 - WEB_CURVE * math.sin(math.pi * t))
+            (pa, sa, ka), (pb, sb, kb) = sides
+            x = at(pa, k) + (at(pb, k) - at(pa, k)) * t
+            n = _unit(surface.normals[ka[int(round(k))]] + surface.normals[kb[int(round(k))]])
+            q, kq = surface.drop(x, n, step)
+            if q is None or not surface.free[kq]:
+                return None
+            w = surface.weights(kq, q)
+            grid[r, c] = len(web.points)
+            web.points.append(q)
+            web.a.append((kq, w))
+            web.b.append((kq, w))
+            web.t.append(0.0)
+            web.s.append(float(at(sa, k) * (1.0 - t) + at(sb, k) * t))
+    web.faces = [(grid[r, c], grid[r, c + 1], grid[r + 1, c + 1], grid[r + 1, c])
+                 for r in range(WEB_ROWS) for c in range(WEB_COLUMNS)]
+    web.length = max(side_a[-1][2], side_b[-1][2])
+    return web
+
+
+def _tendrils(surface, count, length, height, rng, webs=True):
     chains = []
     step = length / STEPS
     total = float(np.where(surface.free, surface.area, 0.0).sum())
@@ -297,6 +353,9 @@ def _tendrils(surface, count, length, height, rng):
             branch.root = trunk
             _fill(surface, branch, branch_path)
             chains.append(branch)
+            web = _web(surface, path[at:], branch_path, trunk, step) if webs else None
+            if web is not None:
+                chains.append(web)
     return chains
 
 
@@ -311,40 +370,47 @@ def _fill(surface, chain, path):
     chain.length = path[-1][2]
 
 
-def _strands(surface, count, height, rng):
+def _strands(surfaces, count, height, rng):
     """Strands across gaps: a ray out from the surface (within 40 degrees of the normal) that hits a surface facing
-    back, not too close, not too far."""
+    back, not too close, not too far. Looked for in every one of `surfaces` (the rest pose first, then poses the body
+    takes: the same triangles moved), each end bound where it was found; the rest length is the gap there."""
     chains = []
     if count <= 0:
         return chains
+    rest = surfaces[0]
     near, far = 0.01 * height, 0.12 * height
     pairs = []
-    for k, p in surface.samples(count * 40, rng):
-        n = surface.normals[k]
-        d = _unit(n + np.tan(math.radians(40.0)) * math.sqrt(rng.random()) * _unit(np.cross(n, rng.normal(size=3))))
-        # (an inner layer under the clothes hits them from inside: they face the same way and are skipped)
-        loc, _nor, kq, dist = surface.bvh.ray_cast(Vector(p + n * 1e-4 * height), Vector(d), far)
-        if loc is None or dist < near or not surface.free[kq] or surface.normals[kq] @ d > -0.2:
-            continue
-        q = np.array(loc)
-        pairs.append((k, (p + q) * 0.5, p, kq, q))
-    spacing = 0.5 * math.sqrt(float(np.where(surface.free, surface.area, 0.0).sum()) / max(count, 1))
-    for k, _mid, p, kq, q in _spaced(pairs, spacing)[:count]:
+    for surface in surfaces:
+        for k, p in surface.samples(count * 40, rng):
+            n = surface.normals[k]
+            d = _unit(n + np.tan(math.radians(40.0)) * math.sqrt(rng.random()) * _unit(np.cross(n, rng.normal(size=3))))
+            # (an inner layer under the clothes hits them from inside: they face the same way and are skipped)
+            loc, _nor, kq, dist = surface.bvh.ray_cast(Vector(p + n * 1e-4 * height), Vector(d), far)
+            if loc is None or dist < near or not surface.free[kq] or surface.normals[kq] @ d > -0.2:
+                continue
+            q = np.array(loc)
+            wa, wb = surface.weights(k, p), surface.weights(kq, q)
+            # where the ends are on the rest pose (the skeleton's own vertices)
+            pa, qb = wa @ rest.co[rest.tris[k]], wb @ rest.co[rest.tris[kq]]
+            pairs.append((k, (pa + qb) * 0.5, wa, kq, wb, pa, qb, float(dist)))
+    order = rng.permutation(len(pairs))  # the poses mixed, so none of them gets all the room
+    spacing = 0.5 * math.sqrt(float(np.where(rest.free, rest.area, 0.0).sum()) / max(count, 1))
+    for k, _mid, wa, kq, wb, p, q, gap in _spaced([pairs[i] for i in order], spacing)[:count]:
         chain = _Chain(1, float(rng.random()))
-        wa, wb = surface.weights(k, p), surface.weights(kq, q)
         for t in np.linspace(0.0, 1.0, STRAND_POINTS):
             chain.points.append(p + (q - p) * t)
             chain.a.append((k, wa))
             chain.b.append((kq, wb))
             chain.t.append(float(t))
             chain.s.append(0.0)
-        chain.length = float(np.linalg.norm(q - p))
+        chain.length = gap
         chains.append(chain)
     return chains
 
 
 def _mesh(name, surface, chains):
-    """The skeleton mesh: one edge chain per chain, the bindings and timing as point attributes."""
+    """The skeleton mesh: one edge chain per tendril, branch or strand, a grid of faces per web, the bindings and
+    timing as point attributes."""
     me = bpy.data.meshes.new(name)
     starts = []
     total = 0
@@ -355,12 +421,9 @@ def _mesh(name, surface, chains):
         return me
     first = {id(chain): start for chain, start in zip(chains, starts)}
     co = np.concatenate([np.array(c.points) for c in chains]).astype(np.float32)
-    edges = np.concatenate([np.stack([np.arange(s, s + len(c.points) - 1), np.arange(s + 1, s + len(c.points))], 1)
-                            for c, s in zip(chains, starts)]).astype(np.int32)
-    me.vertices.add(total)
-    me.vertices.foreach_set("co", co.ravel())
-    me.edges.add(len(edges))
-    me.edges.foreach_set("vertices", edges.ravel())
+    edges = [(s + i, s + i + 1) for c, s in zip(chains, starts) if c.kind != 2 for i in range(len(c.points) - 1)]
+    faces = [tuple(s + i for i in face) for c, s in zip(chains, starts) for face in c.faces]
+    me.from_pydata(co.tolist(), edges, faces)
     me.update()
 
     def put(name, data_type, values):
@@ -384,15 +447,106 @@ def _mesh(name, surface, chains):
     return me
 
 
-def build(ob, values, settings, height, scene):
-    """Trace the tendrils and strands of mesh `ob` (field `values` per vertex, object units) and give it a new
-    skeleton. Returns (tendrils, strands)."""
+def _motion(ob):
+    """What moves `ob`: (object, action, its frame range) for it, its armature and their parents that are animated (an
+    action, NLA strips or drivers); empty when nothing is."""
+    from .model import find_armature
+
+    seen = set()
+    todo = [ob, find_armature(ob)]
+    found = []
+    while todo:
+        item = todo.pop()
+        if item is None or item.name in seen:
+            continue
+        seen.add(item.name)
+        ad = item.animation_data
+        if ad is not None and (ad.action is not None or len(ad.nla_tracks) or len(ad.drivers)):
+            action = ad.action
+            found.append((item.name, action.name if action else "", tuple(action.frame_range) if action else ()))
+        todo.append(item.parent)
+    return tuple(sorted(found))
+
+
+_POSES = {}  # (mesh, vertex count, frames) -> its poses, while Blender runs (a rebuild samples them again)
+_STRANDS = {}  # (that, strand count, model height) -> the strands found in them
+
+
+def forget():
+    """Drop the poses and strands kept from earlier traces (a rebuild: the motion may have changed)."""
+    _POSES.clear()
+    _STRANDS.clear()
+
+
+def sample_poses(scene, ob, frames, quiet):
+    """(poses, key): vertex positions (object space) of mesh `ob` as its armature poses it at each of `frames` when it is
+    animated (kept under `key` for the next trace), or else at the current frame (key None); our node modifiers on the
+    objects `quiet` and everything after the armature on `ob` are off meanwhile. Frames whose positions do not line
+    up with the mesh are left out."""
+    motion = _motion(ob)
+    animated = bool(motion)
+    key = (ob.name, len(ob.data.vertices), tuple(sorted(set(frames))), motion) if animated else None
+    if key in _POSES:
+        return _POSES[key], key
+    saved = {}
+    for other in set(quiet) | {ob}:
+        for mod in other.modifiers:
+            ours = mod.type == "NODES" and mod.node_group is not None and mod.node_group.name.startswith("MMDDisperse")
+            if ours and mod.show_viewport:
+                saved[mod] = True
+                mod.show_viewport = False
+    mods = list(ob.modifiers)
+    last = max((i for i, m in enumerate(mods) if m.type == "ARMATURE"), default=-1)
+    for mod in mods[last + 1:]:
+        if mod.show_viewport:
+            saved[mod] = True
+            mod.show_viewport = False
+    count = len(ob.data.vertices)
+    current = scene.frame_current
+    poses = []
+    try:
+        for frame in sorted(set(frames)) if animated else [None]:
+            if frame is not None:
+                scene.frame_set(frame)
+            ev = ob.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            me = ev.to_mesh()
+            try:
+                if len(me.vertices) == count:
+                    co = np.empty(count * 3, dtype=np.float32)
+                    me.vertices.foreach_get("co", co)
+                    poses.append(co)
+            finally:
+                ev.to_mesh_clear()
+    finally:
+        for mod in saved:
+            mod.show_viewport = True
+        if scene.frame_current != current:
+            scene.frame_set(current)
+    if key is not None:
+        _POSES[key] = poses
+    return poses, key
+
+
+def build(ob, values, settings, height, scene, poses=(), pose_key=None):
+    """Trace the tendrils, webs and strands of mesh `ob` (field `values` per vertex, object units) and give it a new
+    skeleton; strands are also looked for in `poses` (vertex positions, object space), and kept for the next trace when
+    those have a `pose_key` (sample_poses). Returns (tendrils, strands)."""
     remove(ob)
     s = max(sum(abs(v) for v in ob.matrix_world.to_scale()) / 3.0, 1e-9)
     surface = _Surface(ob, values)
     rng = np.random.default_rng(len(ob.data.vertices) + 7919)
-    tendrils = _tendrils(surface, settings.venom_tendrils, settings.venom_length / s, height / s, rng)
-    strands = _strands(surface, settings.venom_strands, height / s, rng)
+    tendrils = _tendrils(surface, settings.venom_tendrils, settings.venom_length / s, height / s, rng,
+                         settings.venom_webs)
+    key = None if pose_key is None else (pose_key, settings.venom_strands, round(height / s, 6))
+    strands = _STRANDS.get(key)
+    if strands is None:
+        posed = [_Surface(ob, values, co) for co in poses
+                 if float(np.abs(np.asarray(co).reshape(-1, 3) - surface.co).max()) > 1e-4 * height / s]
+        # (their own random numbers: the strands do not change with the tendrils)
+        strands = _strands([surface] + posed, settings.venom_strands, height / s,
+                           np.random.default_rng(len(ob.data.vertices) + 104729))
+        if key is not None:
+            _STRANDS[key] = strands
     me = _mesh(SKELETON, surface, tendrils + strands)
     sk = bpy.data.objects.new(SKELETON, me)
     sk.hide_render = True
@@ -400,4 +554,4 @@ def build(ob, values, settings, height, scene):
     sk[P_SIGNATURE] = _encode(signature(settings, s))
     sk[P_VERTICES] = len(ob.data.vertices)
     ob[P_SKELETON] = sk
-    return sum(1 for c in tendrils if c.root is c), len(strands)
+    return sum(1 for c in tendrils if c.kind == 0 and c.root is c), len(strands)

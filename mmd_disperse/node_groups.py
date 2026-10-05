@@ -16,14 +16,16 @@ outfit can show up as a hologram ahead of the edge, and the edge can glitch: hor
 between the two outfits. Once the new outfit is complete it can flash (all at once, or a band of light sweeps
 over it) and burst into sparkles (finale). The new outfit can first form as a dark undersuit with its final look
 trailing behind, and both outfits mark how close each vertex is to the cut so materials can light up the inside
-seen through it.
+seen through it. Both outfits can also break into scales that turn over as the edge passes, the old outfit on one
+side of every scale and the new one on the other (Mystique), and the wires, the rim, the finale and the particles
+can pulse on the beats of the music.
 """
 
 import math
 
 import bpy
 
-VERSION = 11
+VERSION = 12
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
@@ -56,6 +58,8 @@ ATTR_PICK = "mmdd_pick"  # scratch: faces that release a finale star
 ATTR_HELD = "mmdd_held"  # scratch: positions put aside while the recorded spots of the fly-in pieces are measured
 ATTR_START = "mmdd_start"  # scratch: centre of a fly-in piece where it took off ...
 ATTR_START_NORMAL = "mmdd_start_normal"  # ... and its normal there
+ATTR_FLIP = "mmdd_flip"  # scratch: how far the scale of a face has turned over (0 .. 1)
+ATTR_CELL = "mmdd_cell"  # scratch: the scale a face belongs to
 
 # Wing angles (degrees) of the poses a butterfly cycles through.
 FLAP_ANGLES = (70.0, 45.0, 15.0, -10.0, 15.0, 45.0)
@@ -90,6 +94,13 @@ VENOM_INPUTS = (
     ("Tendril Absorb", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
     ("Strand Life", "NodeSocketFloat", 3.0, 0.0, 1e9, "DISTANCE"),
     ("Venom Material", "NodeSocketMaterial", None, None, None, None),
+)
+
+# Scales (Mystique): both outfits break into scales that turn over where the edge passes.
+SCALE_INPUTS = (
+    ("Scales", "NodeSocketBool", False, None, None, None),
+    ("Scale Size", "NodeSocketFloat", 0.5, 0.0, 10000.0, "DISTANCE"),
+    ("Flip Width", "NodeSocketFloat", 1.5, 0.0, 1e9, "DISTANCE"),
 )
 
 TARGET_INPUTS = FIELD_INPUTS + (
@@ -136,7 +147,7 @@ TARGET_INPUTS = FIELD_INPUTS + (
     ("Ghosts", "NodeSocketBool", False, None, None, None),
     ("Ghost Count", "NodeSocketInt", 6, 1, 64, None),
     ("Ghost Distance", "NodeSocketFloat", 5.0, 0.0, 1e9, "DISTANCE"),
-) + VENOM_INPUTS
+) + VENOM_INPUTS + SCALE_INPUTS
 
 BASE_INPUTS = FIELD_INPUTS + (
     ("Shrink", "NodeSocketFloat", 0.08, -10000.0, 10000.0, "DISTANCE"),
@@ -174,7 +185,8 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Crystal Size", "NodeSocketFloat", 0.6, 0.0, 10000.0, "DISTANCE"),
     ("Clamp", "NodeSocketBool", False, None, None, None),
     ("Clamp Distance", "NodeSocketFloat", 1000.0, 0.0, 1e9, "DISTANCE"),
-) + VENOM_INPUTS
+    ("Edge Glow", "NodeSocketBool", True, None, None, None),
+) + VENOM_INPUTS + SCALE_INPUTS
 
 # The probe takes these from the modifier it stands in for (the new outfit's finale and fly-in settings are
 # missing on the old outfit's, which does not use them).
@@ -377,12 +389,13 @@ class _Builder:
         self.feed(n.inputs["Vector"], vector)
         return n.outputs[0], n.outputs[1]
 
-    def accumulate(self, value, group, data_type="FLOAT", x=0, y=0):
-        """Per-group total of a point field (Accumulate Field)."""
-        n = self.node("GeometryNodeAccumulateField", x, y, data_type=data_type, domain="POINT")
+    def accumulate(self, value, group, data_type="FLOAT", x=0, y=0, domain="POINT", output="Total"):
+        """Per-group total of a point (or `domain`) field (Accumulate Field); `output` "Leading" for the running total
+        up to and including each element."""
+        n = self.node("GeometryNodeAccumulateField", x, y, data_type=data_type, domain=domain)
         self.feed(_enabled(n.inputs, "Value")[0], value)
         self.feed(n.inputs["Group ID"], group)
-        return _enabled(n.outputs, "Total")[0]
+        return _enabled(n.outputs, output)[0]
 
     def curve_to_mesh(self, curve, profile, x=0, y=0):
         """Curve to Mesh scaled by the curve radius. Blender 4.2+ has a Scale input and no longer uses the
@@ -404,11 +417,17 @@ class _Builder:
 
 def build_field_group():
     """Distance to the (noisy) sphere mask - or the precomputed arrival distance - and the mask radius,
-    plus the glitch fields both outfits share (so a slice shows exactly one of them) and the clean distance
-    along the path (Path, without the edge noise)."""
+    plus the glitch fields both outfits share (so a slice shows exactly one of them), the clean distance
+    along the path (Path, without the edge noise) and the beat (1 on a beat of the music, fading; 0 without beat
+    sync)."""
     ng = _new_group(FIELD_GROUP, is_modifier=False)
     for spec in FIELD_INPUTS:
         _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    # Probe: the distance at a given point of the rest pose (with the arrival distance there) instead of the
+    # element's own (the scales time a whole scale by its site).
+    _add_socket(ng, "Probe", "INPUT", "NodeSocketBool", False)
+    _add_socket(ng, "Probe Point", "INPUT", "NodeSocketVector", (0.0, 0.0, 0.0))
+    _add_socket(ng, "Probe Arrival", "INPUT", "NodeSocketFloat", 0.0)
     _add_socket(ng, "Distance", "OUTPUT", "NodeSocketFloat")
     _add_socket(ng, "Radius", "OUTPUT", "NodeSocketFloat")
     _add_socket(ng, "Glitching", "OUTPUT", "NodeSocketBool")
@@ -416,6 +435,7 @@ def build_field_group():
     _add_socket(ng, "Glitch Offset", "OUTPUT", "NodeSocketVector")
     _add_socket(ng, "Flash", "OUTPUT", "NodeSocketFloat")
     _add_socket(ng, "Path", "OUTPUT", "NodeSocketFloat")
+    _add_socket(ng, "Beat", "OUTPUT", "NodeSocketFloat")
 
     b = _Builder(ng)
     gi = b.node("NodeGroupInput", -1100, 0)
@@ -432,10 +452,13 @@ def build_field_group():
     use_rest = b.boolean("AND", gi.outputs["Use Rest Position"], has_rest, x=-850, y=-150)
     coord = b.switch("VECTOR", use_rest, position, rest, x=-600, y=-150)
     noise_coord = b.switch("VECTOR", has_rest, position, rest, x=-600, y=-400)
+    coord = b.switch("VECTOR", gi.outputs["Probe"], coord, gi.outputs["Probe Point"], x=-500, y=-150)
+    noise_coord = b.switch("VECTOR", gi.outputs["Probe"], noise_coord, gi.outputs["Probe Point"], x=-500, y=-400)
     sphere = b.vmath("DISTANCE", coord, info.outputs["Location"], x=-350, y=-50)
 
     # Other paths (along the body, sweeps): distance precomputed per vertex at build time.
     arrival, has_arrival = b.named_attribute(ATTR_ARRIVAL, "FLOAT", x=-600, y=150)
+    arrival = b.switch("FLOAT", gi.outputs["Probe"], arrival, gi.outputs["Probe Arrival"], x=-500, y=250)
     use_arrival = b.boolean("AND", gi.outputs["Use Arrival"], has_arrival, x=-350, y=150)
     dist = b.switch("FLOAT", use_arrival, sphere, arrival, x=-150, y=0)
 
@@ -507,11 +530,12 @@ def build_field_group():
     b.feed(go.inputs["Glitch Offset"], offset)
     b.feed(go.inputs["Flash"], flash)
     b.feed(go.inputs["Path"], dist)
+    b.feed(go.inputs["Beat"], b.switch("FLOAT", on_beat, 0.0, pulse, x=700, y=-2700))
     return ng
 
 
 def _field_node(b, field_group, gi, x, y):
-    """Outputs of the shared Field group: Distance, Radius, Glitching, New Side, Glitch Offset, Flash, Path."""
+    """Outputs of the shared Field group: Distance, Radius, Glitching, New Side, Glitch Offset, Flash, Path, Beat."""
     n = b.node("GeometryNodeGroup", x, y)
     n.node_tree = field_group
     for spec in FIELD_INPUTS:
@@ -645,7 +669,10 @@ def build_venom_group():
                     x=-300, y=1400)
     up = b.vmath("NORMALIZE", b.vmath("ADD", na, b.vmath("SCALE", b.vmath("SUBTRACT", nb, na, x=-700, y=1200),
                                                          scale=t, x=-500, y=1200), x=-300, y=1200), x=-100, y=1200)
-    strand = b.compare("GREATER_THAN", kind, 0.5, x=-700, y=-650)
+    # kind: 0 tendril, 1 strand, 2 web (a membrane of goo in the fork of a tendril, timed like the tendril)
+    web = b.compare("GREATER_THAN", kind, 1.5, x=-700, y=-500)
+    strand = b.boolean("AND", b.compare("GREATER_THAN", kind, 0.5, x=-700, y=-650), b.boolean("NOT", web, x=-500,
+                                                                                               y=-600), x=-500, y=-700)
     thick = b.math("MULTIPLY", gi.outputs["Tendril Radius"], b.math("MULTIPLY_ADD", rnd, 0.8, 0.6, x=-700, y=-1100),
                    x=-500, y=-1100)
 
@@ -712,13 +739,18 @@ def build_venom_group():
 
     radius = b.switch("FLOAT", strand, tendril_radius, strand_radius, x=1300, y=-500)
     shown = b.switch("BOOLEAN", strand, tendril_shown, strand_shown, x=1300, y=-700)
-    # Tendrils lie on the surface, mostly above it.
+    # Tendrils lie on the surface, mostly above it; webs lie under their middle.
     lift = b.math("MULTIPLY_ADD", radius, 0.7, rise, x=1300, y=-900)
     offset = b.switch("VECTOR", strand, b.vmath("SCALE", up, scale=lift, x=1500, y=-900), sag, x=1700, y=-800)
+    offset = b.switch("VECTOR", web, offset, b.vmath("SCALE", up, scale=b.math("MULTIPLY", thick, 0.45, x=1500,
+                                                                               y=-1100), x=1700, y=-1100),
+                      x=1900, y=-900)
     placed = b.set_position(aged, position=b.vmath("ADD", point, offset, x=1700, y=-600), x=1900, y=600)
     placed = b.store(placed, _VENOM_RADIUS, radius, x=2100, y=600)
     placed = b.delete(placed, b.boolean("NOT", shown, x=2100, y=400), "POINT", x=2300, y=600)
+    webs, placed = b.separate(placed, web, "POINT", x=2400, y=800)
     placed = _remove_attributes(b, placed, VENOM_ATTRS + (_VENOM_AGE,), 2500, 600)
+    webs = _remove_attributes(b, webs, VENOM_ATTRS + (_VENOM_AGE, _VENOM_RADIUS), 2600, 1000)
 
     curve = b.node("GeometryNodeMeshToCurve", 2500, 200)
     b.feed(curve.inputs["Mesh"], placed)
@@ -736,7 +768,7 @@ def build_venom_group():
     profile.inputs["Radius"].default_value = 1.0
     tube = b.curve_to_mesh(curves, profile.outputs["Curve"], x=3500, y=200)
     shade = b.node("GeometryNodeSetShadeSmooth", 3700, 200)
-    b.feed(shade.inputs["Geometry"], tube)
+    b.feed(shade.inputs["Geometry"], b.join([tube, webs], x=3600, y=400))
     mat = b.node("GeometryNodeSetMaterial", 3900, 200)
     b.feed(mat.inputs["Geometry"], shade.outputs["Geometry"])
     b.feed(mat.inputs["Material"], gi.outputs["Venom Material"])
@@ -771,7 +803,7 @@ def build_target_group(field_group, venom_group):
     b.feed(sub.inputs["Level"], gi.outputs["Subdivide"])
 
     field = _field_node(b, field_group, gi, -1300, -300)
-    d, radius = field["Distance"], field["Radius"]
+    d, radius, beat = field["Distance"], field["Radius"], field["Beat"]
 
     # Parts locked to the old model (face, hair ...) never come from the new one.
     lock = b.named_attribute(ATTR_LOCK, "BOOLEAN", x=-1300, y=500)[0]
@@ -812,6 +844,10 @@ def build_target_group(field_group, venom_group):
     attack = b.math("DIVIDE", finale_t, 0.1, x=-300, y=-1900, clamp=True)
     decay = b.math("POWER", b.math("SUBTRACT", 1.0, finale_t, x=-300, y=-2050, clamp=True), 2.0, x=-100, y=-2050)
     pulse = b.math("MULTIPLY", attack, decay, x=100, y=-1950)
+    # ... and on the beat it flashes again, less as the finale goes on
+    again = b.math("MULTIPLY", b.math("MULTIPLY", beat, 0.8, x=-100, y=-1750), decay, x=100, y=-1750)
+    again = b.switch("FLOAT", b.compare("GREATER_THAN", finale_t, 0.0, x=100, y=-1600), 0.0, again, x=300, y=-1700)
+    pulse = b.math("MAXIMUM", pulse, again, x=300, y=-1900)
     # ... or a band of light runs out from the start point along the wave's own path (the clean distance, no
     # edge noise) and has crossed the whole outfit after SWEEP_SHARE of the finale.
     sweep_span = b.math("ADD", gi.outputs["Finale Start"], gi.outputs["Sweep Width"], x=-700, y=-2250)
@@ -821,6 +857,7 @@ def build_target_group(field_group, venom_group):
     band = b.map_range(off_band, 0.0, b.math("MAXIMUM", gi.outputs["Sweep Width"], 1e-4, x=100, y=-2400), 1.0, 0.0,
                        x=300, y=-2250, smooth=True)
     band = b.math("MULTIPLY", band, b.math("DIVIDE", finale_t, 0.03, x=300, y=-2450, clamp=True), x=500, y=-2300)
+    band = b.math("MULTIPLY", band, b.math("ADD", beat, 1.0, x=500, y=-2450), x=600, y=-2350)  # brighter on a beat
     flash = b.math("MULTIPLY", b.switch("FLOAT", gi.outputs["Finale Sweep"], pulse, band, x=500, y=-2050),
                    gi.outputs["Finale Glow"], x=700, y=-2000)
     flash = b.switch("FLOAT", gi.outputs["Finale"], 0.0, b.math("POWER", flash, 0.125, x=900, y=-2000),
@@ -841,6 +878,8 @@ def build_target_group(field_group, venom_group):
     seam = b.switch("FLOAT", b.compare("GREATER_THAN", d, layer_front, x=-100, y=-3150), seam, 0.0, x=100, y=-3050)
     seam_on = b.boolean("AND", gi.outputs["Undersuit"], gi.outputs["Edge Glow"], x=100, y=-3200)
     rim = b.math("MAXIMUM", rim, b.switch("FLOAT", seam_on, 0.0, seam, x=300, y=-3050), x=850, y=-50)
+    # on a beat of the music the rim flares (2.5 times as bright once the material raises it to the 8th power)
+    rim = b.math("MULTIPLY", rim, b.math("MULTIPLY_ADD", beat, 0.12, 1.0, x=850, y=-250), x=1000, y=-100)
     suit = b.store(suit, ATTR_EDGE, rim, x=400, y=350)
     # 0 at the edge .. 1 at the front of the hologram (materials draw a scan ring there).
     holo = b.math("DIVIDE", b.math("SUBTRACT", d, radius, x=150, y=-650),
@@ -1109,6 +1148,17 @@ def build_target_group(field_group, venom_group):
     ghosts = b.switch("GEOMETRY", gathering, None, spun.outputs["Instances"], x=3400, y=9600)
     suit = b.switch("GEOMETRY", gi.outputs["Ghosts"], suit, b.join([real, ghosts], x=3600, y=9000), x=6200, y=1000)
 
+    # --- Scales (Mystique): the new outfit turns in scale by scale, each scale the second half of its turn (the old
+    # outfit shows the first): edge-on to flat, glinting as it goes.
+    scales = _flip(b, gi, field_group, geo, d, field["Path"], radius, None, True, gi.outputs["Edge Glow"], -1000,
+                   12000)
+    scales = b.store(scales, ATTR_EDGE, b.math("MAXIMUM", b.named_attribute(ATTR_EDGE, "FLOAT", x=6200, y=11700)[0],
+                                               flash, x=6400, y=11700), x=6600, y=12000)
+    scales = b.switch("GEOMETRY", gi.outputs["Undersuit"], scales, b.store(scales, ATTR_LAYER, under, x=6800,
+                                                                          y=12200), x=7000, y=12000)
+    scales = mark_cut(scales, 7200, 12000)
+    suit = b.switch("GEOMETRY", gi.outputs["Scales"], suit, scales, x=6400, y=1000)
+
     # --- Wire layer: keep a band around the boundary.
     t = b.math("SUBTRACT", d, radius, x=-700, y=-500)
     too_deep = b.compare("LESS_THAN", t, b.math("MULTIPLY", gi.outputs["Wire Inner"], -1.0, x=-700, y=-700),
@@ -1135,8 +1185,12 @@ def build_target_group(field_group, venom_group):
     b.feed(curve.inputs["Mesh"], band)
     radius_node = b.node("GeometryNodeSetCurveRadius", 1350, -450)
     b.feed(radius_node.inputs["Curve"], curve.outputs["Curve"])
-    b.feed(radius_node.inputs["Radius"], bump)
-    curve_out = b.store(radius_node.outputs["Curve"], ATTR_EDGE, bump, x=1550, y=-450)
+    # On a beat the wires swell and flare.
+    b.feed(radius_node.inputs["Radius"], b.math("MULTIPLY", bump, b.math("MULTIPLY_ADD", beat, 0.6, 1.0, x=1150,
+                                                                         y=-650), x=1350, y=-650))
+    curve_out = b.store(radius_node.outputs["Curve"], ATTR_EDGE,
+                        b.math("MULTIPLY", bump, b.math("MULTIPLY_ADD", beat, 0.5, 1.0, x=1350, y=-800),
+                               x=1550, y=-800), x=1550, y=-450)
     profile = b.node("GeometryNodeCurvePrimitiveCircle", 1550, -750, mode="RADIUS")
     b.feed(profile.inputs["Resolution"], gi.outputs["Wire Resolution"])
     b.feed(profile.inputs["Radius"], gi.outputs["Wire Radius"])
@@ -1214,6 +1268,7 @@ def build_target_group(field_group, venom_group):
     size = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Sparkle Size"], grow, x=3700, y=-4400), twinkle,
                   x=3900, y=-4400)
     size = b.math("MULTIPLY", size, b.math("MULTIPLY_ADD", srnd, 0.8, 0.6, x=3900, y=-4600), x=4100, y=-4450)
+    size = b.math("MULTIPLY", size, b.math("MULTIPLY_ADD", beat, 0.5, 1.0, x=4100, y=-4650), x=4300, y=-4500)
     info = b.node("GeometryNodeObjectInfo", 3500, -3000, transform_space="ORIGINAL")
     b.feed(info.inputs["Object"], gi.outputs["Sparkle Object"])
     on_points = b.node("GeometryNodeInstanceOnPoints", 3800, -2700)
@@ -1294,6 +1349,169 @@ def _pieces(b, geometry, anchor, size, extra_key, x, y):
     return split.outputs["Mesh"], island, count, center, rest_center, normal
 
 
+def _scale_cells(b, anchor, size, x, y):
+    """Scales: 3D Voronoi cells about `size` across on the rest position, each face in the cell of its centre, so both
+    outfits are cut into the same scales where they overlap. Returns face fields (key, cell, site): a number that tells
+    cells apart on a cut (the Voronoi colour), an integer naming the cell (the unit cube of the scaled space its site
+    lies in, 8 bits an axis: exact as a float) and the cell's site (rest space)."""
+    scale = b.math("DIVIDE", 1.0, b.math("MAXIMUM", size, 1e-4, x=x - 200, y=y - 250), x=x, y=y - 250)
+    voronoi = b.node("ShaderNodeTexVoronoi", x + 200, y, voronoi_dimensions="3D", feature="F1")
+    b.feed(voronoi.inputs["Vector"], b.on_domain(anchor, "FACE", "FLOAT_VECTOR", x=x, y=y))
+    b.feed(voronoi.inputs["Scale"], scale)
+    key = b.on_domain(b.vmath("DOT_PRODUCT", voronoi.outputs["Color"], (1.0, 0.618, 0.381), x=x + 400, y=y),
+                      "FACE", x=x + 600, y=y)
+    site = b.on_domain(voronoi.outputs["Position"], "FACE", "FLOAT_VECTOR", x=x + 400, y=y - 200)
+    lattice = b.vmath("FLOOR", b.vmath("SCALE", site, scale=scale, x=x + 600, y=y - 250), x=x + 800, y=y - 250)
+    wrapped = b.vmath("MODULO", b.vmath("ADD", lattice, (1024.0, 1024.0, 1024.0), x=x + 1000, y=y - 250),
+                      (256.0, 256.0, 256.0), x=x + 1200, y=y - 250)
+    cell = b.vmath("DOT_PRODUCT", wrapped, (1.0, 256.0, 65536.0), x=x + 1400, y=y - 250)
+    return key, cell, site
+
+
+def _flip(b, gi, field_group, geometry, d, path, radius, keep, new, glow, x, y):
+    """Scales (Mystique): `geometry` cut into scales (_scale_cells) that turn over where the edge passes, while it moves
+    Flip Width on, about an axis across the way the wave runs (`path`, the clean distance along it), popping up off
+    the surface so they clear it. The old outfit shows the first half of the turn (flat to edge-on, then it is gone),
+    the new outfit (`new`) the second half (edge-on to flat), so together a scale turns over with the old outfit on
+    one side and the new one on the other. `d` is the distance timing a vertex, `keep` (old outfit) faces that never
+    turn. Turning scales glint (ATTR_EDGE) when `glow` is on.
+
+    A scale is timed by its site: the Field group probed there (the sphere's distance and the edge noise at the site,
+    or the arrival distance of the vertex nearest to it), the same in both outfits whatever else the scale holds.
+    Measured on the posed body (Use Rest Position off) it is the mean distance of its faces instead. Scales are only
+    timed in a band around the edge (on a copy of it; farther away a face is simply before or behind the edge) and
+    only the turning ones are cut out of the mesh."""
+    size = gi.outputs["Scale Size"]
+    # (the width grows in with the radius, so nothing turns before the edge sets off)
+    width = b.math("MAXIMUM", b.math("MINIMUM", gi.outputs["Flip Width"],
+                                     b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=x - 400, y=y - 1300), 2.0,
+                                            x=x - 200, y=y - 1300), x=x, y=y - 1250), 1e-4, x=x + 200, y=y - 1250)
+    # The band: a scale reaches about one and a half scale sizes from its site, so a face farther than this from the
+    # edge belongs to a scale that is all before or all behind it. The scales are timed on a copy of the band only.
+    face_d = b.on_domain(d, "FACE", x=x, y=y - 400)
+    margin = b.math("MULTIPLY_ADD", size, 3.5, b.math("MULTIPLY", width, 0.5, x=x, y=y - 600), x=x + 200, y=y - 550)
+    near = b.compare("LESS_THAN", b.math("ABSOLUTE", b.math("SUBTRACT", radius, face_d, x=x + 200, y=y - 400),
+                                         x=x + 400, y=y - 400), margin, x=x + 600, y=y - 450)
+    band = b.separate(geometry, near, "FACE", x=x + 800, y=y)[0]
+
+    rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=x + 800, y=y - 1000)
+    anchor = b.switch("VECTOR", has_rest, b.node("GeometryNodeInputPosition", x + 800, y - 1150).outputs[0], rest,
+                      x=x + 1000, y=y - 1000)
+    key, cell, site = _scale_cells(b, anchor, size, x + 1200, y - 1000)
+    # Timing at the site: the arrival distance there is the one of the band's vertex nearest to it on the rest pose.
+    on_rest = b.set_position(band, position=anchor, x=x + 1200, y=y - 1600)
+    nearest = b.node("GeometryNodeSampleNearest", x + 1400, y - 1600, domain="POINT")
+    b.feed(nearest.inputs["Geometry"], on_rest)
+    b.feed(nearest.inputs["Sample Position"], site)
+    sampled = b.node("GeometryNodeSampleIndex", x + 1600, y - 1600, data_type="FLOAT", domain="POINT")
+    b.feed(sampled.inputs["Geometry"], on_rest)
+    b.feed(_enabled(sampled.inputs, "Value")[0], b.named_attribute(ATTR_ARRIVAL, "FLOAT", x=x + 1400, y=y - 1800)[0])
+    b.feed(sampled.inputs["Index"], nearest.outputs["Index"])
+    site_arrival = b.switch("FLOAT", gi.outputs["Use Arrival"], 0.0, _enabled(sampled.outputs, "Value")[0],
+                            x=x + 1800, y=y - 1600)
+    probe = b.node("GeometryNodeGroup", x + 2000, y - 1400)
+    probe.node_tree = field_group
+    for spec in FIELD_INPUTS:
+        b.feed(probe.inputs[spec[0]], gi.outputs[spec[0]])
+    b.feed(probe.inputs["Probe"], True)
+    b.feed(probe.inputs["Probe Point"], site)
+    b.feed(probe.inputs["Probe Arrival"], site_arrival)
+    # ... on the posed body, the mean distance of the scale's faces
+    total = b.accumulate(face_d, cell, x=x + 2000, y=y - 1900, domain="FACE")
+    faces = b.accumulate(1.0, cell, x=x + 2000, y=y - 2100, domain="FACE")
+    timing = b.switch("FLOAT", gi.outputs["Use Rest Position"], b.math("DIVIDE", total, faces, x=x + 2200, y=y - 2000),
+                      probe.outputs["Distance"], x=x + 2400, y=y - 1600)
+    # a little earlier or later at random, the same in both outfits: random by the site
+    jitter = b.math("MULTIPLY", b.math("SUBTRACT", b.white_noise(b.vmath("SCALE", site, scale=1.37, x=x + 2000,
+                                                                         y=y - 2300), x=x + 2200, y=y - 2300)[0],
+                                       0.5, x=x + 2400, y=y - 2300), b.math("MULTIPLY", size, 0.5, x=x + 2400,
+                                                                             y=y - 2450), x=x + 2600, y=y - 2300)
+    turned = b.math("MULTIPLY_ADD", b.math("SUBTRACT", radius, b.math("ADD", timing, jitter, x=x + 2600, y=y - 1700),
+                                           x=x + 2800, y=y - 1700),
+                    b.math("DIVIDE", 1.0, width, x=x + 2800, y=y - 1900), 0.5, x=x + 3000, y=y - 1750, clamp=True)
+    timed = b.store(band, ATTR_FLIP, turned, "FLOAT", "FACE", x=x + 3000, y=y + 300)
+    # Back on the whole mesh (never cut here: no seams on the faces that do not turn): a band face is the how-manieth
+    # band face it is in the copy; the others are wholly before (0) or behind (1) the edge.
+    band_index = b.math("SUBTRACT", b.accumulate(b.switch("FLOAT", near, 0.0, 1.0, x=x + 2800, y=y + 600), None,
+                                                 x=x + 3000, y=y + 600, domain="FACE", output="Leading"), 1.0,
+                        x=x + 3200, y=y + 600)
+    from_band = b.node("GeometryNodeSampleIndex", x + 3200, y + 300, data_type="FLOAT", domain="FACE")
+    b.feed(from_band.inputs["Geometry"], timed)
+    b.feed(_enabled(from_band.inputs, "Value")[0], b.named_attribute(ATTR_FLIP, "FLOAT", x=x + 3000, y=y + 450)[0])
+    b.feed(from_band.inputs["Index"], band_index)
+    elsewhere = b.switch("FLOAT", b.compare("GREATER_THAN", radius, face_d, x=x + 3000, y=y + 800), 0.0, 1.0,
+                         x=x + 3200, y=y + 800)
+    staged = b.store(geometry, ATTR_FLIP, b.switch("FLOAT", near, elsewhere, _enabled(from_band.outputs, "Value")[0],
+                                                   x=x + 3400, y=y + 500), "FLOAT", "FACE", x=x + 3600, y=y + 200)
+    turn = b.named_attribute(ATTR_FLIP, "FLOAT", x=x + 3200, y=y - 300)[0]
+    if new:  # the second half: edge-on to flat
+        gone = b.compare("LESS_EQUAL", turn, 0.5, x=x + 3400, y=y - 300)
+        moving = b.compare("LESS_THAN", turn, 1.0, x=x + 3400, y=y - 450)
+    else:  # the first half: flat to edge-on
+        loose = b.boolean("NOT", keep, x=x + 3200, y=y - 600)
+        gone = b.boolean("AND", b.compare("GREATER_EQUAL", turn, 0.5, x=x + 3400, y=y - 300), loose,
+                         x=x + 3600, y=y - 300)
+        moving = b.boolean("AND", b.compare("GREATER_THAN", turn, 0.0, x=x + 3400, y=y - 450), loose,
+                           x=x + 3600, y=y - 450)
+    left = b.delete(staged, gone, "FACE", x=x + 3600, y=y)
+    # (loose vertices and edges, without faces, come and go with the edge like the grown outfit's)
+    loose = b.compare("LESS_THAN", b.node("GeometryNodeInputMeshVertexNeighbors", x + 3400, y + 500).outputs[
+        "Face Count"], 0.5, x=x + 3600, y=y + 500)
+    behind = b.compare("GREATER_THAN", radius, d, x=x + 3600, y=y + 650)
+    left = b.delete(left, b.boolean("AND", loose, b.boolean("NOT", behind, x=x + 3800, y=y + 650) if new else behind,
+                                    x=x + 4000, y=y + 550), "POINT", x=x + 3800, y=y + 300)
+    plates, still = b.separate(left, moving, "FACE", x=x + 3800, y=y)
+    # The mesh's own seams (PMX splits it at every UV seam) are welded first, so a scale turns as one plate, then the
+    # turning part is cut into its scales: an edge is a cut where its faces belong to different cells. Parts that only
+    # share a cell (an arm and the side of the body) stay apart and turn on their own.
+    weld = b.node("GeometryNodeMergeByDistance", x + 4000, y + 200)
+    b.feed(weld.inputs["Geometry"], plates)
+    b.feed(weld.inputs["Distance"], b.math("MULTIPLY", size, 0.001, x=x + 3800, y=y + 300))
+    face_sq = b.on_domain(b.math("MULTIPLY", key, key, x=x + 3600, y=y - 700), "FACE", x=x + 3800, y=y - 700)
+    mean_key = b.on_domain(key, "EDGE", x=x + 3800, y=y - 550)
+    spread = b.math("SUBTRACT", b.on_domain(face_sq, "EDGE", x=x + 4000, y=y - 700),
+                    b.math("MULTIPLY", mean_key, mean_key, x=x + 4000, y=y - 550), x=x + 4200, y=y - 600)
+    split = b.node("GeometryNodeSplitEdges", x + 4200, y)
+    b.feed(split.inputs["Mesh"], weld.outputs["Geometry"])
+    b.feed(split.inputs["Selection"], b.compare("GREATER_THAN", spread, 1e-7, x=x + 4400, y=y - 600))
+    # Each piece turns about its own middle.
+    island = b.node("GeometryNodeInputMeshIsland", x + 4400, y - 900).outputs["Island Index"]
+    position = b.node("GeometryNodeInputPosition", x + 4400, y - 1050).outputs[0]
+    normal = b.node("GeometryNodeInputNormal", x + 4400, y - 1200).outputs[0]
+    count = b.accumulate(1.0, island, x=x + 4600, y=y - 900)
+    center = b.vmath("SCALE", b.accumulate(position, island, "FLOAT_VECTOR", x=x + 4600, y=y - 1050),
+                     scale=b.math("DIVIDE", 1.0, count, x=x + 4800, y=y - 900), x=x + 5000, y=y - 1000)
+    up = b.vmath("NORMALIZE", b.accumulate(normal, island, "FLOAT_VECTOR", x=x + 4600, y=y - 1200),
+                 x=x + 4800, y=y - 1200)
+    # the way the wave runs over the piece: the path distance against the positions (sum of (d - mean) * (p - mean))
+    run = b.vmath("SUBTRACT", b.accumulate(b.vmath("SCALE", position, scale=path, x=x + 4400, y=y - 1400), island,
+                                           "FLOAT_VECTOR", x=x + 4600, y=y - 1400),
+                  b.vmath("SCALE", center, scale=b.accumulate(path, island, x=x + 4600, y=y - 1550),
+                          x=x + 4800, y=y - 1550), x=x + 5000, y=y - 1450)
+    along = b.vmath("SUBTRACT", run, b.vmath("SCALE", up, scale=b.vmath("DOT_PRODUCT", run, up, x=x + 5000,
+                                                                         y=y - 1650), x=x + 5200, y=y - 1650),
+                    x=x + 5400, y=y - 1500)
+    flat = b.compare("LESS_THAN", b.vmath("LENGTH", along, x=x + 5600, y=y - 1650), 1e-12, x=x + 5800, y=y - 1650)
+    along = b.switch("VECTOR", flat, along, b.vmath("CROSS_PRODUCT", up, (0.31, 0.53, 0.79), x=x + 5600,
+                                                    y=y - 1800), x=x + 6000, y=y - 1550)
+    axis = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", up, along, x=x + 6200, y=y - 1500), x=x + 6400, y=y - 1500)
+    # (the trailing side comes up and the scale tips over forwards)
+    part = b.named_attribute(ATTR_FLIP, "FLOAT", x=x + 5000, y=y - 1900)[0]
+    half_turn = b.math("MULTIPLY", part, math.pi, x=x + 5200, y=y - 1900)
+    angle = b.math("SUBTRACT", half_turn, math.pi, x=x + 5400, y=y - 2000) if new else half_turn
+    rise = b.math("SINE", half_turn, x=x + 5400, y=y - 1850)
+    turned_pos = b.rotate(position, center, axis, angle, x=x + 6600, y=y - 1200)
+    lift = b.vmath("SCALE", up, scale=b.math("MULTIPLY", rise, b.math("MULTIPLY", size, 0.5, x=x + 5600, y=y - 2100),
+                                             x=x + 5800, y=y - 2000), x=x + 6000, y=y - 2000)
+    plates = b.set_position(split.outputs["Mesh"], position=b.vmath("ADD", turned_pos, lift, x=x + 6800, y=y - 1300),
+                            x=x + 7000, y=y)
+    # a glint as it stands edge-on
+    glint = b.math("MULTIPLY", b.math("POWER", rise, 4.0, x=x + 6600, y=y - 2000), 0.82, x=x + 6800, y=y - 2000)
+    plates = b.store(plates, ATTR_EDGE, b.switch("FLOAT", glow, 0.0, glint, x=x + 7000, y=y - 2000), x=x + 7200, y=y)
+    joined = b.join([still, plates], x=x + 7400, y=y)
+    return _remove_attributes(b, joined, (ATTR_FLIP,), x + 7600, y)
+
+
 def _old_distance(b, gi, field, x, y):
     """The distance that times the old outfit: the edge's, or with the new outfit clamping shut (Clamp) the same for
     all of it, so it all goes when the halves close (within a few percent)."""
@@ -1319,7 +1537,7 @@ def build_base_group(field_group, venom_group):
     go = b.node("NodeGroupOutput", 4800, 0)
 
     field = _field_node(b, field_group, gi, -1900, -300)
-    radius = field["Radius"]
+    radius, beat = field["Radius"], field["Beat"]
     distance = _old_distance(b, gi, field, -2300, 500)
     # The age (how far the edge has moved on since it passed) is measured on the body and stored, so pieces that
     # leave behind moves away keep the timing of the vertex they came from (a posed distance would change).
@@ -1401,6 +1619,8 @@ def build_base_group(field_group, venom_group):
     flakes = b.set_position(scale.outputs["Geometry"], position=flown, x=2800, y=0)
     # Bright as they break off, fading out; the injected material glow raises this to the 8th power.
     fade = b.math("POWER", b.math("SUBTRACT", 1.0, tf, x=2600, y=-300), 0.25, x=2800, y=-300)
+    pop = b.math("MULTIPLY_ADD", beat, 0.1, 1.0, x=2800, y=-450)  # twice as bright on a beat (to the 8th power)
+    fade = b.math("MULTIPLY", fade, pop, x=2900, y=-350)
     flakes = b.store(flakes, ATTR_EDGE, b.switch("FLOAT", gi.outputs["Flake Glow"], 0.0, fade, x=3000, y=-300),
                      x=3000, y=0)
     broken = b.join([intact, flakes], x=3200, y=200)
@@ -1445,10 +1665,16 @@ def build_base_group(field_group, venom_group):
     chunks = b.delete(chunks, b.boolean("AND", b.compare("GREATER_EQUAL", ct, 0.999, x=3800, y=2100), free,
                                         x=4000, y=2050), "POINT", x=4200, y=2200)
     chunk_glow = b.math("POWER", b.math("SUBTRACT", 1.0, ct, x=3800, y=1900), 0.25, x=4000, y=1900)
-    chunk_glow = b.switch("FLOAT", moving, 0.0, chunk_glow, x=4200, y=1900)
+    chunk_glow = b.switch("FLOAT", moving, 0.0, b.math("MULTIPLY", chunk_glow, pop, x=4100, y=1750), x=4200, y=1900)
     chunks = b.store(chunks, ATTR_EDGE, b.switch("FLOAT", gi.outputs["Flake Glow"], 0.0, chunk_glow, x=4400, y=1900),
                      x=4400, y=2200)
     old = b.switch("GEOMETRY", gi.outputs["Chunks"], old, chunks, x=4600, y=600)
+
+    # --- Scales (Mystique): the old outfit turns away scale by scale, the first half of each scale's turn (flat to
+    # edge-on); the new outfit turns in on the other side.
+    scales = _flip(b, gi, field_group, geometry, d, field["Path"], radius, lock, False, gi.outputs["Edge Glow"],
+                   -1200, 5000)
+    old = b.switch("GEOMETRY", gi.outputs["Scales"], old, scales, x=4700, y=700)
 
     # --- Glitch: outside the band the old outfit is simply gone behind the edge; inside it, a slice
     # shows the old outfit whenever the dice did not pick the new one. Slices jump and flash together.
@@ -1502,6 +1728,8 @@ def build_base_group(field_group, venom_group):
                   b.map_range(tp, 0.7, 1.0, 1.0, 0.0, x=1800, y=-3100), x=2000, y=-3000)
     size = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Particle Size"], grow, x=2200, y=-3000),
                   b.math("MULTIPLY_ADD", prnd, 0.6, 0.7, x=2200, y=-3200), x=2400, y=-3000)
+    # they all pop on a beat
+    size = b.math("MULTIPLY", size, b.math("MULTIPLY_ADD", beat, 0.5, 1.0, x=2400, y=-3200), x=2600, y=-3100)
 
     info = b.node("GeometryNodeObjectInfo", 1800, -3400, transform_space="ORIGINAL")
     b.feed(info.inputs["Object"], gi.outputs["Particle Object"])
@@ -1557,11 +1785,13 @@ def build_base_group(field_group, venom_group):
     old = b.switch("GEOMETRY", gi.outputs["Inner Glow"], old, b.store(old, ATTR_CUT, cut, x=4500, y=200),
                    x=4600, y=150)
     # The surface ahead of the edge (black veins, frost, char: materials draw it from disperse_ahead, 0 far ahead .. 1
-    # at the edge). The zone grows in with the radius, so nothing shows at the very start.
+    # at the edge). The zone grows in with the radius, so nothing shows at the very start. It follows the wave also
+    # when the old outfit goes all at once (Clamp): it freezes over, then shatters.
     reach = b.math("MINIMUM", gi.outputs["Surface Reach"],
                    b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=4000, y=-1100), 2.0, x=4200, y=-1100),
                    x=4400, y=-1050)
-    ahead = b.map_range(d, b.math("ADD", radius, reach, x=4400, y=-1250), radius, x=4600, y=-1150, smooth=True)
+    wave_d = b.switch("FLOAT", gi.outputs["Clamp"], d, field["Distance"], x=4400, y=-1400)
+    ahead = b.map_range(wave_d, b.math("ADD", radius, reach, x=4400, y=-1250), radius, x=4600, y=-1150, smooth=True)
     old = b.switch("GEOMETRY", gi.outputs["Surface Ahead"], old, b.store(old, ATTR_AHEAD, ahead, x=4700, y=350),
                    x=4800, y=150)
     venom = _venom(b, gi, venom_group, geometry, 4200, -600)

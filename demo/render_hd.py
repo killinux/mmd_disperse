@@ -11,7 +11,7 @@ blender -b "Tifa Gantz 18 V2.blend" --factory-startup --python demo/render_hd.py
 Add --vmd dance.vmd to let the model dance (mmd_tools must be installed), --spin 720 to turn the whole model
 while it transforms (object animation), --white-flash for the finale's compositor flash, --no-base to let the
 new outfit materialise from nothing and --music song.mp3 to find the beats of the song (starting at frame 1) for the
-glitch to follow (mux the song into the video afterwards).
+effect to follow (mux the song into the video afterwards).
 """
 
 import argparse
@@ -29,7 +29,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
-from mmd_disperse import compositor, presets  # noqa: E402
+from mmd_disperse import beats, compositor, presets  # noqa: E402
 from mmd_disperse.model import resolve, rest_bounds  # noqa: E402
 from scene_setup import add_model_args, apply_settings, load_dance, load_models  # noqa: E402
 
@@ -71,7 +71,7 @@ def parse_args():
     p.add_argument("--preset", default="", help="apply a preset first, e.g. MAGICAL")
     p.add_argument("--no-base", action="store_true",
                    help="the new outfit materialises from nothing (the old model is hidden)")
-    p.add_argument("--music", default="", help="find the beats of this song (from frame 1) for the glitch")
+    p.add_argument("--music", default="", help="find the beats of this song (from frame 1) for the effect")
     return p.parse_args(argv)
 
 
@@ -348,8 +348,9 @@ def main():
 
     setup_stage(scene, rest_bounds(base.meshes), args)
     compositor.add_bloom(scene)
-    if args.glitch_fx:
-        compositor.add_glitch(scene, s.frame_start, s.frame_end, s.glitch_rate)
+    if args.glitch_fx:  # (on the beat when the beats were found)
+        compositor.add_glitch(scene, s.frame_start, s.frame_end, s.glitch_rate,
+                              beat=beats.beat_object() if s.beat_sync else None)
     if args.white_flash:
         print("WHITE FLASH", bpy.ops.mmd_disperse.add_white_flash())
 

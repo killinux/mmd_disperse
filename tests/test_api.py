@@ -14,7 +14,8 @@ import wave
 
 import bpy
 import numpy as np
-from mathutils import Matrix
+from mathutils import Matrix, Vector
+from mathutils.kdtree import KDTree
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO)
@@ -267,11 +268,31 @@ def instance_count(ob):
                if inst.is_instance and inst.parent is not None and inst.parent.original == ob)
 
 
+def instance_scales(ob):
+    """Sizes (length of the scale vector) of the instances `ob` makes."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    return np.array([inst.matrix_world.to_scale().length for inst in deps.object_instances
+                     if inst.is_instance and inst.parent is not None and inst.parent.original == ob])
+
+
 def instance_positions(ob):
     """World positions of the instances (stars, petals ...) `ob` makes, in their order."""
     deps = bpy.context.evaluated_depsgraph_get()
     return np.array([tuple(inst.matrix_world.translation) for inst in deps.object_instances
                      if inst.is_instance and inst.parent is not None and inst.parent.original == ob]).reshape(-1, 3)
+
+
+def evaluated_positions(ob):
+    """Object-space positions of the evaluated vertices."""
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = ob.evaluated_get(deps)
+    me = ev.to_mesh()
+    try:
+        co = np.zeros(len(me.vertices) * 3, dtype=np.float32)
+        me.vertices.foreach_get("co", co)
+    finally:
+        ev.to_mesh_clear()
+    return co.reshape(-1, 3)
 
 
 def world_vertices(ob, name=ATTR_EDGE):
@@ -355,6 +376,29 @@ def surface_distance(points, ob):
     return np.array([bvh.find_nearest(Vector(p))[3] for p in points])
 
 
+def strand_gaps(skeleton, ob):
+    """Per strand of a symbiote skeleton: how far apart its two ends are on the rest pose of `ob`, and its rest length
+    (the gap where it was found)."""
+    attrs = skeleton.data.attributes
+    n = len(skeleton.data.vertices)
+
+    def values(name, size=1, prop="value", dtype=np.float32):
+        arr = np.zeros(n * size, dtype=dtype)
+        attrs[name].data.foreach_get(prop, arr)
+        return arr.reshape(n, size) if size > 1 else arr
+
+    kinds, t, length = values("mmdd_kind"), values("mmdd_t"), values("mmdd_len")
+    co = np.zeros(len(ob.data.vertices) * 3, dtype=np.float32)
+    ob.data.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    first = (kinds > 0.5) & (kinds < 1.5) & (t == 0.0)
+    ends = []
+    for end in VENOM_ENDS:
+        index = np.stack([values(name, dtype=np.int32) for name in end[:3]], 1)
+        ends.append((co[index] * values(end[3], 3, "vector")[:, :, None]).sum(axis=1))
+    return np.linalg.norm(ends[1] - ends[0], axis=1)[first], length[first]
+
+
 def write_clicks(path, times, seconds, rate=44100):
     """A WAV file with a kick-like click at each of `times` (seconds) over quiet noise."""
     rng = np.random.default_rng(3)
@@ -380,6 +424,20 @@ def arrival_values(ob):
     values = np.zeros(len(attr.data), dtype=np.float32)
     attr.data.foreach_get("value", values)
     return values
+
+
+def free_vertices(ob):
+    """Per vertex: True when none of its faces is locked (face, hair ...)."""
+    me = ob.data
+    lock = np.zeros(len(me.polygons), dtype=bool)
+    me.attributes[ATTR_LOCK].data.foreach_get("value", lock)
+    totals = np.zeros(len(me.polygons), dtype=np.int64)
+    me.polygons.foreach_get("loop_total", totals)
+    corner_vertex = np.zeros(len(me.loops), dtype=np.int64)
+    me.loops.foreach_get("vertex_index", corner_vertex)
+    locked = np.zeros(len(me.vertices), dtype=bool)
+    locked[corner_vertex[np.repeat(lock, totals)]] = True
+    return ~locked
 
 
 def locked_faces(ob):
@@ -711,6 +769,37 @@ def run():
     drivers = tree.animation_data.drivers if tree.animation_data else []
     check(len(drivers) == 1 and drivers[0].driver.is_valid and [v.name for v in drivers[0].driver.variables] == ["b"],
           "the RGB split spikes on the beat")
+    # The wires flare and the particles pop on the beat (the pulse held on and off at the same frames) ...
+    s.particles = "PETAL"
+    flare, pop = {"on": 0.0, "off": 0.0}, {"on": 0.0, "off": 0.0}
+    if pulse_curve is not None:
+        pulse_curve.mute = True
+        for f in (40, 50):
+            scene.frame_set(f)
+            for name, value in (("on", 1.0), ("off", 0.0)):
+                beat_ob.location.x = value
+                bpy.context.view_layer.update()
+                values = evaluated_values(target.meshes[0], ATTR_EDGE)
+                flare[name] = max(flare[name], float(values.max()) if values is not None and len(values) else 0.0)
+                sizes = instance_scales(base.meshes[0])
+                pop[name] += float(sizes.mean()) if len(sizes) else 0.0
+        pulse_curve.mute = False
+    check(flare["on"] > 1.3 * flare["off"] > 0.0, "the wires flare on the beat %s" % flare)
+    check(pop["on"] > 1.3 * pop["off"] > 0.0, "the particles pop on the beat %s" % pop)
+    s.particles = "NONE"
+    # ... and the finale waits for the next beat: the new outfit lights up first on a beat
+    s.finale = True
+    finale_mod = our_modifiers(target.meshes[0])[0]
+    start = (finale_mod[input_identifiers(finale_mod.node_group)["Finale Start"]]
+             * effect._object_scale(target.meshes[0]))
+    first = None
+    for f in range(1, 101):
+        scene.frame_set(f)
+        if first is None and s.mask.scale[0] > start * (1.0 + 1e-6):
+            first = f
+    check(first is not None and first in beats.beat_frames() and start > 0.9 * float(s.mask[effect.P_WAVE]),
+          "the finale starts on a beat (frame %s; beats %s)" % (first, beats.beat_frames()))
+    s.finale = False
     s.beat_sync = False
     drivers = tree.animation_data.drivers if tree.animation_data else []
     check(not our_modifiers(base.meshes[0])[0][mod_ids["Beat Sync"]] and len(drivers) == 1
@@ -772,8 +861,12 @@ def run():
         weights = np.zeros((2, n_points * 3), dtype=np.float32)
         for i, end in enumerate(VENOM_ENDS):
             sk_attrs[end[3]].data.foreach_get("vector", weights[i])
-        check(int((kinds < 0.5).sum()) > 100 and int((kinds > 0.5).sum()) >= 3 * 8,
-              "tendrils (%d points) and strands (%d points)" % ((kinds < 0.5).sum(), (kinds > 0.5).sum()))
+        check(int((kinds < 0.5).sum()) > 100 and int(((kinds > 0.5) & (kinds < 1.5)).sum()) >= 3 * 8,
+              "tendrils (%d points) and strands (%d points)" % ((kinds < 0.5).sum(),
+                                                              ((kinds > 0.5) & (kinds < 1.5)).sum()))
+        check(int((kinds > 1.5).sum()) > 0 and len(skeleton.data.polygons) > 0,
+              "webs in the forks of the tendrils (%d points, %d faces)" % ((kinds > 1.5).sum(),
+                                                                          len(skeleton.data.polygons)))
         check(index.min() >= 0 and index.max() < len(old_mesh.data.vertices)
               and float(np.abs(weights.reshape(2, -1, 3).sum(axis=2) - 1.0).max()) < 1e-4,
               "every point bound to a triangle of the old outfit")
@@ -802,6 +895,12 @@ def run():
         check(near < 2.0 * s.venom_thickness and lifted < 2.0 * s.venom_thickness,
               "the goo lies on the body, also with the arm lifted (median distance %.3f / %.3f, radius %.3f)"
               % (near, lifted, s.venom_thickness))
+        with_webs = len(goo_points(old_mesh))
+        s.venom_webs = False
+        without_webs = len(goo_points(old_mesh))
+        s.venom_webs = True
+        check(with_webs > without_webs, "the webs add goo between the tendrils at frame %d (%d vs %d vertices)"
+              % (busiest, with_webs, without_webs))
         vein = evaluated_values(old_mesh, ATTR_AHEAD)
         check(vein is not None and float(vein.max()) > 0.9 and float(vein.min()) == 0.0,
               "veins marked ahead of the edge at frame %d" % busiest)
@@ -815,12 +914,46 @@ def run():
           "goo undersuit: the layer's goo style and the lumpy edge")
     check({tuple(chain(m)) for m in veined} == {("MMDD Surface Mix",)},
           "veins spliced into the old outfit (%s)" % {tuple(chain(m)) for m in veined})
+    # liquid metal (T-1000): the goo turns to polished metal everywhere, the tendrils, the goo undersuit and the veins
+    s.venom_metallic = 1.0
+    goo_bsdfs = [bpy.data.materials[materials.GOO_MATERIAL].node_tree.nodes.get("MMDD Goo BSDF")]
+    goo_bsdfs += [m.node_tree.nodes.get(materials.LAYER + " Goo BSDF") for m in glow]
+    goo_bsdfs += [m.node_tree.nodes.get(materials.SURFACE + " Goo BSDF") for m in veined]
+    check(all(n is not None and n.inputs["Metallic"].default_value == 1.0 for n in goo_bsdfs),
+          "liquid metal: every goo shader metallic (%d)" % len(goo_bsdfs))
+    s.venom_metallic = 0.0
+    skeleton = venom.skeleton(old_mesh)  # (traced again with the webs off and on)
     points = len(skeleton.data.vertices) if skeleton is not None else 0
     s.venom_tendrils += 60
     skeleton = venom.skeleton(old_mesh)
     check(skeleton is not None and len(skeleton.data.vertices) > points,
           "more tendrils: traced again (%d -> %d points)" % (points, len(skeleton.data.vertices) if skeleton else 0))
     s.venom_tendrils -= 60
+    # Strands are also looked for in the poses the body takes while it transforms: with the left upper arm coming down
+    # against the body and going back, some are bound where surfaces face each other in a pose, farther apart at rest.
+    gaps, lengths = strand_gaps(venom.skeleton(old_mesh), old_mesh)
+    check(len(gaps) > 0 and float(np.abs(gaps - lengths).max()) < 0.01 * float(lengths.max()),
+          "without motion every strand is found on the rest pose (%d)" % len(gaps))
+    pb = base.armature.pose.bones.get("腕.L") or base.armature.pose.bones.get("左腕")
+    arm_ad = base.armature.animation_data
+    arm_action = arm_ad.action if arm_ad is not None else None
+    for frame, angle in ((1, 0.0), (50, -40.0), (100, 0.0)):  # (about its X axis: down to the side)
+        pb.matrix_basis = Matrix.Rotation(math.radians(angle), 4, "X")
+        pb.keyframe_insert("rotation_quaternion" if pb.rotation_mode == "QUATERNION" else "rotation_euler", frame=frame)
+    scene.frame_set(100)
+    s.venom_strands += 1  # traced again, now with the poses
+    gaps, lengths = strand_gaps(venom.skeleton(old_mesh), old_mesh)
+    moved = np.abs(gaps - lengths) > 0.25 * lengths
+    check(len(gaps) > 0 and int(moved.sum()) >= 2 and scene.frame_current == 100,
+          "strands found in the poses: %d of %d bound where the arm comes down (the frame put back)"
+          % (int(moved.sum()), len(gaps)))
+    if arm_action is None:
+        base.armature.animation_data_clear()
+    else:
+        base.armature.animation_data.action = arm_action
+    pb.matrix_basis = Matrix.Identity(4)
+    bpy.context.view_layer.update()
+    s.venom_strands -= 1
     check(not draw_panels(bpy.context), "panels draw with the symbiote")
     s.venom_enable = False
     scene.frame_set(busiest or 50)
@@ -844,6 +977,46 @@ def run():
         grown[f] = instance_count(old_mesh)
     check(grown[1] == 0 and grown[busiest or 50] > 0 and grown[100] == 0,
           "ice crystals grow ahead of the edge and are gone where it passed (%s)" % grown)
+    # clear ice: between the white frost the light goes through, so EEVEE refracts through those materials; the
+    # crystals and shards are clear glass
+    clarity = [m.node_tree.nodes.get(materials.SURFACE + " Clarity") for m in veined]
+    check(all(n is not None and abs(n.outputs[0].default_value - s.ice_clarity) < 1e-6 for n in clarity)
+          and all(materials.P_REFRACT in m for m in veined), "clear ice: refraction on in %d materials" % len(veined))
+    ice = bpy.data.materials.get(materials.ICE_MATERIAL)
+    ice_bsdf = ice.node_tree.nodes.get("MMDD_BSDF") if ice is not None else None
+    transmission = None
+    if ice_bsdf is not None:
+        transmission = ice_bsdf.inputs.get("Transmission Weight") or ice_bsdf.inputs.get("Transmission")
+    check(transmission is not None and transmission.default_value == 1.0
+          and (getattr(ice, "use_raytrace_refraction", False) or getattr(ice, "use_screen_refraction", False)),
+          "the crystals and shards are clear glass")
+    s.ice_clarity = 0.0
+    check(not any(materials.P_REFRACT in m for m in veined), "milky ice: the materials' refraction put back")
+    s.ice_clarity = 0.5
+    # Freeze, then shatter: the old outfit stays whole while the frost covers it and goes all at once when the wave is
+    # done (the new outfit forms underneath meanwhile).
+    s.exit_timing = "AT_ONCE"
+    whole, frozen, drop = None, 0.0, None
+    full = len(old_mesh.data.vertices)
+    for f in range(5, 101, 5):
+        scene.frame_set(f)
+        count = evaluated_counts(old_mesh)
+        if count == full:
+            whole = f
+            ahead = evaluated_values(old_mesh, ATTR_AHEAD)
+            frozen = float(np.median(ahead)) if ahead is not None else 0.0
+        elif drop is None and count < 0.5 * full:
+            drop = f
+    scene.frame_set(whole or 1)
+    crystals_then = instance_count(old_mesh)
+    check(whole is not None and whole >= 70 and frozen > 0.9 and crystals_then > 0,
+          "frozen over before it goes: whole until frame %s, frost %.2f, %d crystals" % (whole, frozen, crystals_then))
+    check(drop is not None and whole is not None and drop - whole <= 15,
+          "then it shatters all at once (whole at frame %s, mostly gone at %s)" % (whole, drop))
+    scene.frame_set(100)
+    check(evaluated_counts(target.meshes[0]) > 0 and instance_count(old_mesh) == 0,
+          "the new outfit there at the end, the crystals gone")
+    s.exit_timing = "EDGE"
     s.ice_crystals = 0
     scene.frame_set(busiest or 50)
     check(instance_count(old_mesh) == 0, "no crystals with the count at 0")
@@ -939,6 +1112,66 @@ def run():
               "the old outfit goes when they meet (%s)" % [seen[k][3] for k in ("apart", "closer", "met")])
     s.holo_enable = False
     s.entrance, s.exit_style = "GROW", "SHRINK"
+
+    # --- flipping scales (Mystique): both outfits break into scales that turn over where the edge passes, the old
+    # outfit the first half of each turn (flat to edge-on), the new one the second (edge-on to flat), in step; they
+    # stand up off the body as they turn
+    wire_was, s.wire_enable = s.wire_enable, False
+    s.entrance = "SCALES"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with flipping scales")
+    check(not draw_panels(bpy.context), "panels draw with the scales")
+    scene.frame_set(1)
+    check(evaluated_counts(new_mesh) == 0 and evaluated_counts(old_mesh) == len(old_mesh.data.vertices),
+          "scales: nothing turned at frame 1")
+    standing = {}
+    for f in range(10, 95, 5):
+        scene.frame_set(f)
+        standing[f] = tuple(int((world_vertices(ob)[1] > 0.75).sum()) for ob in (old_mesh, new_mesh))
+    busiest = max(standing, key=lambda f: min(standing[f]))
+    check(min(standing[busiest]) > 30, "scales standing edge-on in both outfits at frame %d %s"
+          % (busiest, standing[busiest]))
+    scene.frame_set(busiest)
+    old_co, old_glint = world_vertices(old_mesh)
+    up_old = old_co[old_glint > 0.75]
+    lying = old_co[old_glint == 0.0]
+    rise = float(np.median(surface_distance(up_old[::max(1, len(up_old) // 400)], old_mesh))) if len(up_old) else 0.0
+    flat = float(np.median(surface_distance(lying[::max(1, len(lying) // 400)], old_mesh))) if len(lying) else 1.0
+    check(rise > 0.15 * s.scale_size and flat < 0.01 * s.scale_size,
+          "scales stand up off the body as they turn (median %.3f), the rest lies on it (%.4f; scale size %.3f)"
+          % (rise, flat, s.scale_size))
+    # In step: a scale is timed by its site, the same in both outfits. Where they lie on top of each other on the body,
+    # the old one goes as the new one comes, so they never both sit still there: the old one not turned yet while the
+    # new one has finished turning.
+    old_pose, new_pose = skinned(old_mesh), skinned(new_mesh)
+    free_new = np.nonzero(free_vertices(new_mesh))[0]  # (locked parts never turn)
+    tree = KDTree(len(free_new))
+    for i in free_new:
+        tree.insert(Vector(new_pose[i]), int(i))
+    tree.balance()
+    free_old = free_vertices(old_mesh)
+    # (a seam vertex of a locked part sits on the same spot and stays: leave those spots out)
+    locked_spots = set(map(tuple, np.round(old_pose[~free_old], 3)))
+    picks = np.random.default_rng(5).choice(np.nonzero(free_old)[0], size=min(20000, int(free_old.sum())),
+                                            replace=False)
+    pairs = [(tuple(np.round(old_pose[i], 3)), tuple(np.round(new_pose[j], 3))) for i in picks
+             for (_co, j, dist) in [tree.find(Vector(old_pose[i]))] if dist < 0.05 * s.scale_size]
+    pairs = [(a, c) for a, c in pairs if a not in locked_spots]
+    both, seen = 0, 0
+    for f in range(10, 95, 5):
+        scene.frame_set(f)
+        still_old = set(map(tuple, np.round(evaluated_positions(old_mesh), 3)))
+        still_new = set(map(tuple, np.round(evaluated_positions(new_mesh), 3)))
+        for a, c in pairs:
+            seen += a in still_old or c in still_new
+            both += a in still_old and c in still_new
+    check(len(pairs) > 100 and seen > 0 and both <= 0.002 * seen,
+          "the old and the new half of every turn in step: where the outfits lie on top of each other (%d spots) they "
+          "never both sit still across the edge (%d of %d)" % (len(pairs), both, seen))
+    scene.frame_set(100)
+    check(evaluated_faces_and_edge(new_mesh)[0] == grown_faces
+          and evaluated_faces_and_edge(old_mesh)[0] == locked_faces(old_mesh),
+          "scales: the new outfit whole, the old one gone at the end")
+    s.entrance, s.wire_enable = "GROW", wire_was
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
@@ -1172,6 +1405,23 @@ def run():
         if key == "NANO_FINALE":
             check(s.layer_enable and s.inner_glow and s.finale_style == "SWEEP" and white_flash(scene)[0] is not None
                   and len(white_flash(scene)[1]) == 1, "nanotech finale: undersuit, light sweep and the white flash")
+        if key == "ICE":
+            ee = scene.eevee
+            check(s.exit_timing == "AT_ONCE" and s.ice_clarity > 0.0
+                  and (getattr(ee, "use_raytracing", False) or getattr(ee, "use_ssr_refraction", False)),
+                  "freeze and shatter: clear ice, all at once, EEVEE refraction on")
+        if key == "LIQUID_METAL":
+            goo_bsdf = bpy.data.materials[materials.GOO_MATERIAL].node_tree.nodes.get("MMDD Goo BSDF")
+            check(s.venom_enable and venom.skeleton(base.meshes[0]) is not None and s.venom_metallic == 1.0
+                  and goo_bsdf.inputs["Metallic"].default_value == 1.0, "liquid metal preset: metal tendrils and goo")
+        if key == "MYSTIQUE":
+            mod = our_modifiers(target.meshes[0])[0]
+            check(s.entrance == "SCALES" and mod[input_identifiers(mod.node_group)["Scales"]],
+                  "Mystique preset: flipping scales")
+        if key == "BEAT_DROP":
+            check(s.beat_sync and s.finale and s.glitch_enable and len(white_flash(scene)[1]) == 1,
+                  "beat drop preset: on the beat, glitch, finale and the white flash")
+    s.beat_sync = False  # (the beat drop preset turned it on; the finale checks below are not on the beat)
     check(s.path == "SURFACE" and s.seeds == "LIMBS" and s.ribbon_enable and s.particles == "STAR",
           "magical girl preset applied (and rebuilt)")
     strands = ribbons.ribbon_objects(s.mask)

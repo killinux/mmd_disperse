@@ -67,6 +67,8 @@ SIZE_RATIOS = {
     "crystal_size": 0.03,
     "clamp_distance": 0.22,
     "ghost_distance": 0.25,
+    "scale_size": 0.025,
+    "flip_width": 0.08,
 }
 HOLO_LINE_SPACING = 0.006  # scan line spacing of the hologram, fraction of the model height
 LAYER_CELL = 0.012  # cell size of the line web on the undersuit, fraction of the model height
@@ -76,6 +78,8 @@ STRAND_LIFE = 2.0  # how far the edge moves on before a strand is gone, in tendr
 ABSORB = 0.6  # how far behind the edge the goo swallows a tendril, in tendril lengths
 CLAMP_AT = 0.8  # share of the wave at which the halves of the new outfit clamp shut, or the ghosts meet
 AT_ONCE = ("CLAMP", "GHOSTS")  # entrances where all of the new outfit arrives at that moment (the old one goes then)
+SHATTER_AT = 1.0  # share of the wave at which the old outfit goes all at once (exit timing): when the wave is done
+BEAT_REACH = 2.0  # seconds a moment may wait for the next beat
 NOISE_CELLS_PER_HEIGHT = 6.0
 
 
@@ -168,12 +172,44 @@ def _layer(settings):
     return settings.layer_width if settings.layer_enable else 0.0
 
 
-def _finale_start(settings, wave):
+def _old_at_once(settings):
+    """True when all of the old outfit goes at one moment: the new outfit's halves clamp shut or its ghosts meet, or
+    the old outfit stays (freezing over ...) while the wave crosses it and then goes all at once."""
+    return settings.entrance in AT_ONCE or (settings.exit_timing == "AT_ONCE" and settings.entrance != "SCALES")
+
+
+def _on_beat(settings, mask, radius):
+    """`radius` moved on to where the mask is a frame before the next beat (with beat sync on and beats found), so what
+    starts there peaks on the beat. Unchanged without a beat within BEAT_REACH seconds."""
+    frames = beats.beat_frames() if settings.beat_sync and settings.direction == "GROW" and mask is not None else []
+    curves = _scale_curves(mask) if frames else []
+    keys = curves[0].keyframe_points if curves else []
+    if len(keys) < 2:
+        return radius
+    fc = curves[0]
+    frame, last = keys[0].co[0], keys[-1].co[0]
+    while frame <= last and fc.evaluate(frame) < radius:
+        frame += 0.25
+    scene = settings.id_data
+    reach = BEAT_REACH * scene.render.fps / scene.render.fps_base
+    beat = next((f for f in frames if f >= frame), None)
+    if frame > last or beat is None or beat > last or beat - frame > reach:
+        return radius
+    return fc.evaluate(beat - 1.0)
+
+
+def _moment(settings, wave, mask=None):
+    """Mask radius at which all of the old outfit goes (when it goes at once): the halves clamp shut / the ghosts meet,
+    or the wave is done. On the beat with beat sync."""
+    return _on_beat(settings, mask, (CLAMP_AT if settings.entrance in AT_ONCE else SHATTER_AT) * wave)
+
+
+def _finale_start(settings, wave, mask=None):
     """Mask radius at which the new outfit is complete and the finale starts: when the halves clamp shut, or once the
-    wave has passed and the final look (behind the undersuit) is complete."""
+    wave has passed and the final look (behind the undersuit) is complete. On the beat with beat sync."""
     if settings.entrance in AT_ONCE:
-        return CLAMP_AT * wave
-    return wave + _layer(settings)
+        return _moment(settings, wave, mask)
+    return _on_beat(settings, mask, wave + _layer(settings))
 
 
 def _extra(settings, wave, has_base, has_target):
@@ -185,6 +221,9 @@ def _extra(settings, wave, has_base, has_target):
             extra = settings.frag_life * wave
         if settings.particles != "NONE":
             extra = max(extra, settings.particle_life * wave)
+        if _old_at_once(settings) and settings.entrance not in AT_ONCE:
+            # it goes once the wave is done (give or take a few percent), then shrinks away or flies off
+            extra = max(extra, settings.base_delete_offset) + (SHATTER_AT + 0.05 - 1.0) * wave
     if has_target:
         extra = max(extra, _layer(settings) + (settings.finale_length * wave if settings.finale else 0.0))
     if settings.venom_enable:  # the last strands snap
@@ -431,7 +470,7 @@ def _update_inner_glow(ob, settings):
 def _update_layer(ob, settings):
     # the cells sit on the rest position, which is in object units
     height = max(settings.size_reference, 1e-3) / _object_scale(ob)
-    goo = (settings.venom_color, GOO_CELL * height) if settings.layer_style == "GOO" else None
+    goo = (settings.venom_color, GOO_CELL * height, settings.venom_metallic) if settings.layer_style == "GOO" else None
     for mat in _glow_materials(ob, settings):
         if settings.layer_enable:
             materials.add_layer(mat)
@@ -446,7 +485,8 @@ def _update_surface(ob, settings):
     for mat in _glow_materials(ob, settings):
         if settings.old_surface != "NONE":
             materials.add_surface(mat, settings.old_surface)
-            materials.update_surface(mat, settings.surface_color, settings.glow_color, cell)
+            materials.update_surface(mat, settings.surface_color, settings.glow_color, cell, settings.venom_metallic,
+                                     settings.ice_clarity)
         else:
             materials.remove_surface(mat)
 
@@ -469,12 +509,17 @@ def _update_venom(settings, mask, objects):
         return None
     arrival_path = mask.get(P_PATH, "SPHERE") != "SPHERE"
     height = max(settings.size_reference, 1e-3)
+    scene = settings.id_data
     for ob in owners:
         if not venom.matches(ob, venom.signature(settings, _object_scale(ob))):
             values = venom.field_values(ob, mask.matrix_world.translation, arrival_path)
-            venom.build(ob, values, settings, height, settings.id_data)
+            # strands are also looked for in the poses the body takes while it transforms
+            start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
+            frames = [int(round(start + (end - start) * (i + 1) / (venom.POSES + 1))) for i in range(venom.POSES)]
+            poses, key = venom.sample_poses(scene, ob, frames, objects) if settings.venom_strands > 0 else ([], None)
+            venom.build(ob, values, settings, height, scene, poses, key)
     goo = materials.ensure_goo_material()
-    materials.update_goo_material(settings.venom_color, GOO_CELL * height)
+    materials.update_goo_material(settings.venom_color, GOO_CELL * height, settings.venom_metallic)
     return goo
 
 
@@ -525,7 +570,7 @@ def update_white_flash(settings):
     within a frame where the finale starts and is gone about six frames later, however long the finale is."""
     mask = settings.mask
     wave = float(mask.get(P_WAVE, 0.0)) if mask is not None else 0.0
-    start = _finale_start(settings, wave) if wave > 0.0 else 0.0
+    start = _finale_start(settings, wave, mask) if wave > 0.0 else 0.0
     step = _radius_step(mask, start) if mask is not None else 0.0
     if step <= 0.0:  # no keys to measure: a share of the finale instead
         step = 0.05 * settings.finale_length * wave
@@ -536,8 +581,12 @@ def update_white_flash(settings):
 def _signatures(settings, role, s):
     """What the recorded moments of a mesh depend on besides the mask keys, in object space (`s` is its scale):
     (its vertices', its pieces'). A recording that does not match any more is dropped (launch.py)."""
+    mask = settings.mask
+    wave = float(mask.get(P_WAVE, 0.0)) if mask is not None else 0.0
+    synced = settings.beat_sync and beats.beat_object() is not None  # moments on the beat move with the beats
     if role == "BASE":
-        return (), (settings.piece_size / s,)
+        at_once = (_moment(settings, wave, mask) / s,) if _old_at_once(settings) else ()
+        return at_once, (settings.piece_size / s,) + at_once
     layer = _layer(settings) / s  # the finale starts when the final look is complete
     if settings.finale_style == "SWEEP":
         stars = (1.0, settings.finale_length, settings.finale_width / s, layer)
@@ -545,6 +594,8 @@ def _signatures(settings, role, s):
         stars = (0.0, layer)
     if settings.entrance in AT_ONCE:  # ... or when the halves clamp shut / the ghosts meet
         stars += (1.0,)
+    if synced:
+        stars += (_finale_start(settings, wave, mask) / s,)
     return stars, (settings.piece_size / s, settings.fly_range / s, float(settings.subdivide))
 
 
@@ -620,6 +671,10 @@ def sync(settings):
         "Tendril Absorb": ABSORB * settings.venom_length,
         "Strand Life": STRAND_LIFE * settings.venom_length,
         "Venom Material": goo,
+        "Edge Glow": settings.edge_glow,
+        "Scales": settings.entrance == "SCALES",
+        "Scale Size": settings.scale_size,
+        "Flip Width": settings.flip_width,
     }
     values = {
         TARGET_GROUP: dict(common, **{
@@ -634,7 +689,6 @@ def sync(settings):
             "Wire Lift": settings.wire_lift,
             "Wire Resolution": settings.wire_resolution,
             "Wire Material": wire,
-            "Edge Glow": settings.edge_glow,
             "Hologram": settings.holo_enable,
             "Hologram Width": settings.holo_width,
             "Assemble": settings.entrance == "ASSEMBLE",
@@ -684,7 +738,7 @@ def sync(settings):
             "Crystals": crystal is not None,
             "Crystal Object": crystal,
             "Crystal Size": settings.crystal_size,
-            "Clamp": settings.entrance in AT_ONCE,  # the old outfit goes all at once
+            "Clamp": _old_at_once(settings),  # the old outfit goes all at once
         }),
     }
     reach = float(mask.get(P_REACH, 0.0)) or 1e6
@@ -695,14 +749,15 @@ def sync(settings):
     sparkle_density = settings.finale_sparkles / area_new if area_new > 0.0 else 0.0
     wind = Vector(settings.frag_wind_dir)
     wind = wind.normalized() * settings.frag_wind if wind.length > 1e-9 else Vector((0.0, 0.0, 0.0))
+    moment = _moment(settings, wave, mask)  # (on the beat with beat sync)
+    finale_start = _finale_start(settings, wave, mask)
     for ob in objects:
         role = ob.get(P_ROLE)
         # Node trees work in object space: world distances shrink with the object's scale (densities and
         # frequencies grow), so a scaled model looks the same as an unscaled one.
         s = _object_scale(ob)
         skeleton = venom.skeleton(ob)
-        own = {"Reach": reach, "Venom": skeleton is not None, "Venom Skeleton": skeleton,
-               "Clamp Distance": CLAMP_AT * wave}
+        own = {"Reach": reach, "Venom": skeleton is not None, "Venom Skeleton": skeleton, "Clamp Distance": moment}
         if role in ("BASE", "TARGET") and launch.space(ob) is not None:
             # A recording made with other settings (piece size, the finale's timing ...) does not match any more:
             # those pieces follow the body again until the next build records them.
@@ -721,7 +776,7 @@ def sync(settings):
             })
         elif role == "TARGET":
             own.update({
-                "Finale Start": _finale_start(settings, wave),
+                "Finale Start": finale_start,
                 "Clamp Offset": settings.clamp_distance,
                 "Finale Length": settings.finale_length * wave,
                 "Sparkle Density": sparkle_density * s * s,
@@ -749,7 +804,8 @@ def sync(settings):
             _update_layer(ob, settings)
         elif role == "BASE":
             flakes = settings.exit_style in ("FRAGMENTS", "CHUNKS") and settings.frag_glow
-            _update_glow(ob, settings, flakes or flashes or settings.silhouette,
+            glint = settings.entrance == "SCALES" and settings.edge_glow  # the turning scales glint
+            _update_glow(ob, settings, flakes or flashes or settings.silhouette or glint,
                          settings.frag_glow_strength if flakes or settings.silhouette else settings.edge_glow_strength)
             _update_surface(ob, settings)
         if role in ("TARGET", "BASE"):
@@ -765,6 +821,7 @@ def _seeds(settings, location, model):
 
 def build(context, settings):
     context.view_layer.update()  # matrix_world must reflect recent transform edits
+    venom.forget()  # the motion may have changed: look for the strands in its poses again
     target = mdl.resolve(settings.target)
     base = mdl.resolve(settings.base) if settings.base else mdl.Model(None, None, [])
     if not target and not base:

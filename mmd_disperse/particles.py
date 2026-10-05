@@ -1,5 +1,5 @@
-"""Petal, butterfly, star, cube, coin, ice shard and ember shapes the old outfit can turn into, and the ice crystals
-that grow on it with frost.
+"""Petal, butterfly, star, cube, coin, ice shard, ember, music note, playing card, feather, bat and ink drop shapes the
+old outfit can turn into, and the ice crystals that grow on it with frost.
 
 They are ordinary mesh objects in a hidden collection, so they can be edited (or swapped for any other
 object with the "Custom Object" option); the node tree only reads their geometry.
@@ -20,8 +20,15 @@ COIN = "MMD Disperse Coin"
 SHARD = "MMD Disperse Shard"
 EMBER = "MMD Disperse Ember"
 CRYSTAL = "MMD Disperse Crystal"
+NOTE = "MMD Disperse Note"
+CARD = "MMD Disperse Card"
+FEATHER = "MMD Disperse Feather"
+BAT = "MMD Disperse Bat"
+INK = "MMD Disperse Ink Drop"
 NAMES = {"PETAL": PETAL, "BUTTERFLY": BUTTERFLY, "STAR": STAR, "CUBE": CUBE, "COIN": COIN, "SHARD": SHARD,
-         "EMBER": EMBER, "CRYSTAL": CRYSTAL}
+         "EMBER": EMBER, "CRYSTAL": CRYSTAL, "NOTE": NOTE, "CARD": CARD, "FEATHER": FEATHER, "BAT": BAT, "INK": INK}
+FLAPPING = ("BUTTERFLY", "BAT")  # shapes with two wings in the XY plane (x > 0, x < 0) that flap
+UPRIGHT = ("NOTE",)  # shapes that stand facing the front (-Y) and only sway
 
 
 def _petal():
@@ -130,8 +137,124 @@ def _crystal(sides=6):
     return verts, faces, [(1.0, 0.5)] * len(verts)
 
 
+def _fan(outline, hub, flip=False):
+    """Triangles from `hub` (index) to each edge of the closed `outline` (indices)."""
+    n = len(outline)
+    faces = []
+    for i in range(n):
+        a, b = outline[i], outline[(i + 1) % n]
+        faces.append((hub, b, a) if flip else (hub, a, b))
+    return faces
+
+
+def _note():
+    """Music note (a quaver) about 1 unit tall, standing in the XZ plane facing the front (-Y): an oval head, a stem
+    and a flag."""
+    verts, faces = [], []
+    tilt = math.radians(25.0)
+    verts.append((-0.1, 0.0, -0.33))  # head centre
+    ring = []
+    for i in range(16):
+        a = math.pi * 2.0 * i / 16
+        x, z = 0.17 * math.cos(a), 0.12 * math.sin(a)
+        verts.append((-0.1 + x * math.cos(tilt) - z * math.sin(tilt), 0.0,
+                      -0.33 + x * math.sin(tilt) + z * math.cos(tilt)))
+        ring.append(len(verts) - 1)
+    faces += _fan(ring, 0)
+    start = len(verts)
+    verts += [(0.03, 0.0, -0.33), (0.075, 0.0, -0.33), (0.075, 0.0, 0.47), (0.03, 0.0, 0.47)]
+    faces.append((start, start + 1, start + 2, start + 3))
+    # the flag: a curved strip from the top of the stem
+    pairs = [((0.075, 0.47), (0.075, 0.34)), ((0.17, 0.38), (0.14, 0.28)), ((0.25, 0.25), (0.21, 0.17)),
+             ((0.28, 0.1), (0.23, 0.06))]
+    prev = None
+    for (ox, oz), (ix, iz) in pairs:
+        verts += [(ox, 0.0, oz), (ix, 0.0, iz)]
+        here = (len(verts) - 2, len(verts) - 1)
+        if prev is not None:
+            faces.append((prev[0], here[0], here[1], prev[1]))
+        prev = here
+    return verts, faces, [(1.0, 0.5)] * len(verts)
+
+
+def _card():
+    """Playing card 0.63 x 0.88 in the XY plane with cut corners; UV across the card (the material draws it)."""
+    w, h, c = 0.44, 0.62, 0.055
+    outline = [(-w + c, -h), (w - c, -h), (w, -h + c), (w, h - c), (w - c, h), (-w + c, h), (-w, h - c), (-w, -h + c)]
+    verts = [(0.0, 0.0, 0.0)] + [(x, y, 0.0) for x, y in outline]
+    faces = _fan(list(range(1, len(verts))), 0)
+    uvs = [(x / (2 * w) + 0.5, y / (2 * h) + 0.5) for x, y, _z in verts]
+    return verts, faces, uvs
+
+
+def _feather(steps=12, length=1.3):
+    """Feather `length` long along Y (quill at -Y), the vane wider on one side and curved a little; brightest along the
+    shaft (UV x)."""
+    verts, uvs = [], []
+    rows = []
+    for i in range(steps + 1):
+        t = i / steps
+        y = t - 0.5
+        width = max(0.13 * math.sin(math.pi * min(1.0, t * 1.15)) ** 0.8 if t > 0.12 else 0.0, 0.008)
+        shaft = 0.06 * math.sin(math.pi * t)
+        row = []
+        for side, offset in ((-0.7, -0.7 * width), (0.0, 0.0), (1.0, width)):
+            verts.append(((shaft + offset) * length, y * length, 0.02 * abs(side) * math.sin(math.pi * t) * length))
+            uvs.append((1.0 - 0.7 * abs(side), t))
+            row.append(len(verts) - 1)
+        rows.append(row)
+    faces = []
+    for a, b in zip(rows, rows[1:]):
+        faces.append((a[0], a[1], b[1], b[0]))
+        faces.append((a[1], a[2], b[2], b[1]))
+    return verts, faces, uvs
+
+
+def _bat(size=3.5):
+    """Bat about 3.9 units across (a dark shape has to be big to read): wings in the XY plane (x > 0 right, x < 0
+    left) with a scalloped trailing edge, a small body with ears along Y (the wings flap like the butterfly's)."""
+    wing = [(0.03, 0.1), (0.15, 0.16), (0.3, 0.2), (0.46, 0.22), (0.55, 0.12), (0.48, 0.04), (0.44, -0.06),
+            (0.37, -0.02), (0.31, -0.12), (0.24, -0.05), (0.16, -0.14), (0.09, -0.06), (0.03, -0.08)]
+    hub = (0.13, 0.03)
+    verts, faces, uvs = [], [], []
+    for sign in (1.0, -1.0):
+        start = len(verts)
+        for x, y in [hub] + wing:
+            verts.append((sign * x * size, y * size, 0.0))
+            uvs.append((x / 0.55, y + 0.5))
+        faces += _fan(list(range(start + 1, len(verts))), start, flip=sign < 0)
+    body = [(0.0, -0.16), (0.035, -0.05), (0.03, 0.1), (0.035, 0.22), (0.008, 0.14), (-0.008, 0.14), (-0.035, 0.22),
+            (-0.03, 0.1), (-0.035, -0.05)]
+    start = len(verts)
+    verts.append((0.0, 0.03 * size, 0.004))
+    uvs.append((0.0, 0.5))
+    for x, y in body:
+        verts.append((x * size, y * size, 0.004))
+        uvs.append((0.0, y + 0.5))
+    faces += _fan(list(range(start + 1, len(verts))), start)
+    return verts, faces, uvs
+
+
+def _ink_drop(sides=18):
+    """Splash of ink about 1 unit across, flat in the XY plane: an uneven blot with a small drop beside it."""
+    verts = [(0.0, 0.0, 0.0)]
+    for i in range(sides):
+        a = math.pi * 2.0 * i / sides
+        r = 0.42 * (1.0 + 0.18 * math.sin(3 * a + 1.0) + 0.1 * math.sin(7 * a + 2.0))
+        verts.append((r * math.cos(a), r * math.sin(a), 0.0))
+    faces = _fan(list(range(1, sides + 1)), 0)
+    start = len(verts)
+    verts.append((0.58, 0.2, 0.0))
+    for i in range(6):
+        a = math.pi * 2.0 * i / 6
+        verts.append((0.58 + 0.07 * math.cos(a), 0.2 + 0.07 * math.sin(a), 0.0))
+    faces += _fan(list(range(start + 1, start + 7)), start)
+    return verts, faces, [(1.0, 0.5)] * len(verts)
+
+
 _SHAPES = {"PETAL": _petal, "BUTTERFLY": _butterfly, "STAR": _star, "CUBE": _cube, "COIN": _coin, "SHARD": _shard,
-           "EMBER": _ember, "CRYSTAL": _crystal}
+           "EMBER": _ember, "CRYSTAL": _crystal, "NOTE": _note, "CARD": _card, "FEATHER": _feather, "BAT": _bat,
+           "INK": _ink_drop}
 
 
 def _material(kind):
@@ -139,6 +262,12 @@ def _material(kind):
         return materials.ensure_coin_material()
     if kind in ("SHARD", "CRYSTAL"):
         return materials.ensure_ice_material()
+    if kind == "CARD":
+        return materials.ensure_card_material()
+    if kind == "BAT":
+        return materials.ensure_bat_material()
+    if kind == "INK":
+        return materials.ensure_ink_material()
     return materials.ensure_particle_material()
 
 
@@ -184,7 +313,8 @@ def remove_assets():
     coll = bpy.data.collections.get(COLLECTION)
     if coll is not None and not coll.all_objects:
         bpy.data.collections.remove(coll)
-    for name in (materials.PARTICLE_MATERIAL, materials.COIN_MATERIAL, materials.ICE_MATERIAL):
+    for name in (materials.PARTICLE_MATERIAL, materials.COIN_MATERIAL, materials.ICE_MATERIAL, materials.CARD_MATERIAL,
+                 materials.BAT_MATERIAL, materials.INK_MATERIAL, materials.SMOKE_MATERIAL):
         mat = bpy.data.materials.get(name)
         if mat is not None and mat.users == 0:
             bpy.data.materials.remove(mat)

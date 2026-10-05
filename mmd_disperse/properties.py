@@ -51,8 +51,20 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("SURFACE", "Along the Body",
                 "The wave flows over the body from the start point(s), like a nanotech suit"),
                ("UP", "Sweep Up", "Scan from the feet up to the head"),
-               ("DOWN", "Sweep Down", "Scan from the head down to the feet")),
+               ("DOWN", "Sweep Down", "Scan from the head down to the feet"),
+               ("LEFT_RIGHT", "Sweep Left to Right",
+                "A flat front crosses the body from the left of the picture to the right, seen from the front (like a "
+                "magic circle passing through it)"),
+               ("RIGHT_LEFT", "Sweep Right to Left", "A flat front crosses the body from the right of the picture "
+                                                     "to the left, seen from the front"),
+               ("FRONT_BACK", "Sweep Front to Back", "A flat front passes through the body from the front to the back "
+                                                     "(like walking through a barrier)"),
+               ("BACK_FRONT", "Sweep Back to Front", "A flat front passes through the body from the back to the "
+                                                     "front"),
+               ("SPIRAL", "Spiral Up", "The change winds up around the body from the feet, a turn per Spiral Pitch, "
+                                       "as if something circling it changes what it passes over (Cinderella)")),
         default="SPHERE")
+    spiral_pitch: _distance("Spiral Pitch", "How far up the body the change climbs per turn around it", 2.0)
     seeds: EnumProperty(
         name="Flow From",
         items=(("ORIGIN", "Start Point Only", "Flow from the start point only"),
@@ -127,6 +139,26 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                     default=(0.1, 0.75, 1.0), update=_sync)
     glow_strength: FloatProperty(name="Glow Strength", default=4.0, min=0.0, soft_max=50.0, update=_sync)
 
+    # --- the front's decoration (sweeps and the spiral)
+    ring_enable: BoolProperty(name="Front Ring", default=False, update=_sync,
+                              description="Something you can see moves with the front of a sweep or the spiral: a "
+                                          "magic circle, a ring of sparks, a glowing panel, a sheet of TV static, or a "
+                                          "comet of sparkles circling the body (uses the glow color)")
+    ring_style: EnumProperty(
+        name="Ring Style",
+        items=(("MAGIC", "Magic Circle", "A glowing magic circle with runes, turning as it passes through the body "
+                                         "(Kamen Rider Wizard)"),
+               ("SPARKS", "Spark Ring", "A fiery ring throwing off sparks as it spins (Doctor Strange's portal)"),
+               ("PANEL", "Glowing Panel", "A glowing frame around a see-through screen with a grid (Kamen Rider "
+                                          "Ex-Aid)"),
+               ("STATIC", "TV Static", "A sheet of TV static the body passes through (WandaVision)"),
+               ("COMET", "Sparkle Comet", "A comet of sparkles circling the body at the front, a turn per Spiral "
+                                          "Pitch (with Spiral Up or the up / down sweeps: Cinderella)")),
+        default="MAGIC", update=_sync)
+    ring_size: FloatProperty(name="Ring Size", default=1.0, min=0.1, soft_max=3.0, update=_sync,
+                             description="Size of the ring (1 fits around the body); the comet's distance from it")
+    ring_strength: FloatProperty(name="Ring Glow", default=6.0, min=0.0, soft_max=50.0, update=_sync)
+
     # --- how the new outfit arrives
     entrance: EnumProperty(
         name="New Outfit Entrance",
@@ -140,8 +172,34 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                 "there and the old one goes (Kamen Rider Decade; see-through with the hologram on)"),
                ("SCALES", "Flipping Scales",
                 "Both outfits break into scales that turn over in a wave where the edge passes, the old outfit on one "
-                "side of every scale and the new one on the other (Mystique); the old outfit leaves this way too")),
+                "side of every scale and the new one on the other (Mystique); the old outfit leaves this way too"),
+               ("EVOLVE", "Evolution Flash",
+                "No edge: the body glows up and the two outfits show in turn, faster and faster and brighter and "
+                "brighter until they are pure light, then the new one stays (Pokemon's evolution; uses the glow color "
+                "and the edge glow strength)"),
+               ("POOF", "Smoke Puff", "No edge: a puff of white smoke bursts out of the body and hides it while the "
+                                      "outfits swap, then drifts up and thins out (a ninja's transformation)"),
+               ("SHADOW", "Rise from the Shadow",
+                "No edge: the body sinks into its own black shadow on the floor, head first, and the new outfit stands "
+                "up out of it, feet first")),
         default="GROW", update=_sync)
+    smoke_count: IntProperty(name="Smoke Puffs", default=120, min=1, soft_max=2000, update=_sync,
+                             description="About how many balls of smoke the puff is made of")
+    smoke_size: _distance("Smoke Size", "How big the balls of smoke are", 1.8)
+    shadow_dir: FloatVectorProperty(name="Light Direction", subtype="XYZ", size=3, default=(0.35, 0.55, -1.0),
+                                    update=_sync,
+                                    description="World direction the light falls in, which casts the shadow the body "
+                                                "sinks into (it must point down)")
+    reactor: BoolProperty(name="Reactor Start", default=False, update=_sync,
+                          description="The suit around the start point(s) is there first, glowing and pulsing like an "
+                                      "arc reactor, and the rest flows out of it (Mark 50; uses the glow color)")
+    reactor_size: _distance("Reactor Size", "How big the glowing patch at each start point is", 0.6)
+    plates: BoolProperty(name="Armor Plates", default=False, update=_sync,
+                         description="Behind the edge the new outfit's plates rise off the body one by one and settle "
+                                     "back into place (Mark 50)")
+    plate_size: _distance("Plate Size", "How big the plates are", 0.7)
+    plate_lift: _distance("Plate Lift", "How far a plate rises", 0.25, min_value=-10.0)
+    plate_width: _distance("Plate Width", "How far the edge moves on while a plate rises and settles", 1.6)
     scale_size: _distance("Scale Size", "How big the scales are", 0.5)
     flip_width: _distance("Flip Width", "How far the edge moves while one scale turns over: wider means slower, "
                                         "with more scales turning at once", 1.5)
@@ -206,7 +264,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("FROST", "Frost", "Frost creeps over the old outfit and freezes it to ice; ice crystals grow out of "
                                   "it"),
                ("CHAR", "Char", "The old outfit chars and smoulders, glowing cracks open just before it burns away "
-                                "(uses the glow color)")),
+                                "(uses the glow color)"),
+               ("INK", "Ink Wash", "Ink spreads over the old outfit in patches and turns it into an ink wash painting "
+                                   "of itself, soaking it dark right at the edge (uses the drawing's paper and ink "
+                                   "colors)")),
         default="NONE", update=_sync)
     surface_width: _distance("Surface Reach", "How far ahead of the edge the old outfit starts to change", 3.0)
     surface_color: FloatVectorProperty(name="Surface Color", subtype="COLOR", size=3, min=0.0, max=1.0,
@@ -219,6 +280,24 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     ice_clarity: FloatProperty(name="Ice Clarity", default=0.5, min=0.0, max=1.0, subtype="FACTOR", update=_sync,
                                description="With frost: how clear the ice is between the white frost, like glass that "
                                            "shows what is under it (EEVEE needs raytracing or screen space refraction)")
+
+    # --- line art / ink wash
+    paint_style: EnumProperty(
+        name="Drawing Style",
+        items=(("NONE", "None", "The new outfit appears in its own colours"),
+               ("LINEART", "Sketch Then Color", "The new outfit first shows ahead of the edge as a line drawing on "
+                                                      "paper (outlined, screentone where it is dark), then its colours "
+                                                      "flood in behind the edge like watercolour"),
+               ("INK", "Ink Wash", "The new outfit appears at the edge as an ink wash painting, then its colours bloom "
+                                   "behind it (pair it with the old outfit's Ink Wash surface and ink drops)")),
+        default="NONE", update=_sync)
+    paint_width: _distance("Color Bleed", "How far behind the edge the colours have filled in", 2.5)
+    sketch_width: _distance("Sketch Ahead", "Line art: how far ahead of the edge the drawing shows", 3.0)
+    outline_width: _distance("Outline Width", "Thickness of the drawing's outline (0 = none)", 0.025, soft_max=0.3)
+    paper_color: FloatVectorProperty(name="Paper Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(0.95, 0.93, 0.88), update=_sync)
+    ink_color: FloatVectorProperty(name="Ink Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                   default=(0.02, 0.02, 0.025), update=_sync)
 
     # --- hologram ahead of the edge
     holo_enable: BoolProperty(name="Hologram", default=False, update=_sync,
@@ -260,8 +339,12 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
         name="Old Outfit Exit",
         items=(("SHRINK", "Shrink Away", "Sink under the new outfit and disappear (the tutorial's method)"),
                ("FRAGMENTS", "Disintegrate", "Break into flakes that blow away"),
-               ("CHUNKS", "Cast Off", "Break into armour-like chunks that are thrown off and fall")),
+               ("CHUNKS", "Cast Off", "Break into armour-like chunks that are thrown off and fall"),
+               ("SUCK", "Sucked In", "Break into flakes that spiral into the start point on the chest, like a magical "
+                                     "girl's brooch taking the old clothes in; the particles follow them")),
         default="SHRINK", update=_sync)
+    suck_turns: FloatProperty(name="Spiral Turns", default=1.5, min=-10.0, max=10.0, update=_sync,
+                              description="How many times the flakes circle the brooch on their way in")
     exit_timing: EnumProperty(
         name="Exit Timing",
         items=(("EDGE", "With the Edge", "Each part of the old outfit goes where the edge passes"),
@@ -345,6 +428,13 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("COIN", "Coins", "Spinning metal coins (Ready Player One; gold with a gold particle color)"),
                ("SHARD", "Ice Shards", "Splinters of ice"),
                ("EMBER", "Embers", "Small glowing embers (let the wind blow up to make them rise)"),
+               ("NOTE", "Music Notes", "Glowing music notes that stand facing the front and sway as they float off "
+                                       "(for dancing)"),
+               ("CARD", "Playing Cards", "Playing cards that tumble in the wind (X-Men's Gambit)"),
+               ("FEATHER", "Feathers", "Feathers that drift off (the particle color tints them: white for an angel, "
+                                       "black for a black swan)"),
+               ("BAT", "Bats", "Black bats flapping their wings (vampire)"),
+               ("INK", "Ink Drops", "Splashes of black ink (ink wash)"),
                ("OBJECT", "Custom Object", "Copies of any mesh object")),
         default="NONE", update=_sync)
     particle_object: PointerProperty(name="Particle Object", type=bpy.types.Object, poll=_mesh_object,

@@ -43,6 +43,8 @@ class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
                     col.prop_search(s, "origin_bone", arm.data, "bones")
         if s.path == "SPHERE":
             col.prop(s, "space")
+        if s.path == "SPIRAL":
+            col.prop(s, "spiral_pitch")
 
         col = layout.column(align=True)
         col.prop(s, "frame_start")
@@ -124,6 +126,30 @@ class MMDDISPERSE_PT_wire(_Panel, bpy.types.Panel):
         layout.operator("mmd_disperse.add_bloom", icon="LIGHT_SUN")
 
 
+class MMDDISPERSE_PT_ring(_Panel, bpy.types.Panel):
+    bl_label = "Front Ring"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "ring_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.ring_enable
+        layout.prop(s, "ring_style")
+        col = layout.column(align=True)
+        col.prop(s, "ring_size")
+        col.prop(s, "ring_strength")
+        if s.path in ("SPHERE", "SURFACE"):
+            layout.label(text="Only with the sweeps or Spiral Up", icon="INFO")
+        else:
+            layout.label(text="Uses the glow color of the wire layer", icon="INFO")
+
+
 class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
     bl_label = "New Outfit Entrance"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -135,6 +161,18 @@ class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
         layout.prop(s, "entrance")
+        col = layout.column(align=True)
+        col.prop(s, "reactor")
+        sub = col.column(align=True)
+        sub.active = s.reactor
+        sub.prop(s, "reactor_size")
+        col = layout.column(align=True)
+        col.prop(s, "plates")
+        sub = col.column(align=True)
+        sub.active = s.plates
+        sub.prop(s, "plate_size")
+        sub.prop(s, "plate_lift")
+        sub.prop(s, "plate_width")
         if s.entrance == "ASSEMBLE":
             col = layout.column(align=True)
             col.prop(s, "piece_size")
@@ -157,6 +195,37 @@ class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
             col.prop(s, "scale_size")
             col.prop(s, "flip_width")
             layout.label(text="The old outfit turns away on the other side", icon="INFO")
+        elif s.entrance == "EVOLVE":
+            layout.label(text="Uses the glow color and the edge glow strength", icon="INFO")
+        elif s.entrance == "POOF":
+            col = layout.column(align=True)
+            col.prop(s, "smoke_count")
+            col.prop(s, "smoke_size")
+        elif s.entrance == "SHADOW":
+            layout.prop(s, "shadow_dir")
+
+
+class MMDDISPERSE_PT_paint(_Panel, bpy.types.Panel):
+    bl_label = "Line Art and Ink"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "paint_style")
+        if s.paint_style == "NONE" and s.old_surface != "INK":
+            return
+        col = layout.column(align=True)
+        col.prop(s, "paint_width")
+        if s.paint_style == "LINEART":
+            col.prop(s, "sketch_width")
+        col.prop(s, "outline_width")
+        col = layout.column()
+        col.prop(s, "paper_color")
+        col.prop(s, "ink_color")
 
 
 class MMDDISPERSE_PT_undersuit(_Panel, bpy.types.Panel):
@@ -387,6 +456,13 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
             col.prop(s, "chunk_force")
             col.prop(s, "frag_life")
             col.prop(s, "frag_spin")
+        elif s.exit_style == "SUCK":
+            col = layout.column(align=True)
+            col.prop(s, "frag_size")
+            col.prop(s, "frag_subdivide")
+            col.prop(s, "frag_life")
+            col.prop(s, "suck_turns")
+            col.prop(s, "frag_spin")
         else:
             col = layout.column(align=True)
             col.prop(s, "frag_size")
@@ -433,9 +509,9 @@ class MMDDISPERSE_PT_particles(_Panel, bpy.types.Panel):
         col.prop(s, "particle_count")
         col.prop(s, "particle_size")
         col.prop(s, "particle_life")
-        if s.particles == "BUTTERFLY":
+        if s.particles in ("BUTTERFLY", "BAT"):
             col.prop(s, "flap_speed")
-        if s.particles != "OBJECT":
+        if s.particles not in ("OBJECT", "CARD", "BAT", "INK"):  # those have colours of their own
             col = layout.column()
             col.prop(s, "particle_color")
             col.prop(s, "particle_glow")
@@ -445,7 +521,9 @@ classes = (
     MMDDISPERSE_PT_main,
     MMDDISPERSE_PT_edge,
     MMDDISPERSE_PT_wire,
+    MMDDISPERSE_PT_ring,
     MMDDISPERSE_PT_entrance,
+    MMDDISPERSE_PT_paint,
     MMDDISPERSE_PT_undersuit,
     MMDDISPERSE_PT_venom,
     MMDDISPERSE_PT_surface,

@@ -25,7 +25,7 @@ import math
 
 import bpy
 
-VERSION = 12
+VERSION = 13
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
@@ -33,6 +33,7 @@ BASE_GROUP = "MMDDisperse Base"
 RIBBON_GROUP = "MMDDisperse Ribbon"
 PROBE_GROUP = "MMDDisperse Probe"
 VENOM_GROUP = "MMDDisperse Venom"
+RING_GROUP = "MMDDisperse Ring"
 
 ATTR_EDGE = "disperse_edge"
 ATTR_LOCK = "disperse_lock"
@@ -60,6 +61,11 @@ ATTR_START = "mmdd_start"  # scratch: centre of a fly-in piece where it took off
 ATTR_START_NORMAL = "mmdd_start_normal"  # ... and its normal there
 ATTR_FLIP = "mmdd_flip"  # scratch: how far the scale of a face has turned over (0 .. 1)
 ATTR_CELL = "mmdd_cell"  # scratch: the scale a face belongs to
+ATTR_PAINT = "disperse_paint"  # new outfit, line art / ink wash: 1 still a drawing .. 0 in its own colours
+ATTR_SHADOW = "disperse_shadow"  # rising from the shadow: 1 where the outfit is (flattened into) its black shadow
+ATTR_SCREEN = "mmdd_screen"  # the front's panel / TV static (rings.py): x, y across it (-1 .. 1), z the frame
+ATTR_SCREEN_STYLE = "mmdd_screen_style"  # ... 0 the glowing panel, 1 the static
+ATTR_SMOKE = "mmdd_smoke_clear"  # smoke puff (on its instances): 0 dense .. 1 cleared (0 when missing: still dense)
 
 # Wing angles (degrees) of the poses a butterfly cycles through.
 FLAP_ANGLES = (70.0, 45.0, 15.0, -10.0, 15.0, 45.0)
@@ -94,6 +100,15 @@ VENOM_INPUTS = (
     ("Tendril Absorb", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
     ("Strand Life", "NodeSocketFloat", 3.0, 0.0, 1e9, "DISTANCE"),
     ("Venom Material", "NodeSocketMaterial", None, None, None, None),
+)
+
+# Entrances without a front, timed by the mask radius against Clamp Distance (the moment): the evolution flash
+# (the outfits flash in turn, faster and faster) and rising from the shadow (the body sinks into its shadow, the new
+# outfit stands up out of it).
+TIMELINE_INPUTS = (
+    ("Evolve", "NodeSocketBool", False, None, None, None),
+    ("Shadow", "NodeSocketBool", False, None, None, None),
+    ("Shadow Direction", "NodeSocketVector", (0.35, 0.55, -1.0), None, None, None),
 )
 
 # Scales (Mystique): both outfits break into scales that turn over where the edge passes.
@@ -147,7 +162,22 @@ TARGET_INPUTS = FIELD_INPUTS + (
     ("Ghosts", "NodeSocketBool", False, None, None, None),
     ("Ghost Count", "NodeSocketInt", 6, 1, 64, None),
     ("Ghost Distance", "NodeSocketFloat", 5.0, 0.0, 1e9, "DISTANCE"),
-) + VENOM_INPUTS + SCALE_INPUTS
+    ("Reactor", "NodeSocketBool", False, None, None, None),
+    ("Reactor Size", "NodeSocketFloat", 0.6, 0.0, 1e9, "DISTANCE"),
+    ("Plates", "NodeSocketBool", False, None, None, None),
+    ("Plate Size", "NodeSocketFloat", 0.7, 0.0, 1e9, "DISTANCE"),
+    ("Plate Lift", "NodeSocketFloat", 0.25, -1e9, 1e9, "DISTANCE"),
+    ("Plate Width", "NodeSocketFloat", 1.6, 0.0, 1e9, "DISTANCE"),
+    ("Paint Style", "NodeSocketInt", 0, 0, 2, None),
+    ("Paint Width", "NodeSocketFloat", 2.0, 0.0, 1e9, "DISTANCE"),
+    ("Sketch Width", "NodeSocketFloat", 3.0, 0.0, 1e9, "DISTANCE"),
+    ("Outline Width", "NodeSocketFloat", 0.03, 0.0, 1e9, "DISTANCE"),
+    ("Outline Material", "NodeSocketMaterial", None, None, None, None),
+    ("Poof", "NodeSocketBool", False, None, None, None),
+    ("Smoke Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Smoke Size", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
+    ("Smoke Material", "NodeSocketMaterial", None, None, None, None),
+) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS
 
 BASE_INPUTS = FIELD_INPUTS + (
     ("Shrink", "NodeSocketFloat", 0.08, -10000.0, 10000.0, "DISTANCE"),
@@ -169,6 +199,7 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Particles", "NodeSocketBool", False, None, None, None),
     ("Particle Object", "NodeSocketObject", None, None, None, None),
     ("Flap", "NodeSocketBool", False, None, None, None),
+    ("Upright", "NodeSocketBool", False, None, None, None),
     ("Flap Speed", "NodeSocketFloat", 1.5, 0.0, 100.0, None),
     ("Particle Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
     ("Particle Size", "NodeSocketFloat", 0.35, 0.0, 10000.0, "DISTANCE"),
@@ -186,7 +217,11 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Clamp", "NodeSocketBool", False, None, None, None),
     ("Clamp Distance", "NodeSocketFloat", 1000.0, 0.0, 1e9, "DISTANCE"),
     ("Edge Glow", "NodeSocketBool", True, None, None, None),
-) + VENOM_INPUTS + SCALE_INPUTS
+    ("Suck", "NodeSocketBool", False, None, None, None),
+    ("Suck Target", "NodeSocketVector", (0.0, 0.0, 0.0), None, None, None),
+    ("Suck Turns", "NodeSocketFloat", 1.5, -100.0, 100.0, None),
+    ("Brooch Object", "NodeSocketObject", None, None, None, None),
+) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS
 
 # The probe takes these from the modifier it stands in for (the new outfit's finale and fly-in settings are
 # missing on the old outfit's, which does not use them).
@@ -201,6 +236,30 @@ PROBE_INPUTS = FIELD_INPUTS + (
     ("Fly Range", "NodeSocketFloat", 1.6, 0.0, 10000.0, "DISTANCE"),
     ("Clamp", "NodeSocketBool", False, None, None, None),
     ("Clamp Distance", "NodeSocketFloat", 1000.0, 0.0, 1e9, "DISTANCE"),
+)
+
+RING_STYLES = ("MAGIC", "SPARKS", "PANEL", "STATIC", "COMET")
+# The front's decoration (rings.py), in world units: the ring object is not scaled.
+RING_INPUTS = (
+    ("Mask", "NodeSocketObject", None, None, None, None),
+    ("Style", "NodeSocketInt", 0, 0, len(RING_STYLES) - 1, None),
+    ("Start", "NodeSocketVector", (0.0, 0.0, 0.0), None, None, None),
+    ("Axis", "NodeSocketVector", (0.0, 0.0, 1.0), None, None, None),
+    ("U", "NodeSocketVector", (1.0, 0.0, 0.0), None, None, None),
+    ("V", "NodeSocketVector", (0.0, 1.0, 0.0), None, None, None),
+    ("Half U", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Half V", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Span", "NodeSocketFloat", 10.0, 0.0, 1e9, None),
+    ("Lead", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Size", "NodeSocketFloat", 1.0, 0.0, 100.0, None),
+    ("Pitch", "NodeSocketFloat", 2.0, 0.0, 1e9, None),
+    ("Line Width", "NodeSocketFloat", 0.05, 0.0, 1e9, None),
+    ("Star Size", "NodeSocketFloat", 0.35, 0.0, 1e9, None),
+    ("Beat Sync", "NodeSocketBool", False, None, None, None),
+    ("Beat Object", "NodeSocketObject", None, None, None, None),
+    ("Ring Material", "NodeSocketMaterial", None, None, None, None),
+    ("Screen Material", "NodeSocketMaterial", None, None, None, None),
+    ("Star Object", "NodeSocketObject", None, None, None, None),
 )
 
 RIBBON_INPUTS = (
@@ -819,8 +878,36 @@ def build_target_group(field_group, venom_group):
                         b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=-1000, y=-550), 2.0, x=-850, y=-550),
                         x=-700, y=-500)
     holo_width = b.switch("FLOAT", gi.outputs["Hologram"], 0.0, holo_width, x=-550, y=-500)
-    front = b.math("ADD", radius, holo_width, x=-400, y=-500)
+    # ... and as a line drawing with line art
+    sketch_width = b.math("MINIMUM", gi.outputs["Sketch Width"],
+                          b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=-1000, y=-750), 2.0, x=-850, y=-750),
+                          x=-700, y=-700)
+    line_art = b.compare("EQUAL", gi.outputs["Paint Style"], 1.0, x=-700, y=-850)
+    sketch_width = b.switch("FLOAT", line_art, 0.0, sketch_width, x=-550, y=-700)
+    front = b.math("ADD", radius, b.math("MAXIMUM", holo_width, sketch_width, x=-450, y=-600), x=-400, y=-500)
     shown = b.compare("LESS_EQUAL", d, front, x=-700, y=150)
+    # Reactor (Mark 50): the patch of the suit around the start point(s) is there first, glowing and pulsing, and the
+    # suit flows out of it. Its glow fades once the wave is a few patch sizes on.
+    reactor_stat = b.node("GeometryNodeAttributeStatistic", -1300, 1800, data_type="FLOAT", domain="POINT")
+    b.feed(reactor_stat.inputs["Geometry"], geo)
+    b.feed(_enabled(reactor_stat.inputs, "Attribute")[0], field["Path"])
+    core = b.boolean("AND", gi.outputs["Reactor"], b.compare("LESS_THAN", b.math("SUBTRACT", field["Path"],
+                                                                                 reactor_stat.outputs["Min"], x=-1100,
+                                                                                 y=1800),
+                                                             gi.outputs["Reactor Size"], x=-900, y=1800), x=-700,
+                     y=1800)
+    core = b.boolean("AND", core, b.compare("GREATER_THAN", radius, 0.0, x=-900, y=1650), x=-700, y=1650)
+    shown = b.boolean("OR", shown, core, x=-600, y=250)
+    reactor_frame = b.node("GeometryNodeInputSceneTime", -1300, 1500).outputs["Frame"]
+    throb = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY", reactor_frame, 0.8, x=-1100, y=1500), x=-900,
+                                          y=1500), 0.45, 0.55, x=-700, y=1500)
+    reactor_on = b.math("MULTIPLY", b.map_range(radius, 0.0, b.math("MULTIPLY", gi.outputs["Reactor Size"], 0.15,
+                                                                    x=-1100, y=1350), x=-900, y=1350, smooth=True),
+                        b.map_range(radius, b.math("MULTIPLY", gi.outputs["Reactor Size"], 4.0, x=-1100, y=1200),
+                                    b.math("MULTIPLY", gi.outputs["Reactor Size"], 8.0, x=-1100, y=1050), 1.0, 0.0,
+                                    x=-900, y=1150, smooth=True), x=-700, y=1300)
+    reactor_glow = b.switch("FLOAT", core, 0.0, b.math("POWER", b.math("MULTIPLY", throb, reactor_on, x=-500, y=1400),
+                                                       0.125, x=-300, y=1400), x=-100, y=1400)
     # Glitching slices show whichever outfit the dice picked.
     shown = b.switch("BOOLEAN", field["Glitching"], shown, field["New Side"], x=-550, y=150)
     suit = b.delete(geo, b.boolean("NOT", shown, x=-450, y=150), "POINT", x=-450, y=350)
@@ -837,6 +924,7 @@ def build_target_group(field_group, venom_group):
     rim = b.switch("FLOAT", b.compare("GREATER_THAN", d, radius, x=150, y=-50), edge, 0.0, x=300, y=-50)
     rim = b.switch("FLOAT", gi.outputs["Edge Glow"], 0.0, rim, x=450, y=-50)
     rim = b.math("MAXIMUM", rim, field["Flash"], x=600, y=-50)
+    rim = b.math("MAXIMUM", rim, reactor_glow, x=650, y=50)
     # Finale: once the outfit is complete all of it flashes (quick rise, slow fade). finale_t runs 0 -> 1
     # while the mask grows from Finale Start over Finale Length. Stored as flash^(1/8) like the silhouette.
     finale_t = b.math("DIVIDE", b.math("SUBTRACT", radius, gi.outputs["Finale Start"], x=-700, y=-1900),
@@ -1148,6 +1236,21 @@ def build_target_group(field_group, venom_group):
     ghosts = b.switch("GEOMETRY", gathering, None, spun.outputs["Instances"], x=3400, y=9600)
     suit = b.switch("GEOMETRY", gi.outputs["Ghosts"], suit, b.join([real, ghosts], x=3600, y=9000), x=6200, y=1000)
 
+    # --- Evolution flash: no front; the outfits show in turn (the old one by the Base group), faster and faster,
+    # glowing brighter until they are pure light, and from the moment the new one stays.
+    evolve_new, evolve_glow = _evolve(b, p, 4000, 10600)
+    evolved = b.switch("GEOMETRY", evolve_new, None, b.store(geo, ATTR_EDGE, evolve_glow, x=5800, y=10400),
+                       x=6000, y=10400)
+    suit = b.switch("GEOMETRY", gi.outputs["Evolve"], suit, evolved, x=6250, y=1000)
+    # --- Smoke puff: the new outfit is there at the moment, hidden by a puff of smoke.
+    suit = b.switch("GEOMETRY", gi.outputs["Poof"], suit, real, x=6300, y=1000)
+    smoke = _smoke(b, gi, geo, p, me, 4000, 11400)
+    # --- Rising from the shadow: the new outfit stands up out of the black shadow the old one sank into.
+    risen = b.delete(geo, b.compare("LESS_THAN", p, 0.5, x=4000, y=12600), "POINT", x=4200, y=12800)
+    risen = _shadow_place(b, gi, me, risen, geo, anchor, _shadow_amount(b, geo, anchor, p, True, 4000, 13200), 4400,
+                          12800)
+    suit = b.switch("GEOMETRY", gi.outputs["Shadow"], suit, risen, x=6350, y=1000)
+
     # --- Scales (Mystique): the new outfit turns in scale by scale, each scale the second half of its turn (the old
     # outfit shows the first): edge-on to flat, glinting as it goes.
     scales = _flip(b, gi, field_group, geo, d, field["Path"], radius, None, True, gi.outputs["Edge Glow"], -1000,
@@ -1158,6 +1261,33 @@ def build_target_group(field_group, venom_group):
                                                                           y=12200), x=7000, y=12000)
     scales = mark_cut(scales, 7200, 12000)
     suit = b.switch("GEOMETRY", gi.outputs["Scales"], suit, scales, x=6400, y=1000)
+
+    # --- Armour plates (Mark 50): behind the edge the suit's plates rise and settle back one by one.
+    plated = _flip(b, gi, field_group, suit, d, field["Path"], radius, None, True, gi.outputs["Edge Glow"], 6000,
+                   16000, plates=True)
+    suit = b.switch("GEOMETRY", gi.outputs["Plates"], suit, plated, x=6450, y=1000)
+
+    # --- Line art / ink wash: the new outfit shows as a drawing (with line art also ahead of the edge) and takes on its
+    # colours behind the edge like watercolour (materials draw it from disperse_paint: 1 a drawing .. 0 its colours),
+    # outlined by an inverted hull (a copy pushed out along the normals, faces flipped; its material hides front faces)
+    # that thins out as the colour comes.
+    paint = b.map_range(d, b.math("SUBTRACT", radius, gi.outputs["Paint Width"], x=6400, y=13800), radius, x=6600,
+                        y=13800)
+    painted = b.store(suit, ATTR_PAINT, paint, x=6800, y=13600)
+    hull = b.separate(painted, b.compare("GREATER_THAN", b.on_domain(paint, "FACE", x=6800, y=14000), 0.02, x=7000,
+                                         y=14000), "FACE", x=7000, y=13800)[0]
+    hull = b.set_position(hull, b.vmath("SCALE", normal, scale=b.math(
+        "MULTIPLY", gi.outputs["Outline Width"], b.math("MULTIPLY", paint, 3.0, x=7000, y=14400, clamp=True), x=7200,
+        y=14300), x=7400, y=14200), x=7600, y=13800)
+    flip = b.node("GeometryNodeFlipFaces", 7800, 13800)
+    b.feed(flip.inputs["Mesh"], hull)
+    inked = b.node("GeometryNodeSetMaterial", 8000, 13800)
+    b.feed(inked.inputs["Geometry"], flip.outputs["Mesh"])
+    b.feed(inked.inputs["Material"], gi.outputs["Outline Material"])
+    outlined = b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Outline Width"], 0.0, x=8000, y=14100),
+                        painted, b.join([painted, inked.outputs["Geometry"]], x=8200, y=13700), x=8400, y=13600)
+    suit = b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Paint Style"], 0.5, x=6400, y=1300), suit,
+                    outlined, x=6500, y=1000)
 
     # --- Wire layer: keep a band around the boundary.
     t = b.math("SUBTRACT", d, radius, x=-700, y=-500)
@@ -1198,7 +1328,10 @@ def build_target_group(field_group, venom_group):
     mat = b.node("GeometryNodeSetMaterial", 1950, -450)
     b.feed(mat.inputs["Geometry"], tube)
     b.feed(mat.inputs["Material"], gi.outputs["Wire Material"])
-    wire_on = b.boolean("AND", gi.outputs["Wire"], b.boolean("NOT", b.boolean("OR", gi.outputs["Clamp"],
+    timeline = b.boolean("OR", b.boolean("OR", gi.outputs["Evolve"], gi.outputs["Poof"], x=1150, y=100),
+                         gi.outputs["Shadow"], x=1350, y=100)
+    wire_on = b.boolean("AND", gi.outputs["Wire"], b.boolean("NOT", timeline, x=1550, y=100), x=1750, y=150)
+    wire_on = b.boolean("AND", wire_on, b.boolean("NOT", b.boolean("OR", gi.outputs["Clamp"],
                                                                                 gi.outputs["Ghosts"], x=1550, y=-50),
                                                              x=1750, y=-50), x=1950, y=-50)
     wire = b.switch("GEOMETRY", wire_on, None, mat.outputs["Geometry"], x=1950, y=-150)
@@ -1289,8 +1422,142 @@ def build_target_group(field_group, venom_group):
     b.feed(join.inputs["Geometry"], sparkles)
     b.feed(join.inputs["Geometry"], venom)
     b.feed(join.inputs["Geometry"], frames)
+    b.feed(join.inputs["Geometry"], smoke)
     b.feed(go.inputs["Geometry"], join.outputs["Geometry"])
     return ng
+
+
+def _evolve(b, p, x, y):
+    """Evolution flash, p running 0 -> 1 up to the moment: (whether the new outfit shows, the glow stored as
+    glow^(1/8)). After glowing up the outfits show in turn, faster and faster (eleven times), brighter and brighter
+    until both are pure light; from the moment the new one stays and its glow fades. The glow stays soft while the
+    first turns come, so that the outfits' own looks flicker, and only near the end becomes pure light."""
+    u = b.map_range(p, 0.05, 1.0, x=x, y=y)
+    phase = b.math("MULTIPLY_ADD", u, 4.0, b.math("MULTIPLY", b.math("POWER", u, 3.0, x=x, y=y - 300), 7.0, x=x + 200,
+                                                  y=y - 300), x=x + 400, y=y - 150)
+    flips = b.math("FLOOR", phase, x=x + 600, y=y - 150)
+    odd = b.compare("GREATER_THAN", b.math("FRACT", b.math("MULTIPLY", flips, 0.5, x=x + 800, y=y - 150), x=x + 1000,
+                                           y=y - 150), 0.25, x=x + 1200, y=y - 150)
+    turn = b.boolean("AND", b.compare("GREATER_THAN", u, 0.0, x=x + 1000, y=y), odd, x=x + 1400, y=y)
+    new = b.boolean("OR", b.compare("GREATER_EQUAL", p, 1.0, x=x + 1400, y=y + 150), turn, x=x + 1600, y=y)
+    rising = b.math("MULTIPLY_ADD", b.math("POWER", b.map_range(p, 0.1, 1.0, x=x, y=y - 500, smooth=True), 3.0,
+                                           x=x + 200, y=y - 500), 0.97, 0.03, x=x + 400, y=y - 500)
+    glow = b.math("MINIMUM", b.math("MINIMUM", rising, b.map_range(p, 0.0, 0.12, x=x + 400, y=y - 700, smooth=True),
+                                    x=x + 600, y=y - 600),
+                  b.map_range(p, 1.0, 1.15, 1.0, 0.0, x=x + 600, y=y - 800, smooth=True), x=x + 800, y=y - 650)
+    return new, b.math("POWER", glow, 0.125, x=x + 1000, y=y - 650)
+
+
+def _shadow_amount(b, geometry, anchor, p, new, x, y):
+    """Rising from the shadow: how far a vertex is in its shadow (0 standing .. 1 flat on the floor). The old outfit
+    sinks in over the first half of the timeline, the head first; the new one stands up over the second half, the feet
+    first."""
+    rest_z = b.split_xyz(anchor, x=x, y=y)[2]
+    stat = b.node("GeometryNodeAttributeStatistic", x, y - 300, data_type="FLOAT", domain="POINT")
+    b.feed(stat.inputs["Geometry"], geometry)
+    b.feed(_enabled(stat.inputs, "Attribute")[0], rest_z)
+    h = b.math("DIVIDE", b.math("SUBTRACT", rest_z, stat.outputs["Min"], x=x + 200, y=y),
+               b.math("MAXIMUM", stat.outputs["Range"], 1e-4, x=x + 200, y=y - 150), x=x + 400, y=y)
+    if new:
+        start = b.math("MULTIPLY_ADD", h, 0.3, 0.5, x=x + 600, y=y)
+    else:
+        start = b.math("MULTIPLY", b.math("SUBTRACT", 1.0, h, x=x + 600, y=y - 150), 0.3, x=x + 800, y=y - 150)
+    t_ = b.map_range(b.math("DIVIDE", b.math("SUBTRACT", p, start, x=x + 1000, y=y), 0.2, x=x + 1200, y=y), 0.0, 1.0,
+                     x=x + 1400, y=y, smooth=True)
+    return b.math("SUBTRACT", 1.0, t_, x=x + 1600, y=y) if new else t_
+
+
+def _shadow_place(b, gi, me, geometry, whole, anchor, amount, x, y):
+    """`geometry` moved `amount` of the way into its shadow: each vertex slides along the light (Shadow Direction, in
+    the world) down onto the floor (the lowest point of the whole outfit `whole` on the rest pose), and turns black
+    (ATTR_SHADOW)."""
+    rest_z = b.split_xyz(anchor, x=x, y=y)[2]
+    stat = b.node("GeometryNodeAttributeStatistic", x, y - 300, data_type="FLOAT", domain="POINT")
+    b.feed(stat.inputs["Geometry"], whole)
+    b.feed(_enabled(stat.inputs, "Attribute")[0], rest_z)
+    floor = b.math("MULTIPLY_ADD", stat.outputs["Range"], 0.0015, stat.outputs["Min"], x=x + 200, y=y - 300)
+    light = b.vmath("NORMALIZE", _unrotate(b, me, gi.outputs["Shadow Direction"], x, y - 600), x=x + 200, y=y - 600)
+    lx, ly, lz = b.split_xyz(light, x=x + 400, y=y - 600)
+    lz = b.math("MINIMUM", lz, -0.05, x=x + 600, y=y - 700)
+    position = b.node("GeometryNodeInputPosition", x, y - 900).outputs[0]
+    px, py, pz = b.split_xyz(position, x=x + 200, y=y - 900)
+    along = b.math("DIVIDE", b.math("SUBTRACT", floor, pz, x=x + 600, y=y - 900), lz, x=x + 800, y=y - 900)
+    shadow = b.combine(b.math("MULTIPLY_ADD", lx, along, px, x=x + 1000, y=y - 800),
+                       b.math("MULTIPLY_ADD", ly, along, py, x=x + 1000, y=y - 950), floor, x=x + 1200, y=y - 900)
+    spot = b.vmath("ADD", position, b.vmath("SCALE", b.vmath("SUBTRACT", shadow, position, x=x + 1400, y=y - 900),
+                                            scale=amount, x=x + 1600, y=y - 900), x=x + 1800, y=y - 900)
+    moved = b.set_position(geometry, position=spot, x=x + 2000, y=y)
+    moved = b.store(moved, ATTR_SHADOW, amount, x=x + 2200, y=y)
+    sliding = b.math("POWER", b.math("SINE", b.math("MULTIPLY", amount, math.pi, x=x + 2000, y=y - 1200), x=x + 2200,
+                                     y=y - 1200), 0.25, x=x + 2400, y=y - 1200)
+    return b.store(moved, ATTR_EDGE, b.math("MAXIMUM", sliding, b.named_attribute(ATTR_EDGE, "FLOAT", x=x + 2200,
+                                                                                   y=y - 1400)[0], x=x + 2600,
+                                           y=y - 1300), x=x + 2400, y=y)
+
+
+def _smoke(b, gi, geometry, p, me, x, y):
+    """Smoke puff (the ninja transformation): balls of white smoke burst out of the body from the feet up, each by its
+    height on the rest pose, so the cloud has wrapped the body by the moment, when the outfits swap; then it drifts up
+    and spreads out, fading away (the material reads ATTR_SMOKE). Each puff's start and size come from the rest
+    position (an attribute the points carry along), so they stay put while the body dances."""
+    spread = b.node("GeometryNodeDistributePointsOnFaces", x, y, distribute_method="RANDOM")
+    b.feed(spread.inputs["Mesh"], geometry)
+    b.feed(spread.inputs["Density"], gi.outputs["Smoke Density"])
+    spread.inputs["Seed"].default_value = 7
+    size = gi.outputs["Smoke Size"]
+    up = _unrotate(b, me, (0.0, 0.0, 1.0), x + 400, y - 800)
+    box = b.node("GeometryNodeBoundBox", x, y + 300)
+    b.feed(box.inputs["Geometry"], geometry)
+    middle = b.vmath("SCALE", b.vmath("ADD", box.outputs["Min"], box.outputs["Max"], x=x + 200, y=y + 300), scale=0.5,
+                     x=x + 400, y=y + 300)
+    here = b.node("GeometryNodeInputPosition", x + 400, y + 150).outputs[0]
+    rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=x, y=y - 1100)
+    still = b.switch("VECTOR", has_rest, here, rest, x=x + 200, y=y - 1100)
+    rnd = b.white_noise(b.vmath("SCALE", still, scale=3.1, x=x + 400, y=y - 1250), x=x + 600, y=y - 1250)[0]
+    late = b.white_noise(b.vmath("SCALE", still, scale=7.7, x=x + 400, y=y - 1400), x=x + 600, y=y - 1400)[0]
+    height = b.math("DIVIDE", b.vmath("DOT_PRODUCT", b.vmath("SUBTRACT", still, box.outputs["Min"], x=x + 400,
+                                                             y=y - 1550), up, x=x + 600, y=y - 1550),
+                    b.math("MAXIMUM", b.vmath("DOT_PRODUCT", b.vmath("SUBTRACT", box.outputs["Max"], box.outputs["Min"],
+                                                                     x=x + 400, y=y - 1700), up, x=x + 600,
+                                              y=y - 1700), 1e-4, x=x + 800, y=y - 1700), x=x + 1000, y=y - 1600,
+                    clamp=True)
+    birth = b.math("MULTIPLY_ADD", height, 0.5, b.math("MULTIPLY_ADD", late, 0.15, 0.1, x=x + 1000, y=y - 1400),
+                   x=x + 1200, y=y - 1500)
+    grow = b.map_range(p, birth, b.math("ADD", birth, 0.22, x=x + 1400, y=y - 1550), x=x + 1600, y=y - 1450,
+                       smooth=True)
+    fade = b.map_range(p, 1.02, 1.32, x=x + 400, y=y - 450, smooth=True)
+    rise = b.map_range(p, 0.99, 1.32, x=x + 400, y=y - 600, smooth=True)
+    away = b.vmath("SCALE", b.vmath("SUBTRACT", here, middle, x=x + 600, y=y + 200),
+                   scale=b.math("MULTIPLY_ADD", fade, 0.3, b.math("MULTIPLY", grow, 0.35, x=x + 400, y=y + 50),
+                                x=x + 600, y=y + 50), x=x + 800, y=y + 150)
+    out = b.vmath("ADD", b.vmath("SCALE", spread.outputs["Normal"], scale=b.math(
+        "MULTIPLY", b.math("MULTIPLY", size, 1.1, x=x + 600, y=y - 300), grow, x=x + 800, y=y - 300), x=x + 1000,
+        y=y - 300), b.vmath("SCALE", up, scale=b.math("MULTIPLY", size, rise, x=x + 800, y=y - 600), x=x + 1000,
+                            y=y - 600), x=x + 1200, y=y - 450)
+    out = b.vmath("ADD", out, away, x=x + 1300, y=y - 300)
+    puffs = b.set_position(spread.outputs["Points"], out, x=x + 1400, y=y)
+    scale = b.math("MULTIPLY", b.math("MULTIPLY", size, b.math("MULTIPLY_ADD", rnd, 1.0, 0.6, x=x + 1600, y=y - 900),
+                                      x=x + 1800, y=y - 800),
+                   b.math("MULTIPLY", grow, b.math("MULTIPLY_ADD", fade, 0.5, 1.0, x=x + 1400, y=y - 650), x=x + 1600,
+                          y=y - 600), x=x + 2000, y=y - 700)
+    ball = b.node("GeometryNodeMeshIcoSphere", x + 1400, y + 300)
+    ball.inputs["Radius"].default_value = 1.0
+    ball.inputs["Subdivisions"].default_value = 2
+    smooth = b.node("GeometryNodeSetShadeSmooth", x + 1600, y + 300)
+    b.feed(smooth.inputs[0], ball.outputs["Mesh"])
+    material = b.node("GeometryNodeSetMaterial", x + 1800, y + 300)
+    b.feed(material.inputs["Geometry"], smooth.outputs[0])
+    b.feed(material.inputs["Material"], gi.outputs["Smoke Material"])
+    cloud = b.node("GeometryNodeInstanceOnPoints", x + 2200, y)
+    b.feed(cloud.inputs["Points"], puffs)
+    b.feed(cloud.inputs["Instance"], material.outputs["Geometry"])
+    b.feed(cloud.inputs["Scale"], scale)
+    puffing = b.boolean("AND", gi.outputs["Poof"], b.boolean("AND", b.compare("GREATER_THAN", p, 0.1, x=x + 2000,
+                                                                              y=y + 300),
+                                                             b.compare("LESS_THAN", p, 1.32, x=x + 2000, y=y + 150),
+                                                             x=x + 2200, y=y + 250), x=x + 2400, y=y + 250)
+    clearing = b.store(cloud.outputs["Instances"], ATTR_SMOKE, fade, domain="INSTANCE", x=x + 2400, y=y)
+    return b.switch("GEOMETRY", puffing, None, clearing, x=x + 2600, y=y)
 
 
 def _fly(b, gi, t, normal, seed, rnd, wind, me, x, y):
@@ -1368,7 +1635,7 @@ def _scale_cells(b, anchor, size, x, y):
     return key, cell, site
 
 
-def _flip(b, gi, field_group, geometry, d, path, radius, keep, new, glow, x, y):
+def _flip(b, gi, field_group, geometry, d, path, radius, keep, new, glow, x, y, plates=False):
     """Scales (Mystique): `geometry` cut into scales (_scale_cells) that turn over where the edge passes, while it moves
     Flip Width on, about an axis across the way the wave runs (`path`, the clean distance along it), popping up off
     the surface so they clear it. The old outfit shows the first half of the turn (flat to edge-on, then it is gone),
@@ -1380,10 +1647,13 @@ def _flip(b, gi, field_group, geometry, d, path, radius, keep, new, glow, x, y):
     or the arrival distance of the vertex nearest to it), the same in both outfits whatever else the scale holds.
     Measured on the posed body (Use Rest Position off) it is the mean distance of its faces instead. Scales are only
     timed in a band around the edge (on a copy of it; farther away a face is simply before or behind the edge) and
-    only the turning ones are cut out of the mesh."""
-    size = gi.outputs["Scale Size"]
+    only the turning ones are cut out of the mesh.
+
+    With `plates` (armour plates, Mark 50) nothing turns over: behind the edge each plate (Plate Size) rises off the
+    surface by Plate Lift, tilting a little, and settles back while the edge moves Plate Width on; nothing goes."""
+    size = gi.outputs["Plate Size" if plates else "Scale Size"]
     # (the width grows in with the radius, so nothing turns before the edge sets off)
-    width = b.math("MAXIMUM", b.math("MINIMUM", gi.outputs["Flip Width"],
+    width = b.math("MAXIMUM", b.math("MINIMUM", gi.outputs["Plate Width" if plates else "Flip Width"],
                                      b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=x - 400, y=y - 1300), 2.0,
                                             x=x - 200, y=y - 1300), x=x, y=y - 1250), 1e-4, x=x + 200, y=y - 1250)
     # The band: a scale reaches about one and a half scale sizes from its site, so a face farther than this from the
@@ -1428,7 +1698,8 @@ def _flip(b, gi, field_group, geometry, d, path, radius, keep, new, glow, x, y):
                                                                              y=y - 2450), x=x + 2600, y=y - 2300)
     turned = b.math("MULTIPLY_ADD", b.math("SUBTRACT", radius, b.math("ADD", timing, jitter, x=x + 2600, y=y - 1700),
                                            x=x + 2800, y=y - 1700),
-                    b.math("DIVIDE", 1.0, width, x=x + 2800, y=y - 1900), 0.5, x=x + 3000, y=y - 1750, clamp=True)
+                    b.math("DIVIDE", 1.0, width, x=x + 2800, y=y - 1900), 0.0 if plates else 0.5, x=x + 3000,
+                    y=y - 1750, clamp=True)
     timed = b.store(band, ATTR_FLIP, turned, "FLOAT", "FACE", x=x + 3000, y=y + 300)
     # Back on the whole mesh (never cut here: no seams on the faces that do not turn): a band face is the how-manieth
     # band face it is in the copy; the others are wholly before (0) or behind (1) the edge.
@@ -1444,7 +1715,11 @@ def _flip(b, gi, field_group, geometry, d, path, radius, keep, new, glow, x, y):
     staged = b.store(geometry, ATTR_FLIP, b.switch("FLOAT", near, elsewhere, _enabled(from_band.outputs, "Value")[0],
                                                    x=x + 3400, y=y + 500), "FLOAT", "FACE", x=x + 3600, y=y + 200)
     turn = b.named_attribute(ATTR_FLIP, "FLOAT", x=x + 3200, y=y - 300)[0]
-    if new:  # the second half: edge-on to flat
+    if plates:  # nothing goes; the plates in the band rise and settle
+        gone = False
+        moving = b.boolean("AND", b.compare("GREATER_THAN", turn, 0.0, x=x + 3400, y=y - 300),
+                           b.compare("LESS_THAN", turn, 1.0, x=x + 3400, y=y - 450), x=x + 3600, y=y - 400)
+    elif new:  # the second half: edge-on to flat
         gone = b.compare("LESS_EQUAL", turn, 0.5, x=x + 3400, y=y - 300)
         moving = b.compare("LESS_THAN", turn, 1.0, x=x + 3400, y=y - 450)
     else:  # the first half: flat to edge-on
@@ -1453,19 +1728,22 @@ def _flip(b, gi, field_group, geometry, d, path, radius, keep, new, glow, x, y):
                          x=x + 3600, y=y - 300)
         moving = b.boolean("AND", b.compare("GREATER_THAN", turn, 0.0, x=x + 3400, y=y - 450), loose,
                            x=x + 3600, y=y - 450)
-    left = b.delete(staged, gone, "FACE", x=x + 3600, y=y)
-    # (loose vertices and edges, without faces, come and go with the edge like the grown outfit's)
-    loose = b.compare("LESS_THAN", b.node("GeometryNodeInputMeshVertexNeighbors", x + 3400, y + 500).outputs[
-        "Face Count"], 0.5, x=x + 3600, y=y + 500)
-    behind = b.compare("GREATER_THAN", radius, d, x=x + 3600, y=y + 650)
-    left = b.delete(left, b.boolean("AND", loose, b.boolean("NOT", behind, x=x + 3800, y=y + 650) if new else behind,
-                                    x=x + 4000, y=y + 550), "POINT", x=x + 3800, y=y + 300)
-    plates, still = b.separate(left, moving, "FACE", x=x + 3800, y=y)
+    if plates:
+        left = staged
+    else:
+        left = b.delete(staged, gone, "FACE", x=x + 3600, y=y)
+        # (loose vertices and edges, without faces, come and go with the edge like the grown outfit's)
+        loose = b.compare("LESS_THAN", b.node("GeometryNodeInputMeshVertexNeighbors", x + 3400, y + 500).outputs[
+            "Face Count"], 0.5, x=x + 3600, y=y + 500)
+        behind = b.compare("GREATER_THAN", radius, d, x=x + 3600, y=y + 650)
+        left = b.delete(left, b.boolean("AND", loose, b.boolean("NOT", behind, x=x + 3800, y=y + 650) if new else
+                                        behind, x=x + 4000, y=y + 550), "POINT", x=x + 3800, y=y + 300)
+    turning, still = b.separate(left, moving, "FACE", x=x + 3800, y=y)
     # The mesh's own seams (PMX splits it at every UV seam) are welded first, so a scale turns as one plate, then the
     # turning part is cut into its scales: an edge is a cut where its faces belong to different cells. Parts that only
     # share a cell (an arm and the side of the body) stay apart and turn on their own.
     weld = b.node("GeometryNodeMergeByDistance", x + 4000, y + 200)
-    b.feed(weld.inputs["Geometry"], plates)
+    b.feed(weld.inputs["Geometry"], turning)
     b.feed(weld.inputs["Distance"], b.math("MULTIPLY", size, 0.001, x=x + 3800, y=y + 300))
     face_sq = b.on_domain(b.math("MULTIPLY", key, key, x=x + 3600, y=y - 700), "FACE", x=x + 3800, y=y - 700)
     mean_key = b.on_domain(key, "EDGE", x=x + 3800, y=y - 550)
@@ -1500,15 +1778,26 @@ def _flip(b, gi, field_group, geometry, d, path, radius, keep, new, glow, x, y):
     half_turn = b.math("MULTIPLY", part, math.pi, x=x + 5200, y=y - 1900)
     angle = b.math("SUBTRACT", half_turn, math.pi, x=x + 5400, y=y - 2000) if new else half_turn
     rise = b.math("SINE", half_turn, x=x + 5400, y=y - 1850)
+    height = b.math("MULTIPLY", size, 0.5, x=x + 5600, y=y - 2100)
+    if plates:  # a slight tilt this way or that and a lift, each plate its own
+        plate_rnd = b.white_noise(b.vmath("SCALE", center, scale=2.17, x=x + 5000, y=y - 2300), x=x + 5200,
+                                  y=y - 2300)[0]
+        angle = b.math("MULTIPLY", rise, b.math("MULTIPLY_ADD", plate_rnd, 0.6, -0.3, x=x + 5400, y=y - 2300),
+                       x=x + 5600, y=y - 2250)
+        height = b.math("MULTIPLY", gi.outputs["Plate Lift"], b.math("MULTIPLY_ADD", plate_rnd, 0.6, 0.7, x=x + 5400,
+                                                                     y=y - 2450), x=x + 5600, y=y - 2400)
     turned_pos = b.rotate(position, center, axis, angle, x=x + 6600, y=y - 1200)
-    lift = b.vmath("SCALE", up, scale=b.math("MULTIPLY", rise, b.math("MULTIPLY", size, 0.5, x=x + 5600, y=y - 2100),
-                                             x=x + 5800, y=y - 2000), x=x + 6000, y=y - 2000)
-    plates = b.set_position(split.outputs["Mesh"], position=b.vmath("ADD", turned_pos, lift, x=x + 6800, y=y - 1300),
-                            x=x + 7000, y=y)
+    lift = b.vmath("SCALE", up, scale=b.math("MULTIPLY", rise, height, x=x + 5800, y=y - 2000), x=x + 6000, y=y - 2000)
+    moved_plates = b.set_position(split.outputs["Mesh"], position=b.vmath("ADD", turned_pos, lift, x=x + 6800,
+                                                                           y=y - 1300), x=x + 7000, y=y)
     # a glint as it stands edge-on
     glint = b.math("MULTIPLY", b.math("POWER", rise, 4.0, x=x + 6600, y=y - 2000), 0.82, x=x + 6800, y=y - 2000)
-    plates = b.store(plates, ATTR_EDGE, b.switch("FLOAT", glow, 0.0, glint, x=x + 7000, y=y - 2000), x=x + 7200, y=y)
-    joined = b.join([still, plates], x=x + 7400, y=y)
+    glint = b.switch("FLOAT", glow, 0.0, glint, x=x + 7000, y=y - 2000)
+    if plates:  # (on top of the rim the outfit already has)
+        glint = b.math("MAXIMUM", glint, b.named_attribute(ATTR_EDGE, "FLOAT", x=x + 7000, y=y - 2200)[0], x=x + 7200,
+                       y=y - 2100)
+    moved = b.store(moved_plates, ATTR_EDGE, glint, x=x + 7200, y=y)
+    joined = b.join([still, moved], x=x + 7400, y=y)
     return _remove_attributes(b, joined, (ATTR_FLIP,), x + 7600, y)
 
 
@@ -1565,6 +1854,36 @@ def build_base_group(field_group, venom_group):
         moved = b.set_position(geo, selection=has_launch, position=launch, x=x, y=y - 150)
         return b.switch("GEOMETRY", gi.outputs["Leave Behind"], geo, moved, x=x + 200, y=y)
 
+    # Sucked in (a magical girl's brooch): the target is the body's vertex nearest to Suck Target on the rest pose,
+    # where it is now (it moves with the dance). Pieces spiral into it about the world's up, closing in faster and
+    # faster.
+    on_rest = b.set_position(gi.outputs["Geometry"], position=anchor, x=-1500, y=-2400)
+    nearest = b.node("GeometryNodeSampleNearest", -1300, -2400, domain="POINT")
+    b.feed(nearest.inputs["Geometry"], on_rest)
+    b.feed(nearest.inputs["Sample Position"], gi.outputs["Suck Target"])
+    target_now = b.node("GeometryNodeSampleIndex", -1100, -2400, data_type="FLOAT_VECTOR", domain="POINT")
+    b.feed(target_now.inputs["Geometry"], gi.outputs["Geometry"])
+    b.feed(_enabled(target_now.inputs, "Value")[0], position)
+    b.feed(target_now.inputs["Index"], nearest.outputs["Index"])
+    target = _enabled(target_now.outputs, "Value")[0]
+    up = _unrotate(b, me, (0.0, 0.0, 1.0), -1100, -2650)
+
+    def sucked(start, t, x, y):
+        """Where something that set off from `start` is after `t` (0 .. 1) of its flight into the target."""
+        close = b.math("MULTIPLY", t, t, x=x, y=y - 150)
+        spun = b.rotate(start, target, up, b.math("MULTIPLY", gi.outputs["Suck Turns"],
+                                                  b.math("MULTIPLY", close, 2.0 * math.pi, x=x, y=y - 300),
+                                                  x=x + 200, y=y - 300), x=x + 400, y=y)
+        toward = b.vmath("ADD", target, b.vmath("SCALE", b.vmath("SUBTRACT", spun, target, x=x + 600, y=y),
+                                                scale=b.math("SUBTRACT", 1.0, close, x=x + 600, y=y - 150),
+                                                x=x + 800, y=y), x=x + 1000, y=y)
+        arc = b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY", t, math.pi, x=x + 600, y=y - 300), x=x + 800,
+                                        y=y - 300),
+                     b.math("MULTIPLY", b.vmath("LENGTH", b.vmath("SUBTRACT", start, target, x=x + 600, y=y - 450),
+                                                x=x + 800, y=y - 450), 0.15, x=x + 1000, y=y - 450),
+                     x=x + 1000, y=y - 300)
+        return b.vmath("ADD", toward, b.vmath("SCALE", up, scale=arc, x=x + 1200, y=y - 300), x=x + 1200, y=y)
+
     # --- Shrink away (tutorial): sink under the new outfit, then delete behind the edge.
     inside = b.compare("LESS_EQUAL", d, radius, x=-1200, y=600)
     shrink = b.vmath("SCALE", normal, scale=b.math("MULTIPLY", gi.outputs["Shrink"], -1.0, x=-1200, y=450),
@@ -1616,6 +1935,10 @@ def build_base_group(field_group, venom_group):
     turned = b.rotate(position, center, axis, turn, x=1600, y=-1100)
     flown = b.vmath("ADD", turned, _fly(b, gi, tf, face_normal, seed, rnd, wind, me, x=1200, y=-1600),
                     x=2600, y=-1100)
+    # ... or spiralling into the brooch, each flake tumbling about its centre on the way
+    into = b.vmath("ADD", sucked(center, tf, 1200, -2400), b.vmath("SUBTRACT", turned, center, x=2400, y=-2200),
+                   x=2600, y=-2300)
+    flown = b.switch("VECTOR", gi.outputs["Suck"], flown, into, x=2700, y=-1200)
     flakes = b.set_position(scale.outputs["Geometry"], position=flown, x=2800, y=0)
     # Bright as they break off, fading out; the injected material glow raises this to the 8th power.
     fade = b.math("POWER", b.math("SUBTRACT", 1.0, tf, x=2600, y=-300), 0.25, x=2800, y=-300)
@@ -1685,6 +2008,24 @@ def build_base_group(field_group, venom_group):
     glitched = b.store(glitched, ATTR_EDGE, field["Flash"], x=3600, y=900)
     old = b.switch("GEOMETRY", gi.outputs["Glitch"], old, glitched, x=3600, y=500)
 
+    # --- Timeline entrances. Evolution flash: the old outfit shows whenever the new one does not, glowing (locked parts
+    # stay). Rising from the shadow: it sinks into its shadow over the first half; the locked parts (head, hair) stand
+    # up again with the new outfit over the second half (the new outfit has none).
+    t_p = b.math("DIVIDE", radius, b.math("MAXIMUM", gi.outputs["Clamp Distance"], 1e-4, x=3400, y=6800), x=3600,
+                 y=6800)
+    evolve_new, evolve_glow = _evolve(b, t_p, 3800, 7000)
+    evolved = b.delete(geometry, b.boolean("AND", evolve_new, free, x=5600, y=6800), "FACE", x=5800, y=6800)
+    evolved = b.store(evolved, ATTR_EDGE, evolve_glow, x=6000, y=6800)
+    old = b.switch("GEOMETRY", gi.outputs["Evolve"], old, evolved, x=4650, y=650)
+    sinking = _shadow_amount(b, geometry, anchor, t_p, False, 3800, 7800)
+    rising = _shadow_amount(b, geometry, anchor, t_p, True, 3800, 8400)
+    late = b.compare("GREATER_EQUAL", t_p, 0.5, x=5600, y=8000)
+    amount = b.switch("FLOAT", b.boolean("AND", late, lock, x=5800, y=8100), sinking, rising, x=6000, y=8000)
+    sunk = b.delete(geometry, b.boolean("AND", b.compare("GREATER_EQUAL", t_p, 0.55, x=5600, y=8300), free, x=5800,
+                                        y=8300), "FACE", x=6000, y=8300)
+    sunk = _shadow_place(b, gi, me, sunk, geometry, anchor, amount, 6200, 8000)
+    old = b.switch("GEOMETRY", gi.outputs["Shadow"], old, sunk, x=4660, y=600)
+
     # --- Particles: some faces release a petal / butterfly / custom object where the front passes.
     tp = lifetime(gi.outputs["Particle Flight"], -1800)
     chance = b.math("MULTIPLY", b.node("GeometryNodeInputMeshFaceArea", -800, -2000).outputs[0],
@@ -1706,8 +2047,11 @@ def build_base_group(field_group, venom_group):
     # On the points: rest position, arrival and the stored normal came along from the faces.
     point_normal = b.named_attribute(ATTR_NORMAL, "FLOAT_VECTOR", x=400, y=-1900)[0]
     prnd, prnd_color = b.white_noise(b.vmath("SCALE", anchor, scale=5.13, x=400, y=-2400), x=600, y=-2400)
-    pts = b.set_position(to_points.outputs["Points"],
-                         _fly(b, gi, tp, point_normal, anchor, prnd, wind, me, x=600, y=-2700), x=1800, y=-1600)
+    p_here = b.node("GeometryNodeInputPosition", 1400, -3400).outputs[0]
+    p_flown = b.vmath("ADD", p_here, _fly(b, gi, tp, point_normal, anchor, prnd, wind, me, x=600, y=-2700),
+                      x=1600, y=-3400)
+    pts = b.set_position(to_points.outputs["Points"], position=b.switch(
+        "VECTOR", gi.outputs["Suck"], p_flown, sucked(p_here, tp, 200, -3700), x=1700, y=-3500), x=1800, y=-1600)
     pts = _remove_attributes(b, pts, (ATTR_NORMAL, ATTR_PICK), 2000, -1600)
 
     # Petals tumble; butterflies stay roughly upright and turn slowly.
@@ -1723,7 +2067,16 @@ def build_base_group(field_group, venom_group):
                                b.math("MULTIPLY", gi.outputs["Spin"],
                                       b.math("MULTIPLY", tp, 0.3, x=1600, y=-2750), x=1700, y=-2700),
                                x=1800, y=-2700), x=2000, y=-2500)
-    rotation = b.switch("VECTOR", gi.outputs["Flap"], tumble, upright, x=2200, y=-2200)
+    # Notes stand facing the front and only sway a little (each at its own pace).
+    sway_frame = b.node("GeometryNodeInputSceneTime", 1400, -2900).outputs["Frame"]
+    sway = b.combine(b.math("MULTIPLY_ADD", cx, 0.5, -0.25, x=1800, y=-2850),
+                     b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY_ADD", sway_frame, 0.15,
+                                                              b.math("MULTIPLY", prnd, two_pi, x=1400, y=-3050),
+                                                              x=1600, y=-3000), x=1700, y=-3000), 0.25,
+                            x=1800, y=-3000),
+                     b.math("MULTIPLY_ADD", cy, 1.2, -0.6, x=1800, y=-3150), x=2000, y=-2850)
+    rotation = b.switch("VECTOR", gi.outputs["Upright"], tumble, sway, x=2100, y=-2050)
+    rotation = b.switch("VECTOR", gi.outputs["Flap"], rotation, upright, x=2200, y=-2200)
     grow = b.math("MINIMUM", b.map_range(tp, 0.0, 0.05, 0.2, 1.0, x=1800, y=-2900),
                   b.map_range(tp, 0.7, 1.0, 1.0, 0.0, x=1800, y=-3100), x=2000, y=-3000)
     size = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Particle Size"], grow, x=2200, y=-3000),
@@ -1833,7 +2186,30 @@ def build_base_group(field_group, venom_group):
     crystals = _remove_attributes(b, c_on.outputs["Instances"], (ATTR_PICK, ATTR_NORMAL), 6000, -3800)
     crystals = b.switch("GEOMETRY", gi.outputs["Crystals"], None, crystals, x=6400, y=-3800)
     tidy = b.node("GeometryNodeRemoveAttribute", 4600, 0)
-    b.feed(tidy.inputs["Geometry"], b.join([old, particles, venom, crystals], x=4400, y=-150))
+    # The brooch twinkles while the old outfit flies into it.
+    brooch_pt = b.node("GeometryNodePoints", 5200, -5400)
+    brooch_pt.inputs["Count"].default_value = 1
+    b.feed(brooch_pt.inputs["Position"], target)
+    brooch_shape = b.node("GeometryNodeObjectInfo", 5200, -5700, transform_space="ORIGINAL")
+    b.feed(brooch_shape.inputs["Object"], gi.outputs["Brooch Object"])
+    twinkle_frame = b.node("GeometryNodeInputSceneTime", 5000, -6000).outputs["Frame"]
+    shine = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Particle Size"], 2.5, x=5200, y=-6000),
+                   b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY", twinkle_frame, 0.7, x=5200, y=-6150),
+                                                 x=5400, y=-6150), 0.3, 0.8, x=5600, y=-6150), x=5800, y=-6050)
+    shine = b.math("MULTIPLY", shine, b.math("MULTIPLY_ADD", beat, 0.5, 1.0, x=5800, y=-6250), x=6000, y=-6100)
+    brooch = b.node("GeometryNodeInstanceOnPoints", 5600, -5400)
+    b.feed(brooch.inputs["Points"], brooch_pt.outputs["Geometry"])
+    b.feed(brooch.inputs["Instance"], brooch_shape.outputs["Geometry"])
+    b.feed(brooch.inputs["Rotation"], b.combine(math.pi / 2, 0.0, 0.0, x=5400, y=-5600))
+    b.feed(brooch.inputs["Scale"], shine)
+    shining = b.boolean("AND", gi.outputs["Suck"], b.boolean("AND", b.compare("GREATER_THAN", radius, 0.0, x=5600,
+                                                                              y=-5900),
+                                                             b.compare("LESS_THAN", radius, gi.outputs["Reach"],
+                                                                       x=5600, y=-6050), x=5800, y=-5950),
+                        x=6000, y=-5900)
+    brooch = b.switch("GEOMETRY", shining, None, _world_instances(b, brooch.outputs["Instances"], me, 5800, -5400),
+                      x=6800, y=-5400)
+    b.feed(tidy.inputs["Geometry"], b.join([old, particles, venom, crystals, brooch], x=4400, y=-150))
     tidy.inputs["Name"].default_value = ATTR_AGE
     b.feed(go.inputs["Geometry"], tidy.outputs["Geometry"])
     return ng
@@ -1891,6 +2267,269 @@ def ensure_ribbon_group():
     if not _is_current(RIBBON_GROUP):
         build_ribbon_group()
     return bpy.data.node_groups[RIBBON_GROUP]
+
+
+def _circle(b, radius, resolution, x, y):
+    n = b.node("GeometryNodeCurvePrimitiveCircle", x, y, mode="RADIUS")
+    n.inputs["Resolution"].default_value = resolution
+    b.feed(n.inputs["Radius"], radius)
+    return n.outputs["Curve"]
+
+
+def _star(b, points, inner, outer, x, y):
+    n = b.node("GeometryNodeCurveStar", x, y)
+    n.inputs["Points"].default_value = points
+    b.feed(n.inputs["Inner Radius"], inner)
+    b.feed(n.inputs["Outer Radius"], outer)
+    return n.outputs["Curve"]
+
+
+def _tube(b, curve, radius, material, x, y):
+    """A curve as a thin square tube of `radius` with `material`. (The curve's own radius is set to 1 first: curve
+    primitives have none, and Blender 4 sweeps a missing radius as a tiny one.)"""
+    unit = b.node("GeometryNodeSetCurveRadius", x - 200, y)
+    b.feed(unit.inputs["Curve"], curve)
+    unit.inputs["Radius"].default_value = 1.0
+    profile = _circle(b, radius, 4, x - 200, y - 200)
+    n = b.node("GeometryNodeSetMaterial", x + 200, y)
+    b.feed(n.inputs["Geometry"], b.curve_to_mesh(unit.outputs["Curve"], profile, x=x, y=y))
+    b.feed(n.inputs["Material"], material)
+    return n.outputs["Geometry"]
+
+
+def build_ring_group():
+    """Modifier of the front's decoration (rings.py), drawn at the front of a sweep as it crosses the body: a magic
+    circle with runes (Kamen Rider Wizard), a ring of spinning sparks (Doctor Strange's portal), a glowing panel
+    (Kamen Rider Ex-Aid), a sheet of TV static (WandaVision), or a comet of sparkles circling the body at the front of
+    the spiral (Cinderella). Drawn in the plane of the front (u, v) and set at Start + Axis * (mask radius - Lead); it
+    comes in as the front sets off and goes once it has crossed the body (Span). Glows in the glow colour (ATTR_EDGE
+    carries how much), brighter on a beat."""
+    ng = _new_group(RING_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in RING_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -2600, 0)
+    go = b.node("NodeGroupOutput", 4600, 0)
+
+    info = b.node("GeometryNodeObjectInfo", -2400, 800, transform_space="RELATIVE")
+    b.feed(info.inputs["Object"], gi.outputs["Mask"])
+    radius = b.vmath("DOT_PRODUCT", info.outputs["Scale"], (1 / 3, 1 / 3, 1 / 3), x=-2200, y=800)
+    s = b.math("SUBTRACT", radius, gi.outputs["Lead"], x=-2000, y=800)
+    span = b.math("MAXIMUM", gi.outputs["Span"], 1e-4, x=-2000, y=650)
+    fade_in = b.map_range(s, 0.0, b.math("MULTIPLY", span, 0.04, x=-1800, y=600), x=-1600, y=800, smooth=True)
+    end = b.math("MULTIPLY", span, 1.06, x=-1800, y=450)
+    fade_out = b.map_range(s, span, end, 1.0, 0.0, x=-1600, y=600, smooth=True)
+    vis = b.math("MULTIPLY", fade_in, fade_out, x=-1400, y=700)
+    on = b.boolean("AND", b.compare("GREATER_THAN", s, 0.0, x=-1400, y=450),
+                   b.compare("LESS_THAN", s, end, x=-1400, y=300), x=-1200, y=400)
+    beat = b.node("GeometryNodeObjectInfo", -2400, 300, transform_space="ORIGINAL")
+    b.feed(beat.inputs["Object"], gi.outputs["Beat Object"])
+    pulse = b.switch("FLOAT", gi.outputs["Beat Sync"], 0.0, b.split_xyz(beat.outputs["Location"], x=-2200, y=300)[0],
+                     x=-2000, y=300)
+    glow = b.math("MULTIPLY", vis, b.math("MULTIPLY_ADD", pulse, 0.6, 1.0, x=-1400, y=150), x=-1200, y=200)
+    big = b.math("MAXIMUM", gi.outputs["Half U"], gi.outputs["Half V"], x=-2200, y=0)
+    margin = b.math("MULTIPLY", big, 0.08, x=-2000, y=0)
+    size = gi.outputs["Size"]
+    grow = b.math("MULTIPLY_ADD", fade_in, 0.3, 0.7, x=-1400, y=0)  # it opens up as it appears
+    ring_r = b.math("MULTIPLY", b.math("MULTIPLY", b.math("ADD", big, margin, x=-1800, y=0), size, x=-1600, y=0),
+                    grow, x=-1200, y=0)
+    hu = b.math("MULTIPLY", b.math("MULTIPLY", b.math("ADD", gi.outputs["Half U"], margin, x=-1800, y=-200), size,
+                                   x=-1600, y=-200), grow, x=-1200, y=-200)
+    hv = b.math("MULTIPLY", b.math("MULTIPLY", b.math("ADD", gi.outputs["Half V"], margin, x=-1800, y=-400), size,
+                                   x=-1600, y=-400), grow, x=-1200, y=-400)
+    frame = b.node("GeometryNodeInputSceneTime", -2400, -600).outputs["Frame"]
+    width = gi.outputs["Line Width"]
+    ring_mat, screen_mat = gi.outputs["Ring Material"], gi.outputs["Screen Material"]
+    z_axis = (0.0, 0.0, 1.0)
+
+    # --- Magic circle: four circles, a hexagram, runes between the outer circles; the inner star turns the other way.
+    circles = [_circle(b, b.math("MULTIPLY", ring_r, f, x=-800, y=1600 - 200 * i), 128, -600, 1600 - 200 * i)
+               for i, f in enumerate((1.0, 0.94, 0.66, 0.6))]
+    hexagram = _star(b, 6, b.math("MULTIPLY", ring_r, 0.94 * 0.5774, x=-800, y=800),
+                     b.math("MULTIPLY", ring_r, 0.94, x=-800, y=650), -600, 800)
+    octagram = _star(b, 8, b.math("MULTIPLY", ring_r, 0.45, x=-800, y=450),
+                     b.math("MULTIPLY", ring_r, 0.6, x=-800, y=300), -600, 450)
+    ticks = b.node("GeometryNodeMeshCircle", -600, 2400)
+    ticks.inputs["Vertices"].default_value = 36
+    b.feed(ticks.inputs["Radius"], b.math("MULTIPLY", ring_r, 0.97, x=-800, y=2400))
+    glyph_size = b.math("MULTIPLY", ring_r, 0.022, x=-800, y=2200)
+    glyph = _star(b, 3, b.math("MULTIPLY", glyph_size, 0.35, x=-600, y=2200), glyph_size, -400, 2200)
+    runes = b.node("GeometryNodeInstanceOnPoints", -200, 2400)
+    b.feed(runes.inputs["Points"], ticks.outputs["Mesh"])
+    b.feed(runes.inputs["Instance"], glyph)
+    b.feed(runes.inputs["Rotation"], b.combine(0.0, 0.0, b.math(
+        "MULTIPLY", b.node("GeometryNodeInputIndex", -600, 2000).outputs[0], 2.39996, x=-400, y=2000), x=-200, y=2000))
+    realized = b.node("GeometryNodeRealizeInstances", 0, 2400)
+    b.feed(realized.inputs["Geometry"], runes.outputs["Instances"])
+    position = b.node("GeometryNodeInputPosition", 0, 1300).outputs[0]
+    outer = b.set_position(b.join(circles + [hexagram, realized.outputs["Geometry"]], x=200, y=1600),
+                           position=b.rotate(position, (0.0, 0.0, 0.0), z_axis,
+                                             b.math("MULTIPLY", frame, 0.012, x=0, y=1150), x=200, y=1300),
+                           x=400, y=1600)
+    inner = b.set_position(octagram, position=b.rotate(position, (0.0, 0.0, 0.0), z_axis,
+                                                        b.math("MULTIPLY", frame, -0.02, x=0, y=1000), x=200, y=1000),
+                           x=400, y=800)
+    magic = _tube(b, b.join([outer, inner], x=600, y=1200), width, ring_mat, 800, 1200)
+
+    # --- Spark ring: a fiery rim and sparks thrown off along it as it spins.
+    rim = _tube(b, _circle(b, ring_r, 96, -600, -800), b.math("MULTIPLY", width, 1.3, x=-800, y=-1000), ring_mat,
+                -400, -800)
+    sparks = b.node("GeometryNodePoints", -600, -1400)
+    sparks.inputs["Count"].default_value = 320
+    k = b.node("GeometryNodeInputIndex", -1200, -1500).outputs[0]
+    rnd, rnd_color = b.white_noise(b.combine(k, 0.71, 0.13, x=-1000, y=-1500), x=-800, y=-1500)
+    r1, r2, r3 = b.split_xyz(rnd_color, x=-600, y=-1700)
+    theta = b.math("MULTIPLY_ADD", k, 2.0 * math.pi / 320.0, b.math("MULTIPLY", frame, 0.05, x=-1000, y=-1800),
+                   x=-800, y=-1800)
+    age = b.math("FRACT", b.math("MULTIPLY_ADD", frame, 0.07, rnd, x=-1000, y=-2000), x=-800, y=-2000)
+    cos_t, sin_t = b.math("COSINE", theta, x=-600, y=-1900), b.math("SINE", theta, x=-600, y=-2050)
+    out = b.math("MULTIPLY", ring_r, b.math("ADD", b.math("MULTIPLY_ADD", r1, 0.04, 0.98, x=-600, y=-2200),
+                                            b.math("MULTIPLY", age, 0.05, x=-600, y=-2350), x=-400, y=-2250),
+                 x=-200, y=-2250)
+    travel = b.math("MULTIPLY", b.math("MULTIPLY", age, ring_r, x=-400, y=-2450),
+                    b.math("MULTIPLY_ADD", r2, 0.1, 0.05, x=-400, y=-2600), x=-200, y=-2500)
+    spot = b.vmath("ADD", b.combine(b.math("MULTIPLY", cos_t, out, x=0, y=-1900), b.math("MULTIPLY", sin_t, out, x=0,
+                                                                                         y=-2050),
+                                    b.math("MULTIPLY", b.math("SUBTRACT", r3, 0.5, x=-200, y=-2700),
+                                           b.math("MULTIPLY", ring_r, 0.03, x=-200, y=-2850), x=0, y=-2750),
+                                    x=200, y=-2000),
+                   b.vmath("SCALE", b.combine(b.math("MULTIPLY", sin_t, -1.0, x=0, y=-2300), cos_t, 0.0, x=200,
+                                              y=-2300), scale=travel, x=400, y=-2300), x=600, y=-2100)
+    b.feed(sparks.inputs["Position"], spot)
+    streak = b.node("GeometryNodeMeshGrid", -200, -1100)
+    for name, value in (("Size X", 1.0), ("Size Y", 1.0), ("Vertices X", 2), ("Vertices Y", 2)):
+        streak.inputs[name].default_value = value
+    left = b.math("SUBTRACT", 1.0, age, x=200, y=-2600)
+    streaks = b.node("GeometryNodeInstanceOnPoints", 800, -1400)
+    b.feed(streaks.inputs["Points"], sparks.outputs["Geometry"])
+    b.feed(streaks.inputs["Instance"], streak.outputs["Mesh"])
+    b.feed(streaks.inputs["Rotation"], b.combine(0.0, 0.0, b.math("ADD", theta, math.pi / 2, x=600, y=-2500),
+                                                 x=800, y=-2500))
+    b.feed(streaks.inputs["Scale"], b.combine(
+        b.math("MULTIPLY", b.math("MULTIPLY", ring_r, 0.05, x=400, y=-2700), b.math("MULTIPLY", left,
+                                                                                     b.math("ADD", r2, 0.5, x=400,
+                                                                                            y=-2950), x=600, y=-2900),
+               x=800, y=-2750),
+        b.math("MULTIPLY", b.math("MULTIPLY", width, 1.6, x=600, y=-3100), left, x=800, y=-3050), 1.0,
+        x=1000, y=-2800))
+    flying = b.node("GeometryNodeRealizeInstances", 1000, -1400)
+    b.feed(flying.inputs["Geometry"], streaks.outputs["Instances"])
+    spark_mat = b.node("GeometryNodeSetMaterial", 1200, -1400)
+    b.feed(spark_mat.inputs["Geometry"], flying.outputs["Geometry"])
+    b.feed(spark_mat.inputs["Material"], ring_mat)
+    spark_ring = b.join([rim, spark_mat.outputs["Geometry"]], x=1400, y=-1000)
+
+    def sheet(scale, style, x, y):
+        """A filled rectangle across the front (the screen material draws on it from ATTR_SCREEN: x and y across it in
+        -1 .. 1, z the frame) with its outline."""
+        quad = b.node("GeometryNodeCurvePrimitiveQuadrilateral", x, y, mode="RECTANGLE")
+        half_u, half_v = (b.math("MULTIPLY", h, scale, x=x - 200, y=y - 200 * i) for i, h in enumerate((hu, hv)))
+        b.feed(quad.inputs["Width"], b.math("MULTIPLY", half_u, 2.0, x=x - 100, y=y + 100))
+        b.feed(quad.inputs["Height"], b.math("MULTIPLY", half_v, 2.0, x=x - 100, y=y - 100))
+        fill = b.node("GeometryNodeFillCurve", x + 200, y)
+        b.feed(fill.inputs["Curve"], quad.outputs["Curve"])
+        px, py, _pz = b.split_xyz(b.node("GeometryNodeInputPosition", x + 200, y - 300).outputs[0], x=x + 400,
+                                  y=y - 300)
+        across = b.combine(b.math("DIVIDE", px, b.math("MAXIMUM", half_u, 1e-4, x=x + 400, y=y - 500), x=x + 600,
+                                  y=y - 400),
+                           b.math("DIVIDE", py, b.math("MAXIMUM", half_v, 1e-4, x=x + 400, y=y - 650), x=x + 600,
+                                  y=y - 550), frame, x=x + 800, y=y - 450)
+        screen = b.store(fill.outputs["Mesh"], ATTR_SCREEN, across, "FLOAT_VECTOR", x=x + 600, y=y)
+        screen = b.store(screen, ATTR_SCREEN_STYLE, style, x=x + 800, y=y)
+        mat = b.node("GeometryNodeSetMaterial", x + 1000, y)
+        b.feed(mat.inputs["Geometry"], screen)
+        b.feed(mat.inputs["Material"], screen_mat)
+        return quad.outputs["Curve"], mat.outputs["Geometry"]
+
+    # --- Glowing panel: a frame and a see-through screen with a grid and a scan band.
+    outline, screen = sheet(1.0, 0.0, -600, -3600)
+    panel = b.join([_tube(b, outline, width, ring_mat, 600, -3400), screen], x=1000, y=-3600)
+    # --- TV static: a sheet of static a little larger than the body, no frame.
+    _outline, static = sheet(1.12, 1.0, -600, -4400)
+
+    def is_style(k_, y):
+        return b.compare("EQUAL", gi.outputs["Style"], float(k_), x=1600, y=y)
+
+    flat = b.switch("GEOMETRY", is_style(1, -200), magic, spark_ring, x=1800, y=0)
+    flat = b.switch("GEOMETRY", is_style(2, -400), flat, panel, x=2000, y=0)
+    flat = b.switch("GEOMETRY", is_style(3, -600), flat, static, x=2200, y=0)
+    # drawn in the plane (x along u, y along v, z along the axis), moved to the front
+    centre = b.vmath("ADD", gi.outputs["Start"], b.vmath("SCALE", gi.outputs["Axis"], scale=s, x=1800, y=600),
+                     x=2000, y=600)
+
+    def placed(local, x, y):
+        lx, ly, lz = b.split_xyz(local, x=x, y=y)
+        spot_ = b.vmath("ADD", b.vmath("SCALE", gi.outputs["U"], scale=lx, x=x + 200, y=y),
+                        b.vmath("SCALE", gi.outputs["V"], scale=ly, x=x + 200, y=y - 150), x=x + 400, y=y)
+        spot_ = b.vmath("ADD", spot_, b.vmath("SCALE", gi.outputs["Axis"], scale=lz, x=x + 400, y=y - 150), x=x + 600,
+                        y=y)
+        return b.vmath("ADD", centre, spot_, x=x + 800, y=y)
+
+    flat = b.set_position(flat, position=placed(b.node("GeometryNodeInputPosition", 2000, 300).outputs[0], 2200, 300),
+                          x=2600, y=0)
+
+    # --- Comet: a big head and a tight trail of sparkles on the last two thirds of the turn it has just come round (the
+    # spiral's front: once round per pitch, starting in front of the body), standing to face the front.
+    count = 72
+    trail = b.node("GeometryNodePoints", 1600, -5200)
+    trail.inputs["Count"].default_value = count
+    k = b.node("GeometryNodeInputIndex", 1000, -5400).outputs[0]
+    pitch = b.math("MAXIMUM", gi.outputs["Pitch"], 1e-4, x=1000, y=-5600)
+    behind = b.math("SUBTRACT", s, b.math("MULTIPLY", k, b.math("DIVIDE", pitch, 110.0, x=1000, y=-5800), x=1200,
+                                          y=-5700), x=1400, y=-5600)
+    angle = b.math("MULTIPLY", b.math("DIVIDE", behind, pitch, x=1400, y=-5800), 2.0 * math.pi, x=1600, y=-5800)
+    c_rnd, c_color = b.white_noise(b.combine(k, 0.29, 0.61, x=1200, y=-6000), x=1400, y=-6000)
+    scatter = b.vmath("SCALE", b.vmath("SUBTRACT", c_color, (0.5, 0.5, 0.5), x=1600, y=-6100),
+                      scale=b.math("MULTIPLY", b.math("DIVIDE", k, float(count), x=1600, y=-6250),
+                                   b.math("MULTIPLY", ring_r, 0.06, x=1600, y=-6400), x=1800, y=-6300), x=1800, y=-6100)
+    local = b.vmath("ADD", b.combine(b.math("MULTIPLY", b.math("COSINE", angle, x=1800, y=-5800), ring_r, x=2000,
+                                            y=-5800),
+                                     b.math("MULTIPLY", b.math("SINE", angle, x=1800, y=-5950), ring_r, x=2000,
+                                            y=-5950),
+                                     b.math("SUBTRACT", behind, s, x=2000, y=-6100), x=2200, y=-5900),
+                    scatter, x=2400, y=-6000)
+    b.feed(trail.inputs["Position"], placed(local, 2400, -5400))
+    trail_pts = b.delete(trail.outputs["Geometry"], b.compare("LESS_THAN", behind, 0.0, x=2600, y=-5600), "POINT",
+                         x=2800, y=-5200)
+    twinkle = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY_ADD", frame, 1.3, b.math("MULTIPLY", c_rnd,
+                                                                                               2.0 * math.pi, x=2400,
+                                                                                               y=-6500),
+                                                           x=2600, y=-6500), x=2800, y=-6500), 0.45, 0.55, x=3000,
+                         y=-6500)
+    tail = b.math("POWER", b.math("SUBTRACT", 1.0, b.math("DIVIDE", k, float(count), x=2600, y=-6700), x=2800,
+                                  y=-6700), 1.3, x=3000, y=-6700)
+    star_size = b.math("MULTIPLY", gi.outputs["Star Size"], b.switch("FLOAT", b.compare("LESS_THAN", k, 0.5, x=3000,
+                                                                                         y=-6900),
+                                                                     b.math("MULTIPLY", tail, twinkle, x=3200,
+                                                                            y=-6600), 3.0, x=3400, y=-6700),
+                       x=3600, y=-6700)
+    star = b.node("GeometryNodeObjectInfo", 2800, -4900, transform_space="ORIGINAL")
+    b.feed(star.inputs["Object"], gi.outputs["Star Object"])
+    stars = b.node("GeometryNodeInstanceOnPoints", 3200, -5200)
+    b.feed(stars.inputs["Points"], trail_pts)
+    b.feed(stars.inputs["Instance"], star.outputs["Geometry"])
+    b.feed(stars.inputs["Rotation"], b.combine(math.pi / 2, b.math("MULTIPLY", c_rnd, 2.0 * math.pi, x=3000, y=-5500),
+                                               0.0, x=3200, y=-5500))
+    b.feed(stars.inputs["Scale"], b.math("MULTIPLY", star_size, b.math("MAXIMUM", vis, 0.0, x=3400, y=-6900),
+                                         x=3600, y=-6850))
+    comet = b.node("GeometryNodeRealizeInstances", 3400, -5200)
+    b.feed(comet.inputs["Geometry"], stars.outputs["Instances"])
+    comet_mat = b.node("GeometryNodeSetMaterial", 3600, -5200)
+    b.feed(comet_mat.inputs["Geometry"], comet.outputs["Geometry"])
+    b.feed(comet_mat.inputs["Material"], ring_mat)
+
+    drawn = b.switch("GEOMETRY", is_style(4, -800), flat, comet_mat.outputs["Geometry"], x=3800, y=0)
+    drawn = b.store(drawn, ATTR_EDGE, glow, x=4000, y=0)
+    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", on, None, drawn, x=4200, y=0))
+    return ng
+
+
+def ensure_ring_group():
+    if not _is_current(RING_GROUP):
+        build_ring_group()
+    return bpy.data.node_groups[RING_GROUP]
 
 
 def build_probe_group(field_group):

@@ -6,7 +6,8 @@ _OFF = dict(
     entrance="GROW", exit_style="SHRINK", exit_timing="EDGE", particles="NONE", wire_enable=False, holo_enable=False,
     glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True, finale=False, finale_style="PULSE",
     finale_length=0.15, layer_enable=False, layer_style="NANO", inner_glow=False, venom_enable=False,
-    venom_metallic=0.0, old_surface="NONE", particle_count=600,
+    venom_metallic=0.0, old_surface="NONE", particle_count=600, easing="EASE", ring_enable=False, paint_style="NONE",
+    reactor=False, plates=False,
 )
 
 PRESETS = (
@@ -77,6 +78,70 @@ PRESETS = (
      dict(_OFF, path="SURFACE", seeds="ORIGIN_LIMBS", wire_enable=True, glitch_enable=True, glitch_flash=True,
           exit_style="FRAGMENTS", frag_glow=True, particles="STAR", finale=True, finale_white=0.8, beat_sync=True,
           particle_color=(0.6, 0.9, 1.0), particle_glow=3.0, glow_color=(1.0, 0.2, 0.6))),
+    ("MAGIC_CIRCLE", "Magic Circle Pass", "A glowing magic circle passes through the body from the side and leaves "
+                                           "the new outfit behind it (Kamen Rider Wizard)",
+     dict(_OFF, path="RIGHT_LEFT", ring_enable=True, ring_style="MAGIC", ring_size=0.85,
+          glow_color=(1.0, 0.22, 0.06))),
+    ("SPARK_PORTAL", "Spark Portal", "A ring of spinning sparks sweeps across the body like a portal, embers falling "
+                                     "where it passes (Doctor Strange)",
+     dict(_OFF, path="LEFT_RIGHT", ring_enable=True, ring_style="SPARKS", particles="EMBER", particle_count=250,
+          particle_color=(1.0, 0.5, 0.1), particle_glow=6.0, glow_color=(1.0, 0.5, 0.1),
+          frag_wind_dir=(0.0, 0.0, -0.3))),
+    ("TV_BARRIER", "TV Barrier", "The body passes through a sheet of TV static from the front to the back; slices "
+                                 "flicker between the outfits where it is (WandaVision)",
+     dict(_OFF, path="FRONT_BACK", ring_enable=True, ring_style="STATIC", glitch_enable=True, glitch_flash=True,
+          glow_color=(1.0, 0.2, 0.25))),
+    ("SKETCH", "Sketch and Color", "The new outfit is drawn ahead of the edge as line art on paper, from the feet up, "
+                                   "and its colours flood in behind it like watercolour",
+     dict(_OFF, path="UP", paint_style="LINEART", edge_glow=False)),
+    ("INK_WASH", "Ink Wash Painting", "Ink spreads from the chest over the old outfit and turns it into an ink wash "
+                                      "painting that breaks up into drops of ink; the new outfit blooms in colour "
+                                      "behind it",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", paint_style="INK", old_surface="INK", exit_style="FRAGMENTS",
+          frag_glow=False, particles="INK", particle_count=900, edge_glow=False, frag_wind_dir=(0.6, 0.3, 0.2))),
+    ("EVOLUTION", "Evolution", "The body glows up and the two outfits flash in turn, faster and faster, until they are "
+                               "pure light; then the new one shines out with a burst of stars (Pokemon)",
+     dict(_OFF, entrance="EVOLVE", easing="LINEAR", edge_glow_strength=8.0, finale=True, finale_white=0.6,
+          particle_color=(0.85, 0.95, 1.0), particle_glow=4.0, glow_color=(0.85, 0.95, 1.0))),
+    ("SMOKE_PUFF", "Ninja Smoke Puff", "A puff of white smoke bursts out of the body, the outfit is changed when it "
+                                       "clears (a ninja's transformation)",
+     dict(_OFF, entrance="POOF", easing="LINEAR", edge_glow=False)),
+    ("SHADOW_RISE", "Rise from the Shadow", "The body sinks into its own black shadow on the floor and the new outfit "
+                                            "stands up out of it",
+     dict(_OFF, entrance="SHADOW", easing="LINEAR", edge_glow=True, edge_glow_strength=3.0,
+          glow_color=(0.45, 0.08, 1.0))),
+    ("SPARKLE_SPIRAL", "Sparkle Spiral", "A comet of sparkles circles up the body from the feet and changes the outfit "
+                                         "where it passes, scattering glittering dust (Cinderella)",
+     dict(_OFF, path="SPIRAL", ring_enable=True, ring_style="COMET", exit_style="FRAGMENTS", frag_glow=True,
+          particles="STAR", particle_count=500, finale=True, finale_white=0.5, particle_color=(0.7, 0.88, 1.0),
+          particle_glow=4.0, glow_color=(0.6, 0.85, 1.0), frag_wind_dir=(0.0, 0.0, 1.0))),
+    ("BROOCH", "Magical Brooch", "From the hands and feet the old outfit breaks into glowing flakes that spiral into "
+                                 "the brooch on the chest; the new outfit shines when it is complete",
+     dict(_OFF, path="SURFACE", seeds="LIMBS", exit_style="SUCK", frag_glow=True, particles="STAR", particle_count=400,
+          finale=True, finale_white=0.6, particle_color=(1.0, 0.75, 0.9), particle_glow=4.0,
+          glow_color=(1.0, 0.45, 0.8))),
+    ("MARK50", "Mark 50", "The reactor on the chest (and on the hands and feet) lights up, the dark undersuit flows "
+                          "out of it under hexagon wires and the armour plates rise and settle behind it, then a band "
+                          "of light runs over the suit (Iron Man)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN_LIMBS", reactor=True, plates=True, layer_enable=True, wire_enable=True,
+          inner_glow=True, finale=True, finale_style="SWEEP", finale_length=0.3, finale_white=0.6,
+          particle_color=(0.6, 0.9, 1.0), particle_glow=3.0, glow_color=(0.1, 0.75, 1.0))),
+    ("BATS", "Bat Swarm", "The old outfit crumbles into darkness and a swarm of bats flies off, a red rim at the edge "
+                          "(vampire)",
+     dict(_OFF, path="SURFACE", seeds="LIMBS", exit_style="FRAGMENTS", frag_glow=False, particles="BAT",
+          particle_count=300, glow_color=(0.9, 0.05, 0.1), frag_wind_dir=(0.3, 0.6, 1.0))),
+    ("CARDS", "Card Storm", "The old outfit bursts into a storm of glowing playing cards (Gambit)",
+     dict(_OFF, path="SPHERE", exit_style="FRAGMENTS", frag_glow=True, particles="CARD", particle_count=700,
+          glow_color=(1.0, 0.2, 0.7), frag_wind_dir=(0.0, 0.3, 1.0))),
+    ("FEATHERS", "Angel Feathers", "From the head down the old outfit dissolves into light and white feathers drift "
+                                   "away; the new outfit glows when it is complete",
+     dict(_OFF, path="DOWN", exit_style="FRAGMENTS", frag_glow=True, particles="FEATHER", particle_count=600,
+          finale=True, particle_color=(1.0, 0.97, 0.9), particle_glow=1.2, glow_color=(1.0, 0.85, 0.6),
+          frag_wind_dir=(0.4, 0.3, -0.2))),
+    ("NOTES", "Music Notes", "Glowing music notes float off the old outfit as it changes, for a dance",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN_LIMBS", exit_style="FRAGMENTS", frag_glow=True, particles="NOTE",
+          particle_count=500, particle_color=(0.45, 0.9, 1.0), particle_glow=4.0, glow_color=(0.45, 0.8, 1.0),
+          frag_wind_dir=(0.0, 0.2, 1.0))),
     ("MAGICAL", "Magical Girl", "Hands and feet first: the body lights up, ribbons of light wrap the limbs, "
                                 "the old outfit bursts into sparkles and the new one flashes when it is complete",
      dict(_OFF, path="SURFACE", seeds="LIMBS", exit_style="FRAGMENTS", frag_glow=True, silhouette=True,
@@ -86,8 +151,8 @@ PRESETS = (
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
-BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles"}
-WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP"}
+BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles", "spiral_pitch"}
+WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPARKLE_SPIRAL", "BROOCH", "MARK50"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

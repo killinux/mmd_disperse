@@ -1,13 +1,12 @@
 """Build, update and remove a suit-up effect (mask empty + modifiers + materials)."""
 
 import fnmatch
-import math
 import time
 
 import bpy
 from mathutils import Matrix, Vector
 
-from . import arrival, beats, compositor, launch, materials, particles, ribbons, venom
+from . import arrival, beats, compositor, launch, materials, particles, ribbons, rings, venom
 from . import model as mdl
 from .node_groups import BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups, input_identifiers
 
@@ -30,6 +29,11 @@ P_REACH = "mmd_disperse_reach"  # largest mask radius (end of the keys)
 P_WAVE = "mmd_disperse_wave"  # mask radius at which the wave has passed everything
 P_AREA = "mmd_disperse_area"
 P_AREA_NEW = "mmd_disperse_area_new"
+P_LAYOUT = "mmd_disperse_layout"  # sweeps and the spiral: where the front starts and the axes it moves along
+P_ROOT = "mmd_disperse_root"  # the model the effect follows when it moves as a whole
+P_PITCH = "mmd_disperse_pitch"  # the spiral's pitch the arrival field was built with
+P_BROOCH = "mmd_disperse_brooch"  # world rest position the old outfit is sucked into (the start bone)
+FLAKES = ("FRAGMENTS", "SUCK")  # exit styles that break the old outfit into flakes
 
 # Sizes as a fraction of the model height (tuned on Tifa, ~20.7 MMD units tall).
 SIZE_RATIOS = {
@@ -69,7 +73,18 @@ SIZE_RATIOS = {
     "ghost_distance": 0.25,
     "scale_size": 0.025,
     "flip_width": 0.08,
+    "spiral_pitch": 0.1,
+    "smoke_size": 0.09,
+    "paint_width": 0.12,
+    "sketch_width": 0.15,
+    "outline_width": 0.0012,
+    "reactor_size": 0.03,
+    "plate_size": 0.045,
+    "plate_lift": 0.02,
+    "plate_width": 0.12,
 }
+PAINT_STYLES = ("NONE", "LINEART", "INK")
+PAINT_CELL = 0.012  # size of the hatching / washes of the drawings, fraction of the model height
 HOLO_LINE_SPACING = 0.006  # scan line spacing of the hologram, fraction of the model height
 LAYER_CELL = 0.012  # cell size of the line web on the undersuit, fraction of the model height
 GOO_CELL = 0.02  # size of the goo's wet and dry smears, fraction of the model height
@@ -77,7 +92,9 @@ SURFACE_CELL = 0.03  # cell size of the veins, frost and char ahead of the edge,
 STRAND_LIFE = 2.0  # how far the edge moves on before a strand is gone, in tendril lengths
 ABSORB = 0.6  # how far behind the edge the goo swallows a tendril, in tendril lengths
 CLAMP_AT = 0.8  # share of the wave at which the halves of the new outfit clamp shut, or the ghosts meet
-AT_ONCE = ("CLAMP", "GHOSTS")  # entrances where all of the new outfit arrives at that moment (the old one goes then)
+# entrances where all of the new outfit is there at that moment (the old one goes then): the halves clamp shut, the
+# ghosts meet, the evolution flash ends, the smoke puff hides the swap, the new outfit has stood up out of the shadow
+AT_ONCE = ("CLAMP", "GHOSTS", "EVOLVE", "POOF", "SHADOW")
 SHATTER_AT = 1.0  # share of the wave at which the old outfit goes all at once (exit timing): when the wave is done
 BEAT_REACH = 2.0  # seconds a moment may wait for the next beat
 NOISE_CELLS_PER_HEIGHT = 6.0
@@ -134,12 +151,12 @@ def _insert_scale_keys(mask, frames_values, interpolation):
         prefs.keyframe_new_interpolation_type = old
 
 
-def _create_mask(settings, location, armature, bone, collection, radius_max, path, root=None):
+def _create_mask(settings, location, armature, bone, collection, radius_max, path, root=None, axis=None):
     mask = bpy.data.objects.new(MASK_NAME, None)
     # The scale is how far the wave has travelled; for the sweeps an arrow shows the direction.
-    mask.empty_display_type = "SINGLE_ARROW" if path in ("UP", "DOWN") else "SPHERE"
-    if path == "DOWN":
-        mask.rotation_euler = (math.pi, 0.0, 0.0)
+    mask.empty_display_type = "SINGLE_ARROW" if path in arrival.SWEEPS else "SPHERE"
+    if path in arrival.SWEEPS and axis is not None:
+        mask.rotation_euler = Vector((0.0, 0.0, 1.0)).rotation_difference(axis).to_euler()
     mask.empty_display_size = 1.0
     mask.show_in_front = True
     mask.hide_render = True
@@ -214,10 +231,11 @@ def _finale_start(settings, wave, mask=None):
 
 def _extra(settings, wave, has_base, has_target):
     """How much further the mask grows after the wave has passed (radius `wave`) so everything finishes: flakes and
-    particles (their flight is a share of the wave), the undersuit turning into the final look and then the finale."""
+    particles (their flight is a share of the wave), the undersuit turning into the final look and then the finale, the
+    last armour plates settling."""
     extra = 0.0
     if has_base:
-        if settings.exit_style in ("FRAGMENTS", "CHUNKS"):
+        if settings.exit_style in FLAKES + ("CHUNKS",):
             extra = settings.frag_life * wave
         if settings.particles != "NONE":
             extra = max(extra, settings.particle_life * wave)
@@ -226,6 +244,10 @@ def _extra(settings, wave, has_base, has_target):
             extra = max(extra, settings.base_delete_offset) + (SHATTER_AT + 0.05 - 1.0) * wave
     if has_target:
         extra = max(extra, _layer(settings) + (settings.finale_length * wave if settings.finale else 0.0))
+    if has_target and settings.plates:  # the last plates rise and settle up to a plate width (and their jitter) behind
+        extra = max(extra, settings.plate_width + 0.25 * settings.plate_size)
+    if has_target and settings.entrance == "POOF":  # the smoke drifts up and thins out after the moment
+        extra = max(extra, (1.35 * CLAMP_AT - 1.0) * wave)
     if settings.venom_enable:  # the last strands snap
         extra = max(extra, STRAND_LIFE * settings.venom_length)
     return extra
@@ -365,6 +387,8 @@ def _cleanup_mesh(ob):
                 materials.remove_inner_glow(slot.material)
                 materials.remove_layer(slot.material)
                 materials.remove_surface(slot.material)
+                materials.remove_shadow(slot.material)
+                materials.remove_paint(slot.material)
     saved = ob.get(P_ARM)
     if saved:
         for mod_name, arm_name in saved.to_dict().items():
@@ -413,6 +437,7 @@ def remove_effect(mask):
         if settings is not None and settings.mask == mask:
             compositor.update_white_flash(scene, None, 0.0, 0.0, 0.0, 0.0)
     ribbons.remove(mask)
+    rings.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
     bpy.data.objects.remove(mask)
     if action is not None and action.users == 0:
@@ -426,25 +451,41 @@ def remove_effect(mask):
 
 # --------------------------------------------------------------------------- settings -> scene
 
-def _glow_materials(ob, settings):
-    """Materials of an outfit mesh that may glow (locked parts never break or show the rim)."""
+def _glow_materials(ob, settings, locked=False):
+    """Materials of an outfit mesh that may glow (locked parts never break or show the rim), or with `locked` the
+    locked ones."""
     patterns = mdl.split_patterns(settings.lock_patterns) if settings.use_lock else []
     for slot in ob.material_slots:
         mat = slot.material
         if mat is None or mat.name == WIRE_MATERIAL:
             continue
         name = mdl.material_key(mat)
-        if not any(fnmatch.fnmatchcase(name, p) for p in patterns):
+        if any(fnmatch.fnmatchcase(name, p) for p in patterns) == locked:
             yield mat
 
 
 def _update_glow(ob, settings, enabled, strength):
-    for mat in _glow_materials(ob, settings):
-        if enabled:
-            materials.add_edge_glow(mat)
-            materials.update_edge_glow(mat, settings.glow_color, strength)
+    # the evolution flash and the shadow light up the locked parts (head, hair) too
+    whole = settings.entrance in ("EVOLVE", "SHADOW") and ob.get(P_ROLE) == "BASE"
+    for locked in (False, True):
+        for mat in _glow_materials(ob, settings, locked):
+            if enabled and (whole or not locked):
+                materials.add_edge_glow(mat)
+                materials.update_edge_glow(mat, settings.glow_color, strength)
+            else:
+                materials.remove_edge_glow(mat)
+
+
+def _update_shadow(ob, settings):
+    """Rising from the shadow: every material of the outfit (the locked head too) can turn into the black shadow."""
+    for slot in ob.material_slots:
+        mat = slot.material
+        if mat is None or mat.name == WIRE_MATERIAL:
+            continue
+        if settings.entrance == "SHADOW":
+            materials.add_shadow(mat)
         else:
-            materials.remove_edge_glow(mat)
+            materials.remove_shadow(mat)
 
 
 def _update_hologram(ob, settings):
@@ -480,6 +521,17 @@ def _update_layer(ob, settings):
             materials.remove_layer(mat)
 
 
+def _update_paint(ob, settings):
+    cell = PAINT_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob)
+    for mat in _glow_materials(ob, settings):
+        if settings.paint_style != "NONE":
+            materials.add_paint(mat)
+            materials.update_paint(mat, 1.0 if settings.paint_style == "INK" else 0.0, settings.paper_color,
+                                   settings.ink_color, cell)
+        else:
+            materials.remove_paint(mat)
+
+
 def _update_surface(ob, settings):
     cell = SURFACE_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob)
     for mat in _glow_materials(ob, settings):
@@ -487,6 +539,9 @@ def _update_surface(ob, settings):
             materials.add_surface(mat, settings.old_surface)
             materials.update_surface(mat, settings.surface_color, settings.glow_color, cell, settings.venom_metallic,
                                      settings.ice_clarity)
+            if settings.old_surface == "INK":  # its drawing uses the paint colours (and its cells)
+                materials.update_paint(mat, 1.0, settings.paper_color, settings.ink_color,
+                                       PAINT_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob))
         else:
             materials.remove_surface(mat)
 
@@ -537,6 +592,21 @@ def _update_ribbons(settings, mask):
         collection = mask.users_collection[0] if mask.users_collection else settings.id_data.collection
         ribbons.create(settings, mask, meshes, armature, max(settings.size_reference, 1e-3), collection)
     ribbons.sync(settings, mask)
+
+
+def _update_ring(settings, mask, beat):
+    """Create / remove the front's decoration to match the panel (sweeps and the spiral only) and push its values."""
+    layout = mask.get(P_LAYOUT)
+    current = rings.ring_objects(mask)
+    if not settings.ring_enable or layout is None:
+        if current:
+            rings.remove(mask)
+        return
+    if not current:
+        root = bpy.data.objects.get(mask.get(P_ROOT, ""))
+        collection = mask.users_collection[0] if mask.users_collection else settings.id_data.collection
+        rings.create(mask, layout, root, collection)
+    rings.sync(settings, mask, layout.to_dict(), beat)
 
 
 def _particle_object(settings):
@@ -605,7 +675,7 @@ def _record_parts(settings, role, shown=False):
     switching between flakes and chunks needs no new recording."""
     if role == "BASE":
         pieces = settings.exit_style == "CHUNKS"
-        vertices = settings.exit_style == "FRAGMENTS" or settings.particles != "NONE"
+        vertices = settings.exit_style in FLAKES or settings.particles != "NONE"
         return vertices or (pieces and not shown), pieces
     stars = settings.finale and settings.finale_sparkles > 0
     # with Subdivide the fly-in pieces are cut from another mesh than the one recorded
@@ -643,9 +713,11 @@ def sync(settings):
     if settings.finale and settings.finale_sparkles > 0:
         sparkle = particles.ensure_asset("STAR", settings.id_data)
     materials.update_particle_material(settings)
+    materials.update_outline_material(settings.ink_color)
     _update_ribbons(settings, mask)
     goo = _update_venom(settings, mask, objects)
     beat = beats.beat_object() if settings.beat_sync else None
+    _update_ring(settings, mask, beat)
     compositor.update_glitch(settings.id_data, settings.frame_start, settings.frame_end, settings.glitch_rate,
                              beat=beat)
     common = {
@@ -675,6 +747,9 @@ def sync(settings):
         "Scales": settings.entrance == "SCALES",
         "Scale Size": settings.scale_size,
         "Flip Width": settings.flip_width,
+        "Evolve": settings.entrance == "EVOLVE",
+        "Shadow": settings.entrance == "SHADOW",
+        "Shadow Direction": tuple(settings.shadow_dir),
     }
     values = {
         TARGET_GROUP: dict(common, **{
@@ -712,11 +787,29 @@ def sync(settings):
             "Ghosts": settings.entrance == "GHOSTS",
             "Ghost Count": settings.ghost_count,
             "Ghost Distance": settings.ghost_distance,
+            "Reactor": settings.reactor,
+            "Reactor Size": settings.reactor_size,
+            "Plates": settings.plates,
+            "Plate Size": settings.plate_size,
+            "Plate Lift": settings.plate_lift,
+            "Plate Width": settings.plate_width,
+            "Paint Style": PAINT_STYLES.index(settings.paint_style),
+            "Paint Width": settings.paint_width,
+            "Sketch Width": settings.sketch_width,
+            "Outline Width": settings.outline_width,
+            "Outline Material": materials.ensure_outline_material() if settings.paint_style != "NONE" else None,
+            "Poof": settings.entrance == "POOF",
+            "Smoke Size": settings.smoke_size,
+            "Smoke Material": materials.ensure_smoke_material() if settings.entrance == "POOF" else None,
         }),
         BASE_GROUP: dict(common, **{
             "Shrink": settings.base_shrink,
             "Delete Offset": settings.base_delete_offset,
-            "Fragments": settings.exit_style == "FRAGMENTS",
+            "Fragments": settings.exit_style in FLAKES,
+            "Suck": settings.exit_style == "SUCK",
+            "Suck Turns": settings.suck_turns,
+            "Brooch Object": (particles.ensure_asset("STAR", settings.id_data) if settings.exit_style == "SUCK"
+                              else None),
             "Chunks": settings.exit_style == "CHUNKS",
             "Piece Size": settings.piece_size,
             "Chunk Force": settings.chunk_force,
@@ -730,7 +823,8 @@ def sync(settings):
             "Flake Glow": settings.frag_glow,
             "Particles": shape is not None,
             "Particle Object": shape,
-            "Flap": settings.particles == "BUTTERFLY",
+            "Flap": settings.particles in particles.FLAPPING,
+            "Upright": settings.particles in particles.UPRIGHT,
             "Flap Speed": settings.flap_speed,
             "Particle Size": settings.particle_size,
             "Surface Ahead": settings.old_surface != "NONE",
@@ -767,6 +861,9 @@ def sync(settings):
             if launch.space(ob) is not None:
                 own["Launch Space"] = launch.space(ob)
         if role == "BASE":
+            brooch = mask.get(P_BROOCH)
+            if brooch is not None:  # the rest pose is in object space
+                own["Suck Target"] = tuple(ob.matrix_world.inverted() @ Vector(brooch))
             own.update({
                 "Flight": settings.frag_life * wave,
                 "Particle Flight": settings.particle_life * wave,
@@ -780,6 +877,7 @@ def sync(settings):
                 "Clamp Offset": settings.clamp_distance,
                 "Finale Length": settings.finale_length * wave,
                 "Sparkle Density": sparkle_density * s * s,
+                "Smoke Density": (settings.smoke_count / area_new if area_new > 0.0 else 0.0) * s * s,
             })
         for mod in ob.modifiers:
             group = mod.node_group if mod.type == "NODES" else None
@@ -797,19 +895,25 @@ def sync(settings):
                 mod[key] = value
             ob.update_tag()
         flashes = settings.glitch_enable and settings.glitch_flash
+        evolve = settings.entrance == "EVOLVE"
         if role == "TARGET":
-            _update_glow(ob, settings, settings.edge_glow or flashes or settings.finale,
+            _update_glow(ob, settings, settings.edge_glow or flashes or settings.finale or evolve or settings.reactor
+                         or settings.plates,
                          settings.edge_glow_strength)
             _update_hologram(ob, settings)
             _update_layer(ob, settings)
+            _update_paint(ob, settings)
         elif role == "BASE":
-            flakes = settings.exit_style in ("FRAGMENTS", "CHUNKS") and settings.frag_glow
+            flakes = settings.exit_style in FLAKES + ("CHUNKS",) and settings.frag_glow
             glint = settings.entrance == "SCALES" and settings.edge_glow  # the turning scales glint
-            _update_glow(ob, settings, flakes or flashes or settings.silhouette or glint,
-                         settings.frag_glow_strength if flakes or settings.silhouette else settings.edge_glow_strength)
+            shadow = settings.entrance == "SHADOW" and settings.edge_glow  # it glows darkly while it slides
+            _update_glow(ob, settings, flakes or flashes or settings.silhouette or glint or evolve or shadow,
+                         settings.frag_glow_strength if (flakes or settings.silhouette) and not evolve
+                         else settings.edge_glow_strength)
             _update_surface(ob, settings)
         if role in ("TARGET", "BASE"):
             _update_inner_glow(ob, settings)
+            _update_shadow(ob, settings)
 
 
 def _seeds(settings, location, model):
@@ -868,6 +972,7 @@ def build(context, settings):
     path = settings.path
     location, bone = _origin(context, settings, owner)
     seeds = []
+    layout = None
     t0 = time.time()
     if path == "SPHERE":
         reach = mdl.max_distance(meshes, location)
@@ -877,13 +982,16 @@ def build(context, settings):
         # Start a little short of the surface so nothing (not even the wire ahead of the edge) shows at
         # radius 0, like the sphere that starts inside the body.
         lead = settings.wire_outer + 0.005 * height
-        values = [v + lead for v in arrival.compute(meshes, path, seeds, height)]
+        # sweeps and the spiral follow the model's own axes (it may stand turned in the world)
+        frame = (owner.root or meshes[0]).matrix_world.to_3x3().normalized()
+        values = [v + lead for v in arrival.compute(meshes, path, seeds, height, frame, settings.spiral_pitch)]
         for ob, v in zip(meshes, values):
             arrival.write(ob, v / _object_scale(ob))
         reach = max(float(v.max()) for v in values)
         if path != "SURFACE":
-            blo, bhi = mdl.rest_bounds(meshes)
-            location = Vector(((blo.x + bhi.x) / 2, (blo.y + bhi.y) / 2, blo.z if path == "UP" else bhi.z))
+            layout = arrival.front_layout(meshes, path, frame)
+            location = layout["start"].copy()
+            layout["lead"] = lead
     arrival_seconds = time.time() - t0
 
     margin = settings.noise_amount + max(settings.edge_width, settings.wire_outer) + 0.02 * height
@@ -894,12 +1002,18 @@ def build(context, settings):
     radius = wave + _extra(settings, wave, bool(base), bool(target))
     root = target.root or base.root
     collection = root.users_collection[0] if root.users_collection else context.scene.collection
-    mask = _create_mask(settings, location, owner.armature, bone, collection, radius, path, owner.root)
+    mask = _create_mask(settings, location, owner.armature, bone, collection, radius, path, owner.root,
+                        layout["axis"] if layout else None)
     mask[P_ROOTS] = roots
     mask[P_FOLLOWERS] = followers
     mask[P_PATH] = path
     mask[P_REACH] = radius
     mask[P_WAVE] = wave
+    if layout is not None:  # where the front's decoration (rings.py) goes
+        mask[P_LAYOUT] = {key: list(value) if isinstance(value, Vector) else value for key, value in layout.items()}
+    mask[P_ROOT] = owner.root.name if owner.root is not None else ""
+    mask[P_BROOCH] = list(_origin(context, settings, owner)[0])
+    mask[P_PITCH] = settings.spiral_pitch
 
     target_group, base_group = ensure_node_groups()
     settings.mask = mask
@@ -931,7 +1045,7 @@ def build(context, settings):
         start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
         warmup = scene.frame_start if physics and scene.frame_start < start else None
         busy = {job.ob for job in jobs}
-        others = [ob for ob in meshes if ob not in busy] + ribbons.ribbon_objects(mask)
+        others = [ob for ob in meshes if ob not in busy] + ribbons.ribbon_objects(mask) + rings.ring_objects(mask)
         recorded = launch.record(context, jobs, others, range(start, end + 1), warmup)
         record_seconds = time.time() - t0
     return {

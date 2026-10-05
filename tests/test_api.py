@@ -23,12 +23,12 @@ sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
 from mmd_disperse import (beats, compositor, effect, launch, materials, particles, presets, ribbons,  # noqa: E402
-                          venom)
+                          rings, venom)
 from mmd_disperse.arrival import limb_points  # noqa: E402
 from mmd_disperse.model import resolve, rest_points_world  # noqa: E402
 from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_CUT, ATTR_EDGE, ATTR_HOLO, ATTR_LAYER,  # noqa: E402
-                                      ATTR_AHEAD, ATTR_LOCK, BASE_GROUP, TARGET_GROUP, VENOM_ATTRS, VENOM_ENDS,
-                                      input_identifiers)
+                                      ATTR_AHEAD, ATTR_LOCK, ATTR_PAINT, ATTR_SHADOW, BASE_GROUP, RING_STYLES,
+                                      TARGET_GROUP, VENOM_ATTRS, VENOM_ENDS, input_identifiers)
 from scene_setup import add_model_args, load_models  # noqa: E402
 
 FAILURES = []
@@ -1173,6 +1173,217 @@ def run():
           "scales: the new outfit whole, the old one gone at the end")
     s.entrance, s.wire_enable = "GROW", wire_was
 
+    # --- 1.8: new particle shapes: music notes, playing cards, feathers, bats and ink drops, each with its material;
+    # bats flap like the butterflies, notes stand facing the front
+    saved = {key_: getattr(s, key_) for key_ in ("path", "seeds", "exit_style", "particles", "wire_enable", "easing")}
+    s.wire_enable = False
+    s.path, s.exit_style, s.particles = "SPHERE", "FRAGMENTS", "NOTE"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with music notes")
+    mod = our_modifiers(old_mesh)[0]
+    ids = input_identifiers(mod.node_group)
+    for kind, mat_name in (("NOTE", materials.PARTICLE_MATERIAL), ("CARD", materials.CARD_MATERIAL),
+                           ("FEATHER", materials.PARTICLE_MATERIAL), ("BAT", materials.BAT_MATERIAL),
+                           ("INK", materials.INK_MATERIAL)):
+        s.particles = kind
+        scene.frame_set(51)
+        scene.frame_set(50)
+        shape = bpy.data.objects.get(particles.NAMES[kind])
+        check(instance_count(old_mesh) > 0 and shape is not None and shape.data.materials[0].name == mat_name,
+              "%s released at frame 50 (%d), %s" % (kind.lower(), instance_count(old_mesh), mat_name))
+        if kind in ("NOTE", "BAT"):
+            check(bool(mod[ids["Flap"]]) == (kind == "BAT") and bool(mod[ids["Upright"]]) == (kind == "NOTE"),
+                  "bats flap, notes stand facing the front (%s)" % kind.lower())
+    s.exit_style, s.particles = "SHRINK", "NONE"
+
+    # --- sweeps across the body along the model's own axes, and the spiral (at one height the change goes round the
+    # body, a turn per pitch)
+    for path, axis in (("LEFT_RIGHT", 0), ("FRONT_BACK", 1)):
+        s.path = path
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build " + path.lower())
+        coord = rest_points_world(old_mesh)[:, axis]
+        check(float(np.corrcoef(arrival_values(old_mesh), coord)[0, 1]) > 0.999
+              and s.mask.empty_display_type == "SINGLE_ARROW", "%s follows the model's %s axis"
+              % (path.lower(), "XY"[axis]))
+    s.path = "SPIRAL"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the spiral")
+    pts = rest_points_world(old_mesh)
+    turn_of = arrival_values(old_mesh) * effect._object_scale(old_mesh)
+    centre_ = (pts.min(axis=0) + pts.max(axis=0)) / 2.0
+    band = np.abs(pts[:, 2] - np.median(pts[:, 2])) < 0.01 * height
+    angle = np.mod(np.arctan2(pts[band, 0] - centre_[0], -(pts[band, 1] - centre_[1])), 2.0 * math.pi)
+    spread = float(turn_of[band].max() - turn_of[band].min())
+    # at one height the arrival is a sawtooth of the angle; where it jumps depends on the height, so correlate it with
+    # the angle as a circular quantity (circular-linear correlation)
+    rc, rs, cs = (float(np.corrcoef(turn_of[band], np.cos(angle))[0, 1]),
+                  float(np.corrcoef(turn_of[band], np.sin(angle))[0, 1]),
+                  float(np.corrcoef(np.cos(angle), np.sin(angle))[0, 1]))
+    circular = math.sqrt(max((rc * rc + rs * rs - 2.0 * rc * rs * cs) / (1.0 - cs * cs), 0.0))
+    check(band.sum() > 50 and circular > 0.4 and 0.7 * s.spiral_pitch < spread < 1.3 * s.spiral_pitch,
+          "spiral: at one height the change goes round the body (circular correlation %.2f, spread %.2f, pitch %.2f)"
+          % (circular, spread, s.spiral_pitch))
+
+    # --- the front's decoration: a magic circle, sparks, a panel, TV static on a sweep, all at the front, gone before
+    # and after; a comet circling up the spiral. None for the sphere.
+    s.path, s.ring_enable, s.ring_style = "LEFT_RIGHT", True, "MAGIC"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build a sweep with a ring")
+    check(not draw_panels(bpy.context), "panels draw with a ring")
+    loops = rings.ring_objects(s.mask)
+    check(len(loops) == 1, "a ring object for the sweep")
+    layout = s.mask[effect.P_LAYOUT].to_dict()
+    start, axis_ = np.array(layout["start"]), np.array(layout["axis"])
+    for style in RING_STYLES[:4]:
+        s.ring_style = style
+        drawn = {}
+        for f in (1, 50, 100):
+            scene.frame_set(f)
+            drawn[f] = world_vertices(loops[0])[0]
+            if f == 50:
+                front = s.mask.scale.x - layout["lead"]
+        placed = len(drawn[50]) > 0 and abs(float(np.median((drawn[50] - start) @ axis_)) - front) < 0.02 * height
+        check(placed and len(drawn[1]) == 0 and len(drawn[100]) == 0,
+              "%s ring at the front at frame 50, gone at frames 1 and 100" % style.lower())
+    s.path, s.ring_style = "SPIRAL", "COMET"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the spiral with the comet")
+    loops = rings.ring_objects(s.mask)
+    heads = []
+    for f in (40, 41, 60):
+        scene.frame_set(f)
+        heads.append(world_vertices(loops[0])[0].mean(axis=0))
+    check(np.linalg.norm(heads[1][:2] - heads[0][:2]) > 0.05 and heads[2][2] > heads[0][2] + 0.1 * height,
+          "the comet circles the body and climbs (%.2f round, %.2f up)"
+          % (np.linalg.norm(heads[1][:2] - heads[0][:2]), heads[2][2] - heads[0][2]))
+    s.ring_enable = False
+    check(not rings.ring_objects(s.mask), "ring removed when switched off")
+    s.ring_enable, s.path = True, "SPHERE"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"} and not rings.ring_objects(s.mask),
+          "no ring for the sphere (it needs a sweep or the spiral)")
+    s.ring_enable = False
+
+    # --- sucked into the brooch: the flakes gather at the start point on the chest instead of blowing away
+    def gathered(exit_style):
+        s.exit_style = exit_style
+        bpy.ops.mmd_disperse.build()
+        brooch = np.array(s.mask[effect.P_BROOCH])
+        counts = []
+        for f in range(30, 90, 6):
+            scene.frame_set(f)
+            co, glow = world_vertices(old_mesh)
+            counts.append(int(((np.linalg.norm(co - brooch, axis=1) < 0.06 * height) & (glow > 0.3)).sum()))
+        return counts
+
+    s.path = "SURFACE"
+    blown, sucked = gathered("FRAGMENTS"), gathered("SUCK")
+    check(max(sucked) > 100 and max(sucked) > 3 * max(max(blown), 1),
+          "sucked in: glowing flakes gather at the brooch (%d, blown away %d)" % (max(sucked), max(blown)))
+    s.exit_style, s.path = "SHRINK", "SPHERE"
+
+    # --- the evolution flash: no front; the outfits show in turn, faster and faster, then the new one stays; the old
+    # outfit's locked parts glow too
+    s.entrance = "EVOLVE"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the evolution flash")
+    check(not draw_panels(bpy.context), "panels draw with the evolution flash")
+    shown = []
+    for f in range(1, 101):
+        scene.frame_set(f)
+        shown.append(evaluated_counts(new_mesh) > 0)
+    flips = [i for i, (a, b) in enumerate(zip(shown, shown[1:])) if a != b]
+    check(len(flips) >= 8 and not shown[0] and shown[-1] and flips[1] - flips[0] > flips[-1] - flips[-2],
+          "evolution: the outfits flash in turn, faster and faster (%d flips), the new one stays" % len(flips))
+    check(any(m.get(materials.P_GLOW) for m in effect._glow_materials(old_mesh, s, True)),
+          "evolution: the locked parts glow too")
+
+    # --- smoke puff: the new outfit is there at the moment, a puff of smoke around it then
+    s.entrance = "POOF"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the smoke puff")
+    seen = []
+    for f in range(1, 101, 3):
+        scene.frame_set(f)
+        seen.append((evaluated_counts(new_mesh) > 0, instance_count(new_mesh)))
+    swap = next((i for i, (there, _n) in enumerate(seen) if there), None)
+    check(swap is not None and not any(there for there, _n in seen[:swap]) and all(there for there, _n in seen[swap:])
+          and seen[swap][1] > 20 and seen[0][1] == 0 and seen[-1][1] == 0,
+          "smoke puff: the new outfit appears at once inside a puff of smoke (%s)"
+          % (seen[swap][1] if swap is not None else None))
+
+    # --- rising from the shadow: the old outfit sinks into its shadow on the floor, the new one stands up out of it;
+    # every material can turn black
+    s.entrance = "SHADOW"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build rising from the shadow")
+    tops = []
+    for f in range(1, 101, 3):
+        scene.frame_set(f)
+        both = np.concatenate([world_vertices(ob)[0] for ob in (old_mesh, new_mesh)])
+        tops.append(float(both[:, 2].max() - both[:, 2].min()) if len(both) else 0.0)
+    low = min(tops)
+    check(tops[0] > 0.9 * height and low < 0.02 * height and tops[-1] > 0.9 * height,
+          "shadow: standing, then flat on the floor (%.3f), then standing again" % low)
+    check(all(sl.material.get(materials.P_SHADOW) for sl in old_mesh.material_slots if sl.material)
+          and evaluated_values(new_mesh, ATTR_SHADOW) is not None, "shadow: every material can turn black")
+    s.entrance = "GROW"
+    check(not any(sl.material.get(materials.P_SHADOW) for sl in old_mesh.material_slots if sl.material),
+          "shadow: the black shadow taken out of the materials again")
+
+    # --- line art and ink wash: the new outfit drawn ahead of the edge (line art), outlined, its colours coming in
+    # behind it; the old outfit's ink wash surface
+    s.path = "UP"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build a sweep for the drawings")
+    scene.frame_set(50)
+    plain = evaluated_counts(new_mesh)
+    s.paint_style = "LINEART"
+    scene.frame_set(51)
+    scene.frame_set(50)
+    paint = evaluated_values(new_mesh, ATTR_PAINT)
+    deps = bpy.context.evaluated_depsgraph_get()
+    ev = new_mesh.evaluated_get(deps)
+    used = {ev.material_slots[p.material_index].material.name for p in ev.data.polygons
+            if p.material_index < len(ev.material_slots) and ev.material_slots[p.material_index].material}
+    check(evaluated_counts(new_mesh) > plain and paint is not None and paint.min() < 0.05 and paint.max() > 0.95
+          and materials.OUTLINE_MATERIAL in used, "line art: drawn ahead of the edge (%d > %d vertices), outlined"
+          % (evaluated_counts(new_mesh), plain))
+    painted = list(effect._glow_materials(new_mesh, s))
+    check(painted and all(m.get(materials.P_PAINT) for m in painted)
+          and all(materials.PAINT + " Mix" in chain(m) for m in painted[:3]),
+          "line art: the drawing injected into %d materials"
+          % len(painted))
+    check(not draw_panels(bpy.context), "panels draw with line art")
+    s.paint_style, s.old_surface = "INK", "INK"
+    inked = list(effect._glow_materials(old_mesh, s))
+    check(all(m.get(materials.P_SURFACE) == "INK" for m in inked), "ink wash: the old outfit turns into ink")
+    s.paint_style, s.old_surface = "NONE", "NONE"
+    check(not any(m.get(materials.P_PAINT) for m in painted) and not any(m.get(materials.P_SURFACE) for m in inked),
+          "drawings taken out of the materials again")
+
+    # --- Mark 50: the reactor (the suit around the start point there first, glowing) and the armour plates rising
+    # behind the edge (gone at the end)
+    s.path, s.seeds, s.reactor = "SURFACE", "ORIGIN", True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the reactor")
+    early = []
+    for f in range(2, 16):
+        scene.frame_set(f)
+        co, glow = world_vertices(new_mesh)
+        early.append((len(co), int((glow > 0.9).sum())))
+    check(any(0 < n < 0.1 * len(new_mesh.data.vertices) and bright > 0 for n, bright in early),
+          "reactor: a small glowing patch of the suit first %s" % early[::3])
+    s.reactor = False
+    scene.frame_set(50)
+    flat_co = evaluated_positions(new_mesh)
+    s.plates = True
+    scene.frame_set(51)
+    scene.frame_set(50)
+    raised_co = evaluated_positions(new_mesh)
+    tree = KDTree(len(flat_co))
+    for i, v in enumerate(flat_co):
+        tree.insert(Vector(v), i)
+    tree.balance()
+    off = np.array([tree.find(Vector(v))[2] for v in raised_co[::max(1, len(raised_co) // 20000)]])
+    check(int((off > 0.3 * s.plate_lift).sum()) > 20, "plates rise off the suit behind the edge (%d vertices)"
+          % int((off > 0.3 * s.plate_lift).sum()))
+    scene.frame_set(100)
+    check(evaluated_faces_and_edge(new_mesh)[0] == grown_faces, "plates: settled at the end")
+    s.plates = False
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature
@@ -1421,6 +1632,22 @@ def run():
         if key == "BEAT_DROP":
             check(s.beat_sync and s.finale and s.glitch_enable and len(white_flash(scene)[1]) == 1,
                   "beat drop preset: on the beat, glitch, finale and the white flash")
+        if key in ("MAGIC_CIRCLE", "SPARK_PORTAL", "TV_BARRIER", "SPARKLE_SPIRAL"):
+            check(s.ring_enable and len(rings.ring_objects(s.mask)) == 1, "%s preset: a %s at the front"
+                  % (key, s.ring_style.lower()))
+        if key in ("EVOLUTION", "SMOKE_PUFF", "SHADOW_RISE"):
+            check(s.easing == "LINEAR" and s.entrance in effect.AT_ONCE, "%s preset: %s on a linear timeline"
+                  % (key, s.entrance.lower()))
+        if key == "SKETCH":
+            check(s.paint_style == "LINEART" and s.path == "UP", "sketch preset: line art from the feet up")
+        if key == "INK_WASH":
+            check(s.paint_style == "INK" and s.old_surface == "INK" and s.particles == "INK",
+                  "ink wash preset: ink over the old outfit, ink drops, the new one in ink")
+        if key == "BROOCH":
+            check(s.exit_style == "SUCK" and s.finale, "brooch preset: sucked into the brooch")
+        if key == "MARK50":
+            check(s.reactor and s.plates and s.layer_enable and len(white_flash(scene)[1]) == 1,
+                  "Mark 50 preset: reactor, plates, undersuit and the white flash")
     s.beat_sync = False  # (the beat drop preset turned it on; the finale checks below are not on the beat)
     check(s.path == "SURFACE" and s.seeds == "LIMBS" and s.ribbon_enable and s.particles == "STAR",
           "magical girl preset applied (and rebuilt)")

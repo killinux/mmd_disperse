@@ -7,18 +7,26 @@ computed once at build time on the rest pose and stored in the 'disperse_arrival
 * SURFACE - shortest paths through a voxelised copy of both outfits, so the wave flows over the body
   (around the torso, down the arms) instead of jumping through the air. Voxels instead of mesh edges
   because MMD meshes are thousands of disconnected pieces: PMX splits the vertices at every UV seam.
-* UP / DOWN - a flat scan from the feet up, or from the head down.
+* UP / DOWN and the sideways sweeps - a flat front crossing the body along one of the model's axes (from the feet up,
+  from the head down, across from one side to the other, from the front to the back ...).
+* SPIRAL - the front winds up around the body: something circling it once per pitch changes, at each height, the
+  part it passes over (Cinderella's sparkles spiralling up).
 """
 
 import itertools
 import math
 
 import numpy as np
+from mathutils import Matrix, Vector
 
 from .model import rest_points_world
 from .node_groups import ATTR_ARRIVAL
 
-PATHS = ("SPHERE", "SURFACE", "UP", "DOWN")
+# Flat sweeps: the direction the front moves in, in the model's own axes (MMD models face -Y, so from the front the
+# camera sees their right hand on the left of the picture, at -X).
+SWEEPS = {"UP": (0.0, 0.0, 1.0), "DOWN": (0.0, 0.0, -1.0), "LEFT_RIGHT": (1.0, 0.0, 0.0),
+          "RIGHT_LEFT": (-1.0, 0.0, 0.0), "FRONT_BACK": (0.0, 1.0, 0.0), "BACK_FRONT": (0.0, -1.0, 0.0)}
+PATHS = ("SPHERE", "SURFACE", "SPIRAL") + tuple(SWEEPS)
 CELLS_PER_HEIGHT = 96
 
 # Extra start points for "hands and feet" (mmd_tools names first, then the original PMX / other rigs).
@@ -160,19 +168,73 @@ def surface_distances(point_sets, tri_sets, seeds, height):
     return [_sample(dist, origin, step, points) for points in point_sets]
 
 
-def sweep_distances(point_sets, upward):
-    """Height above the lowest point (or below the highest one), for each point set."""
-    lo = min(float(p[:, 2].min()) for p in point_sets)
-    hi = max(float(p[:, 2].max()) for p in point_sets)
-    return [p[:, 2] - lo if upward else hi - p[:, 2] for p in point_sets]
+def axes(frame, path):
+    """World (axis, u, v) of a sweep or the spiral: the direction the front moves in and two directions across it, a
+    right-handed set (u, v, axis). For the upward sweep and the spiral u points at the model's front and v at its left,
+    so angles around the body start in front of it and turn left (counter-clockwise from above). `frame` is the model's
+    rotation (3x3)."""
+    axis = (frame @ Vector(SWEEPS.get(path, (0.0, 0.0, 1.0)))).normalized()
+    up = (frame @ Vector((0.0, 0.0, 1.0))).normalized()
+    front = (frame @ Vector((0.0, -1.0, 0.0))).normalized()
+    u = front if abs(axis.dot(up)) > 0.5 else up  # across a sideways sweep: up the body
+    u = (u - axis * u.dot(axis)).normalized()
+    return axis, u, axis.cross(u)
 
 
-def compute(meshes, path, seeds, height):
-    """Arrival distance of every vertex (rest pose, world units): one array per mesh."""
+def sweep_distances(point_sets, axis):
+    """Distance along `axis` from the point set's first point the front reaches, for each point set."""
+    axis = np.asarray(axis, dtype=np.float64)
+    proj = [p @ axis for p in point_sets]
+    lo = min(float(v.min()) for v in proj)
+    return [v - lo for v in proj]
+
+
+def spiral_distances(point_sets, frame, pitch):
+    """The front winding up around the body: at each height a point changes when the thing circling the body (once
+    per `pitch`, starting in front) passes over it, on the turn that reaches that height:
+    d = h + pitch * (1 - frac(h / pitch - angle / 2pi)), h the height above the lowest point."""
+    axis, u, v = (np.asarray(a, dtype=np.float64) for a in axes(frame, "SPIRAL"))
+    every = np.concatenate(point_sets)
+    centre = (every.min(axis=0) + every.max(axis=0)) / 2.0
+    low = float((every @ axis).min())
+    pitch = max(float(pitch), 1e-6)
+    out = []
+    for p in point_sets:
+        rel = p - centre
+        h = p @ axis - low
+        angle = np.mod(np.arctan2(rel @ v, rel @ u), 2.0 * math.pi)
+        turn = h / pitch - angle / (2.0 * math.pi)
+        out.append(h + pitch * (1.0 - (turn - np.floor(turn))))
+    return out
+
+
+def compute(meshes, path, seeds, height, frame=None, pitch=1.0):
+    """Arrival distance of every vertex (rest pose, world units): one array per mesh. `frame` is the model's rotation
+    (sweeps and the spiral follow the model's own axes)."""
     points = [rest_points_world(ob) for ob in meshes]
-    if path in ("UP", "DOWN"):
-        return sweep_distances(points, path == "UP")
+    frame = frame if frame is not None else Matrix.Identity(3)
+    if path in SWEEPS:
+        return sweep_distances(points, axes(frame, path)[0])
+    if path == "SPIRAL":
+        return spiral_distances(points, frame, pitch)
     return surface_distances(points, [_triangles(ob) for ob in meshes], seeds, height)
+
+
+def front_layout(meshes, path, frame):
+    """Where a sweep or the spiral starts, for the mask and the front's decoration (world units, rest pose): a dict with
+    the start centre (on the plane the front starts from, through the middle of the body; the bottom centre for the
+    spiral), the axes (axis, u, v), the length the front travels across the body ('span') and the body's half size
+    across it along u and v ('half_u', 'half_v')."""
+    every = np.concatenate([rest_points_world(ob) for ob in meshes])
+    axis, u, v = axes(frame, path)
+    lo, hi = every.min(axis=0), every.max(axis=0)
+    centre = Vector(((lo + hi) / 2.0).tolist())
+    a, uu, vv = (np.asarray(x, dtype=np.float64) for x in (axis, u, v))
+    along = every @ a
+    start = centre + axis * (float(along.min()) - float(np.dot(np.asarray(centre), a)))
+    rel = every - np.asarray(centre)
+    return {"start": start, "axis": axis, "u": u, "v": v, "span": float(along.max() - along.min()),
+            "half_u": float(np.abs(rel @ uu).max()), "half_v": float(np.abs(rel @ vv).max())}
 
 
 def write(ob, values):

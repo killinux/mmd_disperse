@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "mmd_disperse"
-version = "1.7.0"
+version = "1.8.0"
 name = "MMD Disperse"
 tagline = "Geometry Nodes suit-up transformation between two MMD outfits"
 maintainer = "mmd_disperse"

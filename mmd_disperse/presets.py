@@ -1,13 +1,15 @@
 """One-click looks. A preset only sets panel values (sizes stay fitted to the model); some of them are
 build-time settings, so an effect that is already built gets rebuilt with them. Presets in WHITE_FLASH also want
-the compositor's white flash, those in REFRACTION EEVEE's refraction (the operator adds them)."""
+the compositor's white flash, those in REFRACTION EEVEE's refraction, those with impact frames the compositor's impact
+frames (the operator adds them)."""
 
 _OFF = dict(
     entrance="GROW", exit_style="SHRINK", exit_timing="EDGE", particles="NONE", wire_enable=False, holo_enable=False,
     glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True, finale=False, finale_style="PULSE",
     finale_length=0.15, layer_enable=False, layer_style="NANO", inner_glow=False, venom_enable=False,
     venom_metallic=0.0, old_surface="NONE", particle_count=600, easing="EASE", ring_enable=False, paint_style="NONE",
-    reactor=False, plates=False, arc_enable=False,
+    reactor=False, plates=False, arc_enable=False, trigger="NONE", flame_enable=False, impact_enable=False,
+    soul_enable=False,
 )
 
 PRESETS = (
@@ -176,6 +178,74 @@ PRESETS = (
           exit_style="CHUNKS", exit_timing="AT_ONCE", frag_glow=False, particles="BUTTERFLY", particle_count=250,
           particle_color=(0.35, 0.75, 1.0), particle_glow=2.0, finale=True, finale_white=0.4,
           glow_color=(0.6, 0.85, 1.0), frag_wind_dir=(0.0, 0.3, 1.0))),
+    ("CLAP", "Clap Change", "On the first clap of the dance the change flows over the body from both hands, the old "
+                            "outfit bursting into sparkles, with impact frames (#拍手变装; needs a dance)",
+     dict(_OFF, path="SURFACE", trigger="CLAP", exit_style="FRAGMENTS", frag_glow=True, particles="STAR",
+          particle_count=500, finale=True, finale_white=0.6, impact_enable=True, speed_lines=True, shockwave=False,
+          particle_color=(1.0, 0.85, 0.6), particle_glow=4.0, glow_color=(1.0, 0.5, 0.75),
+          frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("TURN", "Spin Change", "As the dancer's back is turned to the camera the outfits swap all at once behind a white "
+                            "flash and a burst of stars (Wonder Woman's spin; needs a dance with a turn)",
+     dict(_OFF, entrance="SWAP", trigger="TURN", exit_style="FRAGMENTS", frag_glow=True, particles="STAR",
+          particle_count=400, finale=True, finale_white=0.9, particle_color=(1.0, 0.9, 0.6), particle_glow=4.0,
+          glow_color=(1.0, 0.8, 0.4), frag_wind_dir=(0.0, 0.0, 1.0))),
+    ("HAND_SWIPE", "Hand Swipe", "The outfit changes where the hands sweep over the body as the dance goes, "
+                                 "glittering, then over the rest of it (the hand-swipe change of short videos; needs "
+                                 "a dance)",
+     dict(_OFF, path="HAND", exit_style="FRAGMENTS", frag_glow=True, particles="STAR", particle_count=400,
+          edge_glow_strength=6.0, finale=True, finale_white=0.5, particle_color=(0.8, 0.9, 1.0), particle_glow=4.0,
+          glow_color=(0.6, 0.8, 1.0), frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("BLUE_FLAME", "Blue Flame Awakening", "Blue flames engulf the body and the outfits swap at their height, with "
+                                           "impact frames and a shockwave (Persona 5)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", flame_enable=True, flame_mode="AURA", flame_color=(0.15, 0.45, 1.0),
+          flame_strength=5.0, impact_enable=True, speed_lines=True, shockwave=True, edge_glow=False, finale=True,
+          finale_white=0.4, particle_color=(0.5, 0.7, 1.0), glow_color=(0.25, 0.5, 1.0))),
+    ("PHOENIX", "Phoenix Fire", "A band of fire runs up the body: the old outfit chars and burns away into embers and "
+                                "the new one comes out of the flames",
+     dict(_OFF, path="UP", flame_enable=True, flame_mode="EDGE", flame_color=(1.0, 0.38, 0.06), old_surface="CHAR",
+          surface_color=(0.03, 0.022, 0.016), exit_style="FRAGMENTS", frag_glow=True, particles="EMBER",
+          particle_count=600, particle_color=(1.0, 0.45, 0.1), particle_glow=6.0, glow_color=(1.0, 0.45, 0.1),
+          frag_wind_dir=(0.0, 0.3, 1.0))),
+    ("SUPER_AURA", "Golden Aura", "A golden aura blazes up round the body with arcs of lightning while the change "
+                                  "flows over it from the chest, then a flash, impact frames and a shockwave (a "
+                                  "Super Saiyan)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", flame_enable=True, flame_mode="AURA", flame_color=(1.0, 0.78, 0.15),
+          flame_strength=4.0, arc_enable=True, arc_strike=False, edge_glow_strength=5.0, finale=True, finale_white=0.6,
+          impact_enable=True, speed_lines=True, shockwave=True, particle_color=(1.0, 0.9, 0.5),
+          glow_color=(1.0, 0.8, 0.25))),
+    ("LOTUS", "Lotus Bloom", "Big petals grow up from the floor and close into a lotus bud round the body; the outfits "
+                             "swap inside it with a flash and the lotus opens again, petals drifting off (Ne Zha 2)",
+     dict(_OFF, entrance="LOTUS", easing="LINEAR", exit_style="FRAGMENTS", frag_glow=True, particles="PETAL",
+          particle_count=500, finale=True, finale_white=0.6, particle_color=(1.0, 0.36, 0.5), particle_glow=1.5,
+          glow_color=(1.0, 0.75, 0.45), frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("HUSK", "Golden Cicada", "At the moment the whole old self is left behind as an amber shell while the dancer goes "
+                              "on in the new outfit; then the shell crumbles away (Black Myth's 聚形散气)",
+     dict(_OFF, entrance="SWAP", exit_style="HUSK", husk_style="AMBER", husk_away="CRUMBLE", finale=True,
+          finale_white=0.5, impact_enable=True, speed_lines=False, shockwave=True, particle_color=(1.0, 0.8, 0.45),
+          glow_color=(1.0, 0.7, 0.3), frag_wind_dir=(0.3, 0.3, 0.6))),
+    ("SOUL_DEPART", "Soul Departs", "The old self is left behind as a glowing ghost that floats up and fades while the "
+                                    "dancer goes on in the new outfit",
+     dict(_OFF, entrance="SWAP", exit_style="HUSK", husk_style="GHOST", husk_away="FLOAT", finale=True,
+          finale_white=0.3, particle_color=(0.7, 0.85, 1.0), glow_color=(0.45, 0.7, 1.0))),
+    ("IMPACT", "Anime Impact", "The change bursts out from the chest under hexagon wires; when it is complete, impact "
+                               "frames, speed lines and a shockwave on the floor",
+     dict(_OFF, path="SPHERE", wire_enable=True, exit_style="FRAGMENTS", frag_glow=True, impact_enable=True,
+          speed_lines=True, shockwave=True, finale=True, finale_white=0.7, particle_color=(1.0, 0.9, 0.7),
+          glow_color=(1.0, 0.35, 0.2))),
+    ("DANNY", "Two Rings", "A ring of light at the waist splits in two, one going up and one down, and the outfit "
+                           "changes where they pass (Danny Phantom)",
+     dict(_OFF, path="MIDDLE", ring_enable=True, ring_style="HALO", ring_size=0.9, edge_glow_strength=5.0,
+          glow_color=(0.55, 0.85, 1.0))),
+    ("IDOL", "Idol Coord Change", "One garment after the other, from the top down, each sweeping on in a glow, the old "
+                                  "clothes bursting into sparkles (an idol anime's card-by-card outfit change)",
+     dict(_OFF, path="GARMENTS", garment_order="DOWN", exit_style="FRAGMENTS", frag_glow=True, particles="STAR",
+          particle_count=400, edge_glow_strength=6.0, finale=True, finale_white=0.5, particle_color=(1.0, 0.85, 0.95),
+          particle_glow=4.0, glow_color=(1.0, 0.5, 0.85), frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("SOUL_RINGS", "Soul Rings", "Rings of light rise round the body one after another, yellow, purple, black and red, "
+                                 "while the change flows over it from the chest (Soul Land)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", soul_enable=True, soul_count=7, exit_style="FRAGMENTS", frag_glow=True,
+          particles="STAR", particle_count=300, finale=True, finale_white=0.5, particle_color=(1.0, 0.85, 0.5),
+          glow_color=(1.0, 0.75, 0.3))),
     ("MAGICAL", "Magical Girl", "Hands and feet first: the body lights up, ribbons of light wrap the limbs, "
                                 "the old outfit bursts into sparkles and the new one flashes when it is complete",
      dict(_OFF, path="SURFACE", seeds="LIMBS", exit_style="FRAGMENTS", frag_glow=True, silhouette=True,
@@ -185,9 +255,10 @@ PRESETS = (
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
-BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles", "spiral_pitch"}
+BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles", "spiral_pitch", "trigger", "garment_order"}
 WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPARKLE_SPIRAL", "BROOCH", "MARK50",
-               "LIGHTNING", "COCOON"}
+               "LIGHTNING", "COCOON", "CLAP", "TURN", "HAND_SWIPE", "BLUE_FLAME", "SUPER_AURA", "LOTUS", "HUSK",
+               "SOUL_DEPART", "IMPACT", "IDOL", "SOUL_RINGS"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

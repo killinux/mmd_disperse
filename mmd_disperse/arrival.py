@@ -11,10 +11,15 @@ computed once at build time on the rest pose and stored in the 'disperse_arrival
   from the head down, across from one side to the other, from the front to the back ...).
 * SPIRAL - the front winds up around the body: something circling it once per pitch changes, at each height, the
   part it passes over (Cinderella's sparkles spiralling up).
+* MIDDLE - two flat fronts set off from the waist, one up and one down (Danny Phantom's two rings).
+* GARMENTS - one garment (a material of the new outfit) after the other, each swept over in its own turn, like an idol
+  anime's card-by-card outfit change; the old outfit goes where the new garment over it comes.
+* HAND - where the dancing hands sweep over the body (motion.py), filled in from there over the rest of it.
 """
 
 import itertools
 import math
+import random
 
 import numpy as np
 from mathutils import Matrix, Vector
@@ -26,8 +31,15 @@ from .node_groups import ATTR_ARRIVAL
 # camera sees their right hand on the left of the picture, at -X).
 SWEEPS = {"UP": (0.0, 0.0, 1.0), "DOWN": (0.0, 0.0, -1.0), "LEFT_RIGHT": (1.0, 0.0, 0.0),
           "RIGHT_LEFT": (-1.0, 0.0, 0.0), "FRONT_BACK": (0.0, 1.0, 0.0), "BACK_FRONT": (0.0, -1.0, 0.0)}
-PATHS = ("SPHERE", "SURFACE", "SPIRAL") + tuple(SWEEPS)
+PATHS = ("SPHERE", "SURFACE", "SPIRAL", "MIDDLE", "GARMENTS", "HAND") + tuple(SWEEPS)
+# paths whose front has a decoration (rings.py) and a layout: the sweeps, the spiral and the two fronts from the waist
+LAID_OUT = tuple(SWEEPS) + ("SPIRAL", "MIDDLE")
 CELLS_PER_HEIGHT = 96
+WAIST_BONES = ("下半身", "LowerBody", "lower body", "Hips", "hips", "pelvis")
+WAIST_SHARE = 0.53  # height of the waist up the body when there is no lower-body bone
+GARMENT_GAP = 0.12  # pause between two garments, in garment sweeps
+MAX_GARMENTS = 6  # small materials (buttons, trims) go with the garment nearest to them
+MIN_GARMENT = 0.04  # ... below this share of the outfit's area
 
 # Extra start points for "hands and feet" (mmd_tools names first, then the original PMX / other rigs).
 LIMB_BONES = (
@@ -128,8 +140,8 @@ def _sample(dist, origin, step, points):
     return total / np.maximum(weight, 1e-12)
 
 
-def surface_distances(point_sets, tri_sets, seeds, height):
-    """Distance along the body from the nearest seed, for each point set (world units)."""
+def _voxelize(point_sets, tri_sets, height):
+    """(voxels on the surface of both outfits, grid origin, voxel size): the body as a grid the paths run through."""
     step = height / CELLS_PER_HEIGHT
     every = list(point_sets)
     for points, tris in zip(point_sets, tri_sets):
@@ -146,26 +158,52 @@ def surface_distances(point_sets, tri_sets, seeds, height):
     for move in _MOVES:
         to, frm = _slices(move)
         grown[to] |= voxels[frm]
-    voxels = grown
+    return grown, origin, step
 
-    # Seeds usually sit inside the body (bones): start from the surface nearest to each of them.
-    dist = np.full(dims, np.inf, dtype=np.float32)
-    cells = np.argwhere(voxels)
-    centers = origin + (cells + 0.5) * step
-    for seed in seeds:
-        d = np.linalg.norm(centers - np.asarray(seed, dtype=np.float64), axis=1)
-        near = d <= d.min() + 2.5 * step
-        c = cells[near]
-        dist[c[:, 0], c[:, 1], c[:, 2]] = np.minimum(dist[c[:, 0], c[:, 1], c[:, 2]],
-                                                     (d[near] - d.min()).astype(np.float32))
 
+def _spread(dist, voxels, origin, step, point_sets):
+    """Run the distances started in `dist` over the body (and through the air to pieces that do not touch it), then
+    read them at every point set."""
     _relax(dist, np.where(voxels, 0.0, np.inf).astype(np.float32), step)
     lost = voxels & ~np.isfinite(dist)
     if lost.any():  # pieces that do not touch the body (floating accessories): reach them through the air
         air = dist.copy()
-        _relax(air, np.zeros(dims, dtype=np.float32), step)
+        _relax(air, np.zeros(dist.shape, dtype=np.float32), step)
         dist[lost] = air[lost]
     return [_sample(dist, origin, step, points) for points in point_sets]
+
+
+def surface_distances(point_sets, tri_sets, seeds, height, delays=None):
+    """Distance along the body from the nearest seed, for each point set (world units). With `delays` (one per seed)
+    a seed sets off that much later: the front is where the first one to get there has come to."""
+    voxels, origin, step = _voxelize(point_sets, tri_sets, height)
+    # Seeds usually sit inside the body (bones): start from the surface nearest to each of them.
+    dist = np.full(voxels.shape, np.inf, dtype=np.float32)
+    cells = np.argwhere(voxels)
+    centers = origin + (cells + 0.5) * step
+    for k, seed in enumerate(seeds):
+        d = np.linalg.norm(centers - np.asarray(seed, dtype=np.float64), axis=1)
+        near = d <= d.min() + 2.5 * step
+        c = cells[near]
+        late = float(delays[k]) if delays is not None else 0.0
+        dist[c[:, 0], c[:, 1], c[:, 2]] = np.minimum(dist[c[:, 0], c[:, 1], c[:, 2]],
+                                                     (d[near] - d.min() + late).astype(np.float32))
+    return _spread(dist, voxels, origin, step, point_sets)
+
+
+def surface_fill(point_sets, tri_sets, known, height):
+    """The distances `known` at some points (np.inf where not, one array per point set) carried on over the body to the
+    rest of it: a point gets the smallest known distance plus how far along the body it is from there. The known
+    points keep theirs."""
+    voxels, origin, step = _voxelize(point_sets, tri_sets, height)
+    dist = np.full(voxels.shape, np.inf, dtype=np.float32)
+    for points, values in zip(point_sets, known):
+        ok = np.isfinite(values)
+        if ok.any():
+            idx = np.floor((points[ok] - origin) / step).astype(np.int64)
+            np.minimum.at(dist, (idx[:, 0], idx[:, 1], idx[:, 2]), values[ok].astype(np.float32))
+    filled = _spread(dist, voxels, origin, step, point_sets)
+    return [np.where(np.isfinite(values), values, out) for values, out in zip(known, filled)]
 
 
 def axes(frame, path):
@@ -208,32 +246,176 @@ def spiral_distances(point_sets, frame, pitch):
     return out
 
 
-def compute(meshes, path, seeds, height, frame=None, pitch=1.0):
+def waist_level(point_sets, axis, armature=None):
+    """How far up `axis` the waist is (world units): the lower body bone's rest position, or a share of the body."""
+    a = np.asarray(axis, dtype=np.float64)
+    bones = armature.data.bones if armature is not None else {}
+    bone = next((bones[n] for n in WAIST_BONES if n in bones), None)
+    if bone is not None:
+        return float(np.dot(np.asarray(armature.matrix_world @ bone.head_local), a))
+    along = np.concatenate([p @ a for p in point_sets])
+    return float(along.min() + WAIST_SHARE * (along.max() - along.min()))
+
+
+def middle_distances(point_sets, axis, waist):
+    """Two flat fronts set off from the waist, one up the body and one down: the distance from the waist."""
+    a = np.asarray(axis, dtype=np.float64)
+    return [np.abs(p @ a - waist) for p in point_sets]
+
+
+def _face_data(ob):
+    """(material index, world area, world centre) of every face and, per face corner, its face and its vertex."""
+    me = ob.data
+    n = len(me.polygons)
+    index = np.zeros(n, dtype=np.int32)
+    me.polygons.foreach_get("material_index", index)
+    area = np.zeros(n, dtype=np.float32)
+    me.polygons.foreach_get("area", area)
+    centre = np.zeros(n * 3, dtype=np.float32)
+    me.polygons.foreach_get("center", centre)
+    total = np.zeros(n, dtype=np.int32)
+    me.polygons.foreach_get("loop_total", total)
+    corner_vertex = np.zeros(len(me.loops), dtype=np.int32)
+    me.loops.foreach_get("vertex_index", corner_vertex)
+    mw = np.array(ob.matrix_world, dtype=np.float64)
+    s = ob.matrix_world.to_scale()
+    world_area = area.astype(np.float64) * abs(s.x * s.y * s.z) ** (2.0 / 3.0)
+    world_centre = centre.reshape(-1, 3).astype(np.float64) @ mw[:3, :3].T + mw[:3, 3]
+    return index, world_area, world_centre, np.repeat(np.arange(n), total), corner_vertex
+
+
+def _garments(faces, keys, axis):
+    """The new outfit's garments: its materials (by name, over all its meshes), small ones joined to the nearest
+    bigger one, at most MAX_GARMENTS. Each is a dict: names, area, centre, lowest and highest point along `axis`."""
+    found = {}
+    for (index, area, centre, _face, _vertex), names in zip(faces, keys):
+        for k, name in enumerate(names):
+            if name is None:
+                continue
+            pick = index == k
+            if not pick.any():
+                continue
+            g = found.setdefault(name, {"names": {name}, "area": 0.0, "moment": np.zeros(3), "lo": np.inf,
+                                        "hi": -np.inf})
+            g["area"] += float(area[pick].sum())
+            g["moment"] += (centre[pick] * area[pick, None]).sum(axis=0)
+            h = centre[pick] @ axis
+            g["lo"], g["hi"] = min(g["lo"], float(h.min())), max(g["hi"], float(h.max()))
+    groups = [g for g in found.values() if g["area"] > 0.0]
+    for g in groups:
+        g["centre"] = g.pop("moment") / g["area"]
+    total = sum(g["area"] for g in groups)
+    while len(groups) > 1:
+        small = min(groups, key=lambda g: g["area"])
+        if len(groups) <= MAX_GARMENTS and small["area"] >= MIN_GARMENT * total:
+            break
+        others = [g for g in groups if g is not small]
+        near = min(others, key=lambda g: float(np.linalg.norm(g["centre"] - small["centre"])))
+        joined = near["area"] + small["area"]
+        near["centre"] = (near["centre"] * near["area"] + small["centre"] * small["area"]) / joined
+        near["area"] = joined
+        near["lo"], near["hi"] = min(near["lo"], small["lo"]), max(near["hi"], small["hi"])
+        near["names"] |= small["names"]
+        groups.remove(small)
+    return groups
+
+
+def garment_distances(meshes, roles, keys, axis, height, order="DOWN"):
+    """One garment after the other: each material of the new outfit (`keys`: per mesh, the material names of its slots,
+    None for the parts locked to the old model) in its own turn, a sweep over it from its top down (from its bottom up
+    for the order UP) that takes a body height of the front; the garments go from the top of the body down (DOWN), from
+    the feet up (UP) or in a random order. The old outfit goes where the new garment nearest to it comes. With no new
+    outfit the old outfit's own materials take their turns."""
+    from mathutils.kdtree import KDTree
+
+    a = np.asarray(axis, dtype=np.float64)
+    points = [rest_points_world(ob) for ob in meshes]
+    lead = [i for i, r in enumerate(roles) if r == "TARGET"] or list(range(len(meshes)))
+    faces = [_face_data(meshes[i]) for i in lead]
+    groups = _garments(faces, [keys[i] for i in lead], a)
+    if not groups:
+        return sweep_distances(points, -a)
+    if order == "RANDOM":
+        random.Random(len(groups) * 7919 + int(sum(g["area"] for g in groups) * 1000.0)).shuffle(groups)
+    else:
+        groups.sort(key=lambda g: (g["lo"] + g["hi"]) / 2.0, reverse=order != "UP")
+    slot = 0.6 * height
+    rank = {}
+    for k, g in enumerate(groups):
+        for name in g["names"]:
+            rank[name] = k
+    out = [np.full(len(p), np.inf) for p in points]
+    for i, (index, _area, _centre, face, vertex) in zip(lead, faces):
+        names = keys[i]
+        h = points[i][vertex] @ a
+        k = np.array([rank.get(n, -1) if n is not None else -1 for n in names] or [-1])[np.clip(index[face], 0, max(
+            len(names) - 1, 0))]
+        ok = k >= 0
+        lo = np.array([g["lo"] for g in groups])[np.maximum(k, 0)]
+        hi = np.array([g["hi"] for g in groups])[np.maximum(k, 0)]
+        local = np.clip((h - lo) / np.maximum(hi - lo, 1e-6), 0.0, 1.0)
+        local = local if order == "UP" else 1.0 - local
+        d = k * slot * (1.0 + GARMENT_GAP) + slot * local
+        np.minimum.at(out[i], vertex[ok], d[ok])
+    # Everything else (the old outfit, locked parts, loose vertices) goes with the nearest point of a garment.
+    known = [(i, np.nonzero(np.isfinite(out[i]))[0]) for i in lead]
+    count = sum(len(v) for _i, v in known)
+    if count == 0:
+        return sweep_distances(points, -a)
+    tree = KDTree(count)
+    values = np.empty(count)
+    n = 0
+    for i, idx in known:
+        for j in idx:
+            tree.insert(points[i][j], n)
+            values[n] = out[i][j]
+            n += 1
+    tree.balance()
+    for i, p in enumerate(points):
+        for j in np.nonzero(~np.isfinite(out[i]))[0]:
+            out[i][j] = values[tree.find(p[j])[1]]
+    return out
+
+
+def compute(meshes, path, seeds, height, frame=None, pitch=1.0, armature=None, roles=None, keys=None,
+            order="DOWN"):
     """Arrival distance of every vertex (rest pose, world units): one array per mesh. `frame` is the model's rotation
-    (sweeps and the spiral follow the model's own axes)."""
+    (sweeps and the spiral follow the model's own axes). The waist is found on `armature` (MIDDLE); `roles` and `keys`
+    (the meshes' roles and material names) make the garments (GARMENTS)."""
     points = [rest_points_world(ob) for ob in meshes]
     frame = frame if frame is not None else Matrix.Identity(3)
     if path in SWEEPS:
         return sweep_distances(points, axes(frame, path)[0])
     if path == "SPIRAL":
         return spiral_distances(points, frame, pitch)
+    if path == "MIDDLE":
+        axis = axes(frame, path)[0]
+        return middle_distances(points, axis, waist_level(points, axis, armature))
+    if path == "GARMENTS":
+        return garment_distances(meshes, roles, keys, np.asarray(axes(frame, "UP")[0]), height, order)
     return surface_distances(points, [_triangles(ob) for ob in meshes], seeds, height)
 
 
-def front_layout(meshes, path, frame):
+def front_layout(meshes, path, frame, armature=None):
     """Where a sweep or the spiral starts, for the mask and the front's decoration (world units, rest pose): a dict with
     the start centre (on the plane the front starts from, through the middle of the body; the bottom centre for the
-    spiral), the axes (axis, u, v), the length the front travels across the body ('span') and the body's half size
-    across it along u and v ('half_u', 'half_v')."""
+    spiral; the waist for the two fronts from there), the axes (axis, u, v), the length the front travels across the
+    body ('span') and the body's half size across it along u and v ('half_u', 'half_v'). 'mirror' is 1 when a second
+    front goes the other way from the start (MIDDLE), as far as 'span_back'."""
     every = np.concatenate([rest_points_world(ob) for ob in meshes])
     axis, u, v = axes(frame, path)
     lo, hi = every.min(axis=0), every.max(axis=0)
     centre = Vector(((lo + hi) / 2.0).tolist())
     a, uu, vv = (np.asarray(x, dtype=np.float64) for x in (axis, u, v))
     along = every @ a
-    start = centre + axis * (float(along.min()) - float(np.dot(np.asarray(centre), a)))
+    level, span, mirror = float(along.min()), float(along.max() - along.min()), 0.0
+    span_back = span
+    if path == "MIDDLE":
+        level = waist_level([every], a, armature)
+        span, span_back, mirror = float(along.max()) - level, level - float(along.min()), 1.0
+    start = centre + axis * (level - float(np.dot(np.asarray(centre), a)))
     rel = every - np.asarray(centre)
-    return {"start": start, "axis": axis, "u": u, "v": v, "span": float(along.max() - along.min()),
+    return {"start": start, "axis": axis, "u": u, "v": v, "span": span, "span_back": span_back, "mirror": mirror,
             "half_u": float(np.abs(rel @ uu).max()), "half_v": float(np.abs(rel @ vv).max())}
 
 

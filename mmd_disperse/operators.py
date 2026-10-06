@@ -139,6 +139,12 @@ class MMDDISPERSE_OT_preset(bpy.types.Operator):
             effect.update_white_flash(settings)
         if self.preset in presets.REFRACTION and materials.enable_refraction(context.scene):
             self.report({"INFO"}, "EEVEE refraction turned on for the clear ice")
+        if settings.impact_enable:
+            try:
+                compositor.add_impact(context.scene)
+            except RuntimeError as err:
+                self.report({"WARNING"}, str(err))
+            effect.update_impact(settings)
         return {"FINISHED"}
 
 
@@ -194,6 +200,29 @@ class MMDDISPERSE_OT_find_beats(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class MMDDISPERSE_OT_impact(bpy.types.Operator):
+    """Turn a few frames at the big moment into anime impact frames: stark black and white, every other one inverted
+    (three nodes in the compositor, switched on for those frames)"""
+
+    bl_idname = "mmd_disperse.add_impact"
+    bl_label = "Add Impact Frames"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        settings = context.scene.mmd_disperse
+        try:
+            compositor.add_impact(context.scene)
+        except RuntimeError as err:
+            self.report({"ERROR"}, str(err))
+            return {"CANCELLED"}
+        effect.update_impact(settings)
+        if settings.mask is None or not settings.impact_enable:
+            self.report({"WARNING"}, "Impact frames added; they show once the effect is built with them on")
+        else:
+            self.report({"INFO"}, "Impact frames added to the compositor")
+        return {"FINISHED"}
+
+
 class MMDDISPERSE_OT_white_flash(bpy.types.Operator):
     """Flash the whole picture white as the finale starts (a Mix node in the compositor, driven by the mask)"""
 
@@ -225,5 +254,6 @@ classes = (
     MMDDISPERSE_OT_glitch_fx,
     MMDDISPERSE_OT_find_beats,
     MMDDISPERSE_OT_white_flash,
+    MMDDISPERSE_OT_impact,
     MMDDISPERSE_OT_preset,
 )

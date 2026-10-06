@@ -62,9 +62,46 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("BACK_FRONT", "Sweep Back to Front", "A flat front passes through the body from the back to the "
                                                      "front"),
                ("SPIRAL", "Spiral Up", "The change winds up around the body from the feet, a turn per Spiral Pitch, "
-                                       "as if something circling it changes what it passes over (Cinderella)")),
+                                       "as if something circling it changes what it passes over (Cinderella)"),
+               ("MIDDLE", "Split from the Waist", "Two flat fronts set off from the waist, one up the body and one "
+                                                  "down (Danny Phantom's two rings)"),
+               ("GARMENTS", "Garment by Garment",
+                "One garment of the new outfit after the other (each of its materials), each swept over in its own "
+                "turn, like an idol anime's card-by-card outfit change; the old outfit goes where the garment over it "
+                "comes"),
+               ("HAND", "Where the Hands Sweep",
+                "The outfit changes where the dancing hands sweep over the body, then from there over the rest of it "
+                "(the hand-swipe outfit change of short videos). Building plays the dance to find where they go; the "
+                "front keeps their pace (linear), so the end frame follows")),
         default="SPHERE")
     spiral_pitch: _distance("Spiral Pitch", "How far up the body the change climbs per turn around it", 2.0)
+    garment_order: EnumProperty(
+        name="Garment Order",
+        items=(("DOWN", "From the Top", "From the garments at the top of the body down to the shoes"),
+               ("UP", "From the Feet", "From the shoes up to the garments at the top"),
+               ("RANDOM", "Random", "In a random order (the same every build)")),
+        default="DOWN")
+    hand_side: EnumProperty(
+        name="Hands",
+        items=(("BOTH", "Both Hands", "Wherever either hand sweeps"),
+               ("LEFT", "Left Hand", "Only the model's left hand"),
+               ("RIGHT", "Right Hand", "Only the model's right hand")),
+        default="BOTH")
+    hand_reach: _distance("Hand Reach", "How close a hand has to come to change a spot", 1.4)
+    trigger: EnumProperty(
+        name="Start On",
+        items=(("NONE", "Start Frame", "Start at the start frame"),
+               ("CLAP", "Clap", "Start on the first clap of the dance from the start frame on, from both hands "
+                                "(#拍手变装)"),
+               ("KISS", "Blown Kiss", "Start when a hand blows a kiss (from the lips, then away), from that hand"),
+               ("SALUTE", "Salute", "Start when a hand is held to the brow, from that hand"),
+               ("FLIP", "Hair Flip", "Start on a quick toss of the head, from the head"),
+               ("TURN", "Turn Away", "Swap as the dancer's back is turned to the camera (Wonder Woman's spin): the "
+                                     "moment the outfits swap all at once, or the middle of the wave, comes then")),
+        default="NONE",
+        description="Start the transformation on a move of the dance: building looks for it in the old model's motion "
+                    "from the start frame on and moves the transformation there (the start and end frames follow; with "
+                    "beat sync onto the nearest beat)")
     seeds: EnumProperty(
         name="Flow From",
         items=(("ORIGIN", "Start Point Only", "Flow from the start point only"),
@@ -153,11 +190,56 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                           "Ex-Aid)"),
                ("STATIC", "TV Static", "A sheet of TV static the body passes through (WandaVision)"),
                ("COMET", "Sparkle Comet", "A comet of sparkles circling the body at the front, a turn per Spiral "
-                                          "Pitch (with Spiral Up or the up / down sweeps: Cinderella)")),
+                                          "Pitch (with Spiral Up or the up / down sweeps: Cinderella)"),
+               ("HALO", "Ring of Light", "A plain ring of light (with Split from the Waist: Danny Phantom's two "
+                                         "rings)")),
         default="MAGIC", update=_sync)
     ring_size: FloatProperty(name="Ring Size", default=1.0, min=0.1, soft_max=3.0, update=_sync,
                              description="Size of the ring (1 fits around the body); the comet's distance from it")
     ring_strength: FloatProperty(name="Ring Glow", default=6.0, min=0.0, soft_max=50.0, update=_sync)
+
+    # --- toon flames
+    flame_enable: BoolProperty(name="Toon Flames", default=False, update=_sync,
+                               description="Cartoon flames, no simulation: a shell of flame over the body and tongues "
+                                           "of flame licking up from it (Persona 5's blue flames, Kamen Rider Hibiki, "
+                                           "a Super Saiyan's aura)")
+    flame_mode: EnumProperty(
+        name="Flames",
+        items=(("EDGE", "Along the Edge", "A band of fire runs over the body with the edge"),
+               ("AURA", "Whole Body", "The whole body is wreathed in flames, strongest at the big moment (the swap, or "
+                                      "the new outfit complete), then they die down")),
+        default="EDGE", update=_sync)
+    flame_color: FloatVectorProperty(name="Flame Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(1.0, 0.35, 0.05), update=_sync,
+                                     description="Colour of the flames (deeper at the edges, a white-hot core)")
+    flame_strength: FloatProperty(name="Flame Glow", default=4.0, min=0.0, soft_max=50.0, update=_sync)
+    flame_height: _distance("Flame Height", "How tall the tongues of flame are", 2.5)
+    flame_width: _distance("Flame Width", "How far to either side of the edge the band of fire burns", 2.0)
+    flame_count: IntProperty(name="Tongues", default=500, min=0, soft_max=3000, update=_sync,
+                             description="About how many tongues of flame when the whole outfit burns")
+
+    # --- impact frames
+    impact_enable: BoolProperty(name="Impact Frames", default=False, update=_sync,
+                                description="Anime impact frames at the big moment (or as a move of the dance starts "
+                                            "it): a few frames drained of colour, every other one inverted (needs the "
+                                            "compositor nodes: Add Impact Frames)")
+    impact_frames: IntProperty(name="Frames", default=3, min=1, max=12, update=_sync,
+                               description="How many impact frames")
+    speed_lines: BoolProperty(name="Speed Lines", default=True, update=_sync,
+                              description="Lines rush in from the edges of the picture towards the character during "
+                                          "the impact frames (a sheet in front of the scene camera)")
+    shockwave: BoolProperty(name="Shockwave", default=True, update=_sync,
+                            description="A ring of light spreads over the floor from the feet with puffs of dust (uses "
+                                        "the glow color)")
+    shock_size: _distance("Shockwave Size", "How far the shockwave spreads", 12.0, soft_max=100.0)
+
+    # --- soul rings
+    soul_enable: BoolProperty(name="Soul Rings", default=False, update=_sync,
+                              description="Rings of light rise from the floor one after another and float round the "
+                                          "body, coloured by their age as in Soul Land (斗罗大陆): yellow, purple, "
+                                          "black, red")
+    soul_count: IntProperty(name="Ring Count", default=7, min=1, max=9, update=_sync, description="How many soul rings")
+    soul_strength: FloatProperty(name="Ring Brightness", default=5.0, min=0.0, soft_max=50.0, update=_sync)
 
     # --- lightning
     arc_enable: BoolProperty(name="Lightning Arcs", default=False, update=_sync,
@@ -200,8 +282,16 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("BEAM", "Transporter Beam",
                 "No edge: a column of light comes down round the body with sparkles drifting up and down in it; the "
                 "old outfit shimmers away and the new one shimmers in (Star Trek; uses the glow color, the sparkles "
-                "the particle color)")),
+                "the particle color)"),
+               ("SWAP", "All at Once", "No edge: the outfits swap all at once at the moment (pair it with a flash, "
+                                       "flames, impact frames or Start On: Turn Away)"),
+               ("LOTUS", "Lotus Bud",
+                "No edge: big petals grow up from the floor and close into a bud round the body, the outfits swap "
+                "inside it with a flash, then it opens out and sinks away (Ne Zha 2's lotus; the petals use the "
+                "particle color, their rim the glow color)")),
         default="GROW", update=_sync)
+    lotus_petals: IntProperty(name="Petals", default=8, min=3, max=32, update=_sync,
+                              description="How many petals in each of the lotus's two rings")
     beam_sparkles: IntProperty(name="Beam Sparkles", default=250, min=0, soft_max=2000, update=_sync,
                                description="How many sparkles drift up and down in the column of light")
     beam_strength: FloatProperty(name="Beam Glow", default=2.0, min=0.0, soft_max=20.0, update=_sync,
@@ -385,8 +475,31 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("FRAGMENTS", "Disintegrate", "Break into flakes that blow away"),
                ("CHUNKS", "Cast Off", "Break into armour-like chunks that are thrown off and fall"),
                ("SUCK", "Sucked In", "Break into flakes that spiral into the start point on the chest, like a magical "
-                                     "girl's brooch taking the old clothes in; the particles follow them")),
+                                     "girl's brooch taking the old clothes in; the particles follow them"),
+               ("HUSK", "Leave a Husk",
+                "The whole old model is left behind at the moment as a husk, holding still while the dancer goes on "
+                "in the new outfit, then it crumbles away or floats off (Black Myth's 聚形散气, a cicada's shell). "
+                "Building plays the animation once to record it")),
         default="SHRINK", update=_sync)
+    husk_style: EnumProperty(
+        name="Husk",
+        items=(("AMBER", "Cicada Shell", "A see-through amber shell, like a cicada's"),
+               ("GHOST", "Ghostly", "A see-through ghost of the old self, glowing towards its outline (uses the glow "
+                                  "color)"),
+               ("ASIS", "As It Is", "It looks just like the old outfit (with the surface on it: stone, gold, "
+                                    "ice ...)")),
+        default="AMBER", update=_sync)
+    husk_away: EnumProperty(
+        name="Then",
+        items=(("CRUMBLE", "Crumble", "It crumbles away from the top, the pieces blowing off with the wind"),
+               ("FLOAT", "Float Away", "It floats up and fades out (the soul leaving the body)")),
+        default="CRUMBLE", update=_sync)
+    husk_hold: FloatProperty(name="Husk Holds", default=0.35, min=0.0, max=2.0, subtype="FACTOR", update=_sync,
+                             description="How long the husk stands still before it goes, as a share of the "
+                                         "transformation")
+    husk_time: FloatProperty(name="Husk Goes", default=0.3, min=0.02, max=2.0, subtype="FACTOR", update=_sync,
+                             description="How long it takes to crumble or float away, as a share of the "
+                                         "transformation")
     suck_turns: FloatProperty(name="Spiral Turns", default=1.5, min=-10.0, max=10.0, update=_sync,
                               description="How many times the flakes circle the brooch on their way in")
     exit_timing: EnumProperty(

@@ -60,6 +60,8 @@ def sync(settings, mask, layout, beat):
         "Half V": layout["half_v"],
         "Span": span,
         "Lead": layout["lead"],
+        "Mirror": bool(layout.get("mirror", 0.0)),  # (split from the waist: a second ring going the other way ...
+        "Span Back": float(layout.get("span_back", 0.0)),  # ... as far as its own front goes)
         "Size": settings.ring_size,
         "Pitch": pitch,
         "Line Width": LINE_WIDTH * height,

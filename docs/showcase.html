@@ -231,13 +231,13 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.9：用 Blender 几何节点给 MMD 模型做换装变身。下面五十段视频都是插件生成的
+    <p>mmd_disperse 1.10：用 Blender 几何节点给 MMD 模型做换装变身。下面六十三段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>50</b> 段演示</span>
-      <span><b>22</b> 组效果</span>
-      <span><b>39</b> 个一键预设</span>
-      <span><b>5184</b> 种基本组合</span>
+      <span><b>63</b> 段演示</span>
+      <span><b>29</b> 组效果</span>
+      <span><b>52</b> 个一键预设</span>
+      <span><b>10560</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
     <div class="links">
@@ -266,8 +266,8 @@
     <div class="card">
       <ol class="setup">
         <li><b>安装插件。</b>安装包在 <a href="https://github.com/killinux/mmd_disperse/releases">GitHub Releases</a> 下载。Blender 4.2 及以上：编辑 › 偏好设置 › 获取扩展 › 右上角下拉 › 从磁盘安装，选
-          <code>dist/mmd_disperse-1.9.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
-          <code>mmd_disperse-1.9.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
+          <code>dist/mmd_disperse-1.10.0.zip</code>。Blender 3.6～4.1：偏好设置 › 插件 › 安装，选
+          <code>mmd_disperse-1.10.0-legacy.zip</code>，再勾选「MMD Disperse」。</li>
         <li><b>导入两个模型。</b>用 mmd_tools（文件 › 导入 › MikuMikuDance 模型 (.pmd, .pmx)）导入
           旧服装（变身前，视频里是 V2）和新服装（变身后，V1）。位置随意，生成时新服装会自动对齐到旧服装上。</li>
         <li><b>跳舞的话先加载动作。</b>只给旧模型加载：选中旧模型脚下的根物体，文件 › 导入 ›
@@ -295,7 +295,7 @@
 <section id="effects">
   <div class="wrap">
     <h2>效果演示</h2>
-    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）。</p>
+    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲。</p>
 
     <div class="index">
       <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
@@ -348,6 +348,19 @@
       <a href="#petrify"><img src="../test_output/posters/petrify.jpg" alt="" loading="lazy">石化崩裂</a>
       <a href="#midas"><img src="../test_output/posters/midas.jpg" alt="" loading="lazy">点金术</a>
       <a href="#cocoon"><img src="../test_output/posters/cocoon.jpg" alt="" loading="lazy">破茧而出</a>
+      <a href="#clap"><img src="../test_output/posters/clap.jpg" alt="" loading="lazy">跳舞·拍手变装</a>
+      <a href="#turn"><img src="../test_output/posters/turn.jpg" alt="" loading="lazy">跳舞·转身变装</a>
+      <a href="#hand-swipe"><img src="../test_output/posters/hand_swipe.jpg" alt="" loading="lazy">跳舞·手扫换装</a>
+      <a href="#blue-flame"><img src="../test_output/posters/blue_flame.jpg" alt="" loading="lazy">蓝焰觉醒</a>
+      <a href="#phoenix"><img src="../test_output/posters/phoenix.jpg" alt="" loading="lazy">浴火重生</a>
+      <a href="#super-aura"><img src="../test_output/posters/super_aura.jpg" alt="" loading="lazy">金色气焰</a>
+      <a href="#husk"><img src="../test_output/posters/husk.jpg" alt="" loading="lazy">跳舞·金蝉脱壳</a>
+      <a href="#soul-depart"><img src="../test_output/posters/soul_depart.jpg" alt="" loading="lazy">跳舞·灵魂出窍</a>
+      <a href="#lotus"><img src="../test_output/posters/lotus.jpg" alt="" loading="lazy">莲花绽放</a>
+      <a href="#impact"><img src="../test_output/posters/impact.jpg" alt="" loading="lazy">动画冲击</a>
+      <a href="#idol"><img src="../test_output/posters/idol.jpg" alt="" loading="lazy">偶像换装</a>
+      <a href="#soul-rings"><img src="../test_output/posters/soul_rings.jpg" alt="" loading="lazy">魂环</a>
+      <a href="#danny"><img src="../test_output/posters/danny.jpg" alt="" loading="lazy">双环分开</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -1125,7 +1138,7 @@
     <section class="family card" id="fam-ring">
       <div class="family-head">
         <h3>光环穿身</h3>
-        <p>一个看得见的「光环」跟着平面扫描穿过身体，它经过的地方就换好了衣服。魔法阵和火花圈从侧面扫过，镜头放在斜侧面（正面看只是一条竖线）；雪花屏从前往后穿过。</p>
+        <p>一个看得见的「光环」跟着平面扫描穿过身体，它经过的地方就换好了衣服。魔法阵和火花圈从侧面扫过，镜头放在斜侧面（正面看只是一条竖线）；雪花屏从前往后穿过；1.10 的光环从腰间分成上下两个。</p>
         <button type="button" class="together">▶ 一起播放</button>
       </div>
       <div class="variants">
@@ -1187,6 +1200,26 @@
             <li><span class="ui">光环样式</span> 换成 <span class="v">发光面板</span> 就是假面骑士 Ex-Aid 那种带网格的发光面板。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset TV_BARRIER</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="danny">
+          <figure class="clip">
+            <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/danny.jpg">
+              <source src="../test_output/demo_v12/tifa_danny_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">从腰部上下分开</span><span class="ver">1.10</span><span class="tag">从腰部上下分开</span><span class="tag">光环</span></div>
+            <h3>双环分开（新预设）</h3>
+            <p class="lead">Danny Phantom：腰间一圈光环分成两个，一个往上、一个往下，经过的地方就换好；各自走完自己那一段就消失。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li><span class="ui">预设</span> 选 <span class="v">双环分开</span>：<span class="ui">路径</span> <span class="v">从腰部上下分开</span>，<span class="ui">光环</span> <span class="v">光环</span>。</li>
+            <li>腰的高度取「下半身」骨骼（没有就取身高的 53%）。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset DANNY</code></p>
           </div>
         </article>
       </div>
@@ -1529,6 +1562,271 @@
         </article>
       </div>
     </section>
+    <section class="family card" id="fam-dance">
+      <div class="family-head">
+        <h3>跟着舞蹈动作变</h3>
+        <p>抖音上的变装视频大多跟着舞蹈动作卡点：拍一下手、背过身去、手一扫。插件生成时把舞播一遍，找到这个动作，变身就从那里开始（1.10）。</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="clap">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/clap.jpg">
+              <source src="../test_output/demo_v12/tifa_clap_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">拍手 · 跳舞（有声音）</span><span class="ver">1.10</span><span class="tag">VMD 舞蹈</span><span class="tag">开始时机：拍手</span><span class="tag">沿体表流动</span><span class="tag">碎片飞散</span><span class="tag">星光</span><span class="tag">冲击帧</span></div>
+            <h3>拍手变装（新预设）</h3>
+            <p class="lead">跳着舞两手在头顶一拍，变身就从两只手腕流开：旧服装迸成星光，拍手那一下画面黑白闪两下、集中线冲向人物。生成时插件把舞播一遍（只算骨骼），找到第一次拍手，把变身挪到那里。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD；mmd_tools 导入动作时会把场景的结束帧设到舞蹈结尾，插件找到场景结束帧为止）。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">拍手变装</span>：<span class="ui">开始时机</span> <span class="v">拍手</span>，<span class="ui">路径</span> <span class="v">沿体表流动</span>，<span class="ui">退场方式</span> <span class="v">碎片飞散</span> + <span class="v">星光</span>，<span class="ui">冲击帧</span>。</li>
+            <li>开始帧设在想开始找的地方，点 <span class="ui">生成变身效果</span>：面板显示「在第 N 帧找到」，开始帧和结束帧跟着挪过去（变身时长不变）。</li>
+            <li>冲击帧要在面板里点 <span class="ui">添加冲击帧</span>（预设会自动加），集中线要场景里有相机。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset CLAP --white-flash --vmd "回レ！雪月花.vmd" --wave 100:200</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="turn">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/turn.jpg">
+              <source src="../test_output/demo_v12/tifa_turn_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">转身 · 跳舞（有声音）</span><span class="ver">1.10</span><span class="tag">VMD 舞蹈</span><span class="tag">开始时机：转身背对镜头</span><span class="tag">瞬间换装</span><span class="tag">全屏闪白</span></div>
+            <h3>转身变装（新预设）</h3>
+            <p class="lead">Kizuna AI 的手势舞里转一圈，背对镜头的那一刻一下子换好、闪白、迸出星星，像神奇女侠转一圈就换好。插件找到身体背对相机最彻底的那一帧，把换装的那一刻对准它。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD；mmd_tools 导入动作时会把场景的结束帧设到舞蹈结尾，插件找到场景结束帧为止）。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">转身变装</span>：<span class="ui">开始时机</span> <span class="v">转身背对镜头</span>，<span class="ui">新服装登场</span> <span class="v">瞬间换装</span>。</li>
+            <li>点 <span class="ui">生成变身效果</span>；找到时开始帧会提前，让换装正好落在背身那一帧。没有相机时按正前方（-Y）算朝向。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset TURN --white-flash --vmd "ハンドサイン1.vmd" --wave 200:300</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="hand-swipe">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/hand_swipe.jpg">
+              <source src="../test_output/demo_v12/tifa_hand_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">手扫 · 跳舞（有声音）</span><span class="ver">1.10</span><span class="tag">VMD 舞蹈</span><span class="tag">手扫过的地方</span><span class="tag">碎片飞散</span><span class="tag">星光</span></div>
+            <h3>手扫换装（新预设）</h3>
+            <p class="lead">跳舞时手扫到哪里，哪里先换，其余地方从那里沿体表接着变；这段舞开头双手捧在胸前，胸口最先换。生成时插件把舞播一遍，记下每个地方第一次被手扫到的帧。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD；mmd_tools 导入动作时会把场景的结束帧设到舞蹈结尾，插件找到场景结束帧为止）。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">手扫换装</span>：<span class="ui">路径</span> <span class="v">手扫过的地方</span>（<span class="ui">用哪只手</span>、<span class="ui">手扫到的范围</span>），<span class="ui">退场方式</span> <span class="v">碎片飞散</span> + <span class="v">星光</span>。</li>
+            <li>边界按手的节奏匀速走（一帧走「身高 ÷ 帧数」），结束帧自动改成走完整个身体的时候。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset HAND_SWIPE --white-flash --vmd "回レ！雪月花.vmd" --wave 16:136</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
+    <section class="family card" id="fam-flame">
+      <div class="family-head">
+        <h3>卡通火焰</h3>
+        <p>不用火焰模拟，是动画式的火：一层贴着身体的火壳和一片片转向镜头的火舌，色带切成几档硬边的颜色；火舌大多长在轮廓上，人还看得见（1.10）。</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="blue-flame">
+          <figure class="clip">
+            <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/blue_flame.jpg">
+              <source src="../test_output/demo_v12/tifa_blue_flame_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">全身气焰 · 蓝</span><span class="ver">1.10</span><span class="tag">卡通火焰</span><span class="tag">全身气焰</span><span class="tag">瞬间换装</span><span class="tag">冲击帧</span><span class="tag">地面冲击波</span></div>
+            <h3>蓝焰觉醒（新预设）</h3>
+            <p class="lead">女神异闻录 5：蓝火包住全身，烧到最旺时一下子换好，画面黑白闪三帧、集中线、脚下一圈冲击波和尘土，之后闪白，火慢慢熄掉。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li><span class="ui">预设</span> 选 <span class="v">蓝焰觉醒</span>：<span class="ui">卡通火焰</span> <span class="v">全身气焰</span>（<span class="ui">火焰颜色</span> <span class="v">蓝</span>），<span class="ui">新服装登场</span> <span class="v">瞬间换装</span>，<span class="ui">冲击帧</span>（集中线、地面冲击波）。</li>
+            <li>火壳越靠轮廓越旺，正对着看只剩一层薄纱；火舌转向相机，大多长在轮廓上。<span class="ui">火舌高度</span>、<span class="ui">火舌数量</span>、<span class="ui">火焰亮度</span> 调火舌。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset BLUE_FLAME --white-flash</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="phoenix">
+          <figure class="clip">
+            <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/phoenix.jpg">
+              <source src="../test_output/demo_v12/tifa_phoenix_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">沿着边缘 · 橙</span><span class="ver">1.10</span><span class="tag">卡通火焰</span><span class="tag">沿着边缘</span><span class="tag">从下往上扫</span><span class="tag">烧焦</span><span class="tag">余烬</span></div>
+            <h3>浴火重生（新预设）</h3>
+            <p class="lead">一道火从脚往上烧：火前面的旧服装烧焦，烧过的地方化成余烬往上飘，新服装从火里出来。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li><span class="ui">预设</span> 选 <span class="v">浴火重生</span>：<span class="ui">路径</span> <span class="v">从下往上扫</span>，<span class="ui">卡通火焰</span> <span class="v">沿着边缘</span>，<span class="ui">旧服装表面</span> <span class="v">烧焦</span>，<span class="ui">退场方式</span> <span class="v">碎片飞散</span> + <span class="v">余烬</span>。</li>
+            <li><span class="ui">火焰带宽度</span> 调边界两侧多宽的带子着火。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset PHOENIX</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="super-aura">
+          <figure class="clip">
+            <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/super_aura.jpg">
+              <source src="../test_output/demo_v12/tifa_super_aura_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">全身气焰 · 金</span><span class="ver">1.10</span><span class="tag">卡通火焰</span><span class="tag">全身气焰</span><span class="tag">电弧闪电</span><span class="tag">冲击帧</span><span class="tag">地面冲击波</span></div>
+            <h3>金色气焰（新预设）</h3>
+            <p class="lead">超级赛亚人：金色气焰和电弧包住全身，变身从胸口沿体表流开，完成时画面黑白闪三帧、集中线、冲击波，再闪白，气焰熄掉。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li><span class="ui">预设</span> 选 <span class="v">金色气焰</span>：<span class="ui">路径</span> <span class="v">沿体表流动</span>，<span class="ui">卡通火焰</span> <span class="v">全身气焰</span>，<span class="ui">电弧闪电</span>（不落雷），<span class="ui">冲击帧</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset SUPER_AURA --white-flash</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
+    <section class="family card" id="fam-husk">
+      <div class="family-head">
+        <h3>金蝉脱壳</h3>
+        <p>黑神话的「聚形散气」：换装那一刻，整个旧的自己（连脸和头发）原样留在原地，人穿着新衣服接着跳；空壳停一会儿再碎掉或飘走。要人在动（跳舞或整体移动）才看得出来（1.10）。</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="husk">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/husk.jpg">
+              <source src="../test_output/demo_v12/tifa_husk_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">蝉蜕 · 碎散（有声音）</span><span class="ver">1.10</span><span class="tag">VMD 舞蹈</span><span class="tag">瞬间换装</span><span class="tag">金蝉脱壳</span><span class="tag">蝉蜕空壳</span><span class="tag">冲击帧</span></div>
+            <h3>金蝉脱壳（新预设）</h3>
+            <p class="lead">换装那一刻，旧的自己凝成一个琥珀色的半透明蝉蜕留在原地，人穿着新衣服接着跳开；蝉蜕停一会儿，从头顶往下一片片碎掉、被风吹走。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD；mmd_tools 导入动作时会把场景的结束帧设到舞蹈结尾，插件找到场景结束帧为止）。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">金蝉脱壳</span>：<span class="ui">新服装登场</span> <span class="v">瞬间换装</span>，<span class="ui">退场方式</span> <span class="v">金蝉脱壳</span>（<span class="ui">空壳样式</span> <span class="v">蝉蜕空壳</span>，<span class="ui">之后</span> <span class="v">碎散</span>）。</li>
+            <li>生成时插件把动画播一遍，记下那一刻的姿态（和「留在原地」同一套记录）；<span class="ui">空壳停留</span>、<span class="ui">空壳消散</span> 按变身时长的比例调。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset HUSK --white-flash --vmd "回レ！雪月花.vmd"</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="soul-depart">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/soul_depart.jpg">
+              <source src="../test_output/demo_v12/tifa_soul_depart_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">灵影 · 飘走（有声音）</span><span class="ver">1.10</span><span class="tag">VMD 舞蹈</span><span class="tag">瞬间换装</span><span class="tag">金蝉脱壳</span><span class="tag">灵影</span><span class="tag">飘走</span></div>
+            <h3>灵魂出窍（新预设）</h3>
+            <p class="lead">旧的自己留成一个发光的蓝色鬼影，人跳开以后，鬼影往上飘、慢慢变淡。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD；mmd_tools 导入动作时会把场景的结束帧设到舞蹈结尾，插件找到场景结束帧为止）。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">灵魂出窍</span>：<span class="ui">退场方式</span> <span class="v">金蝉脱壳</span>（<span class="ui">空壳样式</span> <span class="v">灵影</span>，<span class="ui">之后</span> <span class="v">飘走</span>）。</li>
+            <li>鬼影的颜色用边缘的 <span class="ui">发光颜色</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset SOUL_DEPART --white-flash --vmd "回レ！雪月花.vmd"</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
+    <article class="effect card" id="lotus">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/lotus.jpg">
+          <source src="../test_output/demo_v12/tifa_lotus_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="mode">花苞绽放</span><span class="ver">1.10</span><span class="tag">花苞绽放</span><span class="tag">碎片飞散</span><span class="tag">花瓣</span><span class="tag">全屏闪白</span></div>
+        <h3>莲花绽放（新预设）</h3>
+        <p class="lead">哪吒 2 的七色宝莲：地上长出两圈大花瓣，合拢成高过头顶的花苞把人包住，合着时随拍子轻轻起伏；人在里面一下子换好、一闪，花苞再打开，花瓣平铺到地上缩小消失，花瓣粒子飘走。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+        <li><span class="ui">预设</span> 选 <span class="v">莲花绽放</span>：<span class="ui">新服装登场</span> <span class="v">花苞绽放</span>（<span class="ui">花瓣</span> 调每圈几片），<span class="ui">退场方式</span> <span class="v">碎片飞散</span> + <span class="v">花瓣</span>。</li>
+        <li>花瓣颜色用 <span class="ui">粒子颜色</span>（底部深、尖上浅），边缘发光用 <span class="ui">发光颜色</span>。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset LOTUS --white-flash</code></p>
+      </div>
+    </article>
+    <article class="effect card" id="impact">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/impact.jpg">
+          <source src="../test_output/demo_v12/tifa_impact_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="mode">冲击帧</span><span class="ver">1.10</span><span class="tag">球形扩散</span><span class="tag">六边形线框</span><span class="tag">冲击帧</span><span class="tag">集中线</span><span class="tag">地面冲击波</span><span class="tag">收尾闪光</span></div>
+        <h3>动画冲击（新预设）</h3>
+        <p class="lead">变身从胸口炸开；完成的那一刻画面变成黑白两色、隔一帧反色一次（动画的冲击帧），集中线从四周冲向人物，脚下一圈冲击波和尘土，之后才闪白。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+        <li><span class="ui">预设</span> 选 <span class="v">动画冲击</span>，或者在任意效果上勾 <span class="ui">冲击帧</span> 面板，点 <span class="ui">添加冲击帧</span>（合成器里加去色、黑白曲线、反色三个节点）。</li>
+        <li><span class="ui">帧数</span> 调黑白几帧；<span class="ui">集中线</span> 要场景里有相机；<span class="ui">冲击波范围</span> 调冲击波扩多远。</li>
+        <li>冲击帧和收尾闪白同时出现时，闪白推到冲击帧之后。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset IMPACT --white-flash</code></p>
+      </div>
+    </article>
+    <article class="effect card" id="idol">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/idol.jpg">
+          <source src="../test_output/demo_v12/tifa_idol_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="mode">一件一件换</span><span class="ver">1.10</span><span class="tag">一件一件换</span><span class="tag">碎片飞散</span><span class="tag">星光</span><span class="tag">全屏闪白</span></div>
+        <h3>偶像换装（新预设）</h3>
+        <p class="lead">偶像动画的换装卡：新服装一件一件（每个材质算一件）从上往下轮流换上，旧衣服迸成粉色星光，换完整身闪光。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+        <li><span class="ui">预设</span> 选 <span class="v">偶像换装</span>：<span class="ui">路径</span> <span class="v">一件一件换</span>（<span class="ui">换衣顺序</span> <span class="v">从上往下</span>），<span class="ui">退场方式</span> <span class="v">碎片飞散</span> + <span class="v">星光</span>。</li>
+        <li>太小的材质（扣子、饰边）并到离它最近的那件里，最多六件；旧服装跟着离它最近的新衣服退场。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset IDOL --white-flash</code></p>
+      </div>
+    </article>
+    <article class="effect card" id="soul-rings">
+      <figure class="clip">
+        <video controls loop muted playsinline preload="metadata" poster="../test_output/posters/soul_rings.jpg">
+          <source src="../test_output/demo_v12/tifa_soul_rings_hd.mp4" type="video/mp4">
+        </video>
+        <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+      </figure>
+      <div class="info">
+        <div class="meta"><span class="mode">魂环</span><span class="ver">1.10</span><span class="tag">沿体表流动</span><span class="tag">魂环</span><span class="tag">碎片飞散</span><span class="tag">星光</span></div>
+        <h3>魂环（新预设）</h3>
+        <p class="lead">斗罗大陆：身边一个接一个升起魂环，黄、黄、紫、紫、黑、黑、黑，各停在自己的高度轻轻倾斜浮动；变身从胸口流开，完成后魂环淡出。</p>
+        <h4>手动操作</h4>
+        <ol class="steps">
+        <li><span class="ui">预设</span> 选 <span class="v">魂环</span>，或者在任意效果上勾 <span class="ui">魂环</span> 面板：<span class="ui">魂环数量</span> 1～9 个，颜色按魂环的年份排；<span class="ui">魂环亮度</span> 调亮度（黑色的魂环只有边上发光）。</li>
+        </ol>
+        <p class="cmd">演示参数：<code>--preset SOUL_RINGS --white-flash</code></p>
+      </div>
+    </article>
   </div>
 </section>
 
@@ -1538,18 +1836,20 @@
     <p class="sub">预设只是常用搭配，下面这些选项都可以自由组合。</p>
     <div class="options">
       <div class="opt card">
-        <h3>变身路径 <b>9</b></h3>
+        <h3>变身路径 <b>12</b></h3>
         <ul><li>球形扩散</li><li>沿体表流动（出发点：只从起点 / 起点 + 手脚 / 只从手脚）</li><li>从下往上扫</li><li>从上往下扫</li>
-          <li>从左往右扫 / 从右往左扫</li><li>从前往后扫 / 从后往前扫</li><li>螺旋上升</li></ul>
+          <li>从左往右扫 / 从右往左扫</li><li>从前往后扫 / 从后往前扫</li><li>螺旋上升</li><li>从腰部上下分开</li>
+          <li>一件一件换（从上往下 / 从脚往上 / 随机）</li><li>手扫过的地方（要舞蹈动作）</li></ul>
       </div>
       <div class="opt card">
-        <h3>新服装登场 <b>9</b></h3>
+        <h3>新服装登场 <b>11</b></h3>
         <ul><li>边缘生长</li><li>零件飞入</li><li>前后两半夹合</li><li>残影汇聚</li><li>鳞片翻转（旧服装一起翻走）</li>
-          <li>进化闪烁</li><li>烟雾一闪</li><li>从影子里升起</li><li>传送光柱</li></ul>
+          <li>进化闪烁</li><li>烟雾一闪</li><li>从影子里升起</li><li>传送光柱</li><li>瞬间换装</li><li>花苞绽放</li></ul>
       </div>
       <div class="opt card">
-        <h3>旧服装退场 <b>4</b></h3>
-        <ul><li>收缩消失</li><li>碎片飞散</li><li>装甲弹开</li><li>吸进胸针</li><li>退场时机：随边缘 / 最后一起退场</li></ul>
+        <h3>旧服装退场 <b>5</b></h3>
+        <ul><li>收缩消失</li><li>碎片飞散</li><li>装甲弹开</li><li>吸进胸针</li><li>金蝉脱壳（蝉蜕 / 灵影 / 原样；碎散 / 飘走）</li>
+          <li>退场时机：随边缘 / 最后一起退场</li></ul>
       </div>
       <div class="opt card">
         <h3>粒子 <b>15</b></h3>
@@ -1563,22 +1863,24 @@
           <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>也可以不变</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>17</b></h3>
+        <h3>叠加开关 <b>20</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行</li><li>故障风</li><li>光剪影</li><li>光带</li>
           <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
           <li>毒液共生体（触手、蹼、黏丝；黑色黏液或液态金属）</li>
           <li>卡音乐节拍（故障风、线框、边缘、收尾闪光、粒子；关键时刻落在拍点上）</li>
           <li>留在原地（碎片、装甲、粒子、新服装的零件和星星；跳舞或整个人移动、转圈）</li>
-          <li>光环（魔法阵 / 火花圈 / 发光面板 / 雪花屏 / 星光彗星）</li><li>画稿（线稿上色 / 水墨 / 数字雨）</li>
-          <li>反应堆起手</li><li>装甲板鼓起</li><li>电弧闪电（开场落雷）</li></ul>
+          <li>光环（魔法阵 / 火花圈 / 发光面板 / 雪花屏 / 星光彗星 / 光环）</li><li>画稿（线稿上色 / 水墨 / 数字雨）</li>
+          <li>反应堆起手</li><li>装甲板鼓起</li><li>电弧闪电（开场落雷）</li><li>卡通火焰（沿着边缘 / 全身气焰）</li>
+          <li>冲击帧（集中线、地面冲击波）</li><li>魂环</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
-        <ul><li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散、全屏闪白</li></ul>
+        <ul><li>开始时机：开始帧 / 拍手 / 飞吻 / 敬礼 / 甩头 / 转身背对镜头（要舞蹈动作）</li>
+          <li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散、全屏闪白</li></ul>
       </div>
     </div>
-    <p class="sum">路径 × 登场 × 退场 × 粒子 = 9 × 9 × 4 × 16 = <b>5184</b> 种基本组合，再乘旧服装表面的 9 种就是 46656 种；
-      再叠加 17 个开关（收尾闪光有两种方式，内衬有两种样式，光环有五种样式，画稿有三种），组合多到数不过来
+    <p class="sum">路径 × 登场 × 退场 × 粒子 = 12 × 11 × 5 × 16 = <b>10560</b> 种基本组合，再乘旧服装表面的 9 种就是 95040 种；
+      再叠加 20 个开关（收尾闪光有两种方式，内衬有两种样式，光环有六种样式，画稿有三种，火焰有两种范围）和六种开始时机，组合多到数不过来
       （「留在原地」在碎片飞散、装甲弹开、开了粒子、零件飞入或收尾星星时起作用；光环要配平面扫描或螺旋上升）。</p>
   </div>
 </section>
@@ -1629,6 +1931,19 @@
           <tr><td>点金术</td><td>沿体表流动（只从手脚）</td><td>（旧服装退场时出现）</td><td>碎片飞散（最后一起退场）</td><td>旧服装表面：镀金，金币，金色发光</td></tr>
           <tr><td>传送光柱</td><td>（不看路径）</td><td>传送光柱</td><td>（闪烁着消失）</td><td>线性缓动，光柱和光点，淡蓝色发光</td></tr>
           <tr><td>破茧而出</td><td>从下往上扫</td><td>（旧服装退场时出现）</td><td>装甲弹开（最后一起退场）</td><td>旧服装表面：蚕丝茧 + 缠绕丝线，蝴蝶，收尾闪光、全屏闪白</td></tr>
+          <tr><td>拍手变装</td><td>沿体表流动</td><td>边缘生长</td><td>碎片飞散</td><td>开始时机：拍手（从两只手开始），星光、冲击帧和集中线、收尾闪光、全屏闪白</td></tr>
+          <tr><td>转身变装</td><td>（不看路径）</td><td>瞬间换装</td><td>碎片飞散</td><td>开始时机：转身背对镜头，星光、收尾闪光、全屏闪白</td></tr>
+          <tr><td>手扫换装</td><td>手扫过的地方</td><td>边缘生长</td><td>碎片飞散</td><td>星光、收尾闪光、全屏闪白，淡蓝色发光</td></tr>
+          <tr><td>蓝焰觉醒</td><td>（不看路径）</td><td>瞬间换装</td><td>收缩消失</td><td>卡通火焰（全身气焰，蓝）、冲击帧、集中线、地面冲击波、收尾闪光、全屏闪白</td></tr>
+          <tr><td>浴火重生</td><td>从下往上扫</td><td>边缘生长</td><td>碎片飞散</td><td>卡通火焰（沿着边缘，橙）、旧服装表面：烧焦，余烬</td></tr>
+          <tr><td>金色气焰</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>卡通火焰（全身气焰，金）、电弧闪电、冲击帧、集中线、地面冲击波、收尾闪光、全屏闪白</td></tr>
+          <tr><td>莲花绽放</td><td>（不看路径）</td><td>花苞绽放</td><td>碎片飞散</td><td>线性缓动，花瓣、收尾闪光、全屏闪白</td></tr>
+          <tr><td>金蝉脱壳</td><td>（不看路径）</td><td>瞬间换装</td><td>金蝉脱壳（蝉蜕空壳，碎散）</td><td>冲击帧、地面冲击波、收尾闪光、全屏闪白</td></tr>
+          <tr><td>灵魂出窍</td><td>（不看路径）</td><td>瞬间换装</td><td>金蝉脱壳（灵影，飘走）</td><td>收尾闪光、全屏闪白，淡蓝色发光</td></tr>
+          <tr><td>动画冲击</td><td>球形扩散</td><td>边缘生长</td><td>碎片飞散</td><td>六边形线框、冲击帧、集中线、地面冲击波、收尾闪光、全屏闪白</td></tr>
+          <tr><td>双环分开</td><td>从腰部上下分开</td><td>边缘生长</td><td>收缩消失</td><td>光环：光环（一上一下两个），淡蓝色发光</td></tr>
+          <tr><td>偶像换装</td><td>一件一件换（从上往下）</td><td>边缘生长</td><td>碎片飞散</td><td>星光、收尾闪光、全屏闪白，粉色发光</td></tr>
+          <tr><td>魂环</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>碎片飞散</td><td>七个魂环、星光、收尾闪光、全屏闪白</td></tr>
           <tr><td>魔法少女</td><td>沿体表流动（只从手脚）</td><td>边缘生长</td><td>碎片飞散</td><td>光剪影、光带、星光、收尾闪光，粉色发光</td></tr>
         </tbody>
       </table>
@@ -1641,7 +1956,7 @@
 <footer>
   <div class="wrap">
     本页在仓库的 <code>docs/</code> 里，用浏览器直接打开即可。视频和缩略图在 <code>test_output/</code>（渲染结果不进 git），
-    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.9.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
+    用 README「高清演示渲染」里的命令可以重新渲染。插件版本 1.10.0，在 Blender 3.6.15 / 4.5.10 / 5.1.2 上测试。
   </div>
 </footer>
 

@@ -26,7 +26,7 @@ import math
 
 import bpy
 
-VERSION = 14
+VERSION = 15
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
@@ -70,6 +70,13 @@ ATTR_SMOKE = "mmdd_smoke_clear"  # smoke puff (on its instances): 0 dense .. 1 c
 ATTR_FRAME = "mmdd_frame"  # the frame, on what the materials animate: the digital rain, the transporter beam's column
 ATTR_BEAM = "mmdd_beam"  # the beam's column: x, y round it (cosine, sine), z up it (0 at the bottom .. 1 at the top)
 ATTR_VARIANT = "mmdd_variant"  # particle shapes made of several (the code glyphs): which one a face belongs to
+ATTR_FLAME = "mmdd_flame"  # flames: how strongly the shell round the body burns (0 .. 1)
+ATTR_FLAME_CARD = "mmdd_flame_card"  # ... a tongue of flame: x across it (-1 .. 1), y up it (0 .. 1), z 1
+ATTR_FLAME_SEED = "mmdd_flame_seed"  # ... each tongue's own random number (on the instances)
+ATTR_PETAL = "mmdd_petal"  # the lotus: x across a petal (-1 .. 1), y up it (0 .. 1), z 0 outer / 1 inner petals
+ATTR_BAND = "mmdd_band"  # rings drawn as bands (soul rings, the shockwave): across the band, -1 .. 1
+ATTR_SOUL = "mmdd_soul"  # soul rings (on the instances): x which ring (its colour), y how bright
+ATTR_HUSK = "disperse_husk"  # the old outfit's husk left behind: 1 solid .. 0 gone (0 elsewhere)
 _ARC_DIR = "mmdd_arc_dir"  # scratch: the way the distance grows over the surface, where the arcs crackle
 _ARC_ATTRS = ("mmdd_arc_normal", "mmdd_arc_side", "mmdd_arc_len", "mmdd_arc_rnd")  # scratch: each arc's own values
 
@@ -140,6 +147,34 @@ EXTRA_INPUTS = (
     ("Star Object", "NodeSocketObject", None, None, None, None),
     ("Star Size", "NodeSocketFloat", 0.35, 0.0, 1e9, "DISTANCE"),
     ("Code", "NodeSocketBool", False, None, None, None),
+    # 1.10: the new outfit is there all at once (Swap), or inside a lotus bud that closes and opens again (Lotus)
+    ("Swap", "NodeSocketBool", False, None, None, None),
+    ("Lotus", "NodeSocketBool", False, None, None, None),
+    ("Lotus Petals", "NodeSocketInt", 8, 3, 32, None),
+    ("Lotus Material", "NodeSocketMaterial", None, None, None, None),
+    # flames along the edge or round the whole body (Flame Aura: up from Start to Peak, down by End)
+    ("Flames", "NodeSocketBool", False, None, None, None),
+    ("Flame Aura", "NodeSocketBool", False, None, None, None),
+    ("Flame Width", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
+    ("Flame Height", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
+    ("Flame Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Flame Start", "NodeSocketFloat", 0.0, -1e9, 1e9, "DISTANCE"),
+    ("Flame Peak", "NodeSocketFloat", 1.0, -1e9, 1e9, "DISTANCE"),
+    ("Flame End", "NodeSocketFloat", 2.0, -1e9, 1e9, "DISTANCE"),
+    ("Flame Material", "NodeSocketMaterial", None, None, None, None),
+    ("Camera", "NodeSocketObject", None, None, None, None),
+    # a shockwave on the floor (from Shock Start to Shock End of the mask radius) and soul rings rising round the body
+    ("Shock", "NodeSocketBool", False, None, None, None),
+    ("Shock Start", "NodeSocketFloat", 0.0, -1e9, 1e9, "DISTANCE"),
+    ("Shock End", "NodeSocketFloat", 1.0, -1e9, 1e9, "DISTANCE"),
+    ("Shock Size", "NodeSocketFloat", 10.0, 0.0, 1e9, "DISTANCE"),
+    ("Shock Material", "NodeSocketMaterial", None, None, None, None),
+    ("Dust Material", "NodeSocketMaterial", None, None, None, None),
+    ("Soul Rings", "NodeSocketInt", 0, 0, 9, None),
+    ("Soul Start", "NodeSocketFloat", 0.0, -1e9, 1e9, "DISTANCE"),
+    ("Soul Peak", "NodeSocketFloat", 1.0, -1e9, 1e9, "DISTANCE"),
+    ("Soul End", "NodeSocketFloat", 2.0, -1e9, 1e9, "DISTANCE"),
+    ("Soul Material", "NodeSocketMaterial", None, None, None, None),
 )
 
 # Scales (Mystique): both outfits break into scales that turn over where the edge passes.
@@ -255,6 +290,14 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Brooch Object", "NodeSocketObject", None, None, None, None),
     ("Swell", "NodeSocketFloat", 0.0, -1e9, 1e9, "DISTANCE"),
     ("Glyphs", "NodeSocketBool", False, None, None, None),
+    # 1.10: the old outfit left behind as a husk at the moment it goes (recorded where it was then), which holds for
+    # Husk Hold and then crumbles away (or floats up, fading) over Husk Span
+    ("Husk", "NodeSocketBool", False, None, None, None),
+    ("Husk Hold", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
+    ("Husk Span", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
+    ("Husk Float", "NodeSocketBool", False, None, None, None),
+    ("Husk Rise", "NodeSocketFloat", 3.0, -1e9, 1e9, "DISTANCE"),
+    ("Clamp Jitter", "NodeSocketFloat", 0.04, 0.0, 1.0, None),
 ) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS
 
 # The probe takes these from the modifier it stands in for (the new outfit's finale and fly-in settings are
@@ -270,9 +313,10 @@ PROBE_INPUTS = FIELD_INPUTS + (
     ("Fly Range", "NodeSocketFloat", 1.6, 0.0, 10000.0, "DISTANCE"),
     ("Clamp", "NodeSocketBool", False, None, None, None),
     ("Clamp Distance", "NodeSocketFloat", 1000.0, 0.0, 1e9, "DISTANCE"),
+    ("Clamp Jitter", "NodeSocketFloat", 0.04, 0.0, 1.0, None),
 )
 
-RING_STYLES = ("MAGIC", "SPARKS", "PANEL", "STATIC", "COMET")
+RING_STYLES = ("MAGIC", "SPARKS", "PANEL", "STATIC", "COMET", "HALO")
 # The front's decoration (rings.py), in world units: the ring object is not scaled.
 RING_INPUTS = (
     ("Mask", "NodeSocketObject", None, None, None, None),
@@ -294,6 +338,8 @@ RING_INPUTS = (
     ("Ring Material", "NodeSocketMaterial", None, None, None, None),
     ("Screen Material", "NodeSocketMaterial", None, None, None, None),
     ("Star Object", "NodeSocketObject", None, None, None, None),
+    ("Mirror", "NodeSocketBool", False, None, None, None),
+    ("Span Back", "NodeSocketFloat", 0.0, 0.0, 1e9, None),  # how far the mirrored front goes (0: as far as Span)
 )
 
 RIBBON_INPUTS = (
@@ -1283,6 +1329,9 @@ def build_target_group(field_group, venom_group):
     suit = b.switch("GEOMETRY", gi.outputs["Evolve"], suit, evolved, x=6250, y=1000)
     # --- Smoke puff: the new outfit is there at the moment, hidden by a puff of smoke.
     suit = b.switch("GEOMETRY", gi.outputs["Poof"], suit, real, x=6300, y=1000)
+    # --- Swap (all at once at the moment) and the lotus (inside the shut bud): the same.
+    suit = b.switch("GEOMETRY", b.boolean("OR", gi.outputs["Swap"], gi.outputs["Lotus"], x=6200, y=1300), suit, real,
+                    x=6325, y=1000)
     smoke = _smoke(b, gi, geo, p, me, 4000, 11400)
     # --- Rising from the shadow: the new outfit stands up out of the black shadow the old one sank into.
     risen = b.delete(geo, b.compare("LESS_THAN", p, 0.5, x=4000, y=12600), "POINT", x=4200, y=12800)
@@ -1382,6 +1431,8 @@ def build_target_group(field_group, venom_group):
     b.feed(mat.inputs["Material"], gi.outputs["Wire Material"])
     timeline = b.boolean("OR", b.boolean("OR", gi.outputs["Evolve"], gi.outputs["Poof"], x=1150, y=100),
                          b.boolean("OR", gi.outputs["Shadow"], gi.outputs["Beam"], x=1150, y=250), x=1350, y=100)
+    timeline = b.boolean("OR", timeline, b.boolean("OR", gi.outputs["Swap"], gi.outputs["Lotus"], x=1150, y=400),
+                         x=1400, y=250)
     wire_on = b.boolean("AND", gi.outputs["Wire"], b.boolean("NOT", timeline, x=1550, y=100), x=1750, y=150)
     wire_on = b.boolean("AND", wire_on, b.boolean("NOT", b.boolean("OR", gi.outputs["Clamp"],
                                                                                 gi.outputs["Ghosts"], x=1550, y=-50),
@@ -1470,9 +1521,15 @@ def build_target_group(field_group, venom_group):
     # Lightning: arcs crackling along the edge, the strike at the start.
     arcs = _arcs(b, gi, geo, d, radius, beat, 4000, 27000)
     strike = _strike(b, gi, radius, me, 4000, 30000)
+    # 1.10: the lotus round the body, flames on the new outfit, the shockwave on the floor, the soul rings (the lotus,
+    # the shockwave and the rings are sized by the whole model at rest, its locked parts too: head to toe)
+    lotus = _lotus(b, gi, gi.outputs["Geometry"], p, beat, 4000, 34000)
+    flames = _flames(b, gi, suit, d, radius, me, 4000, 42000)
+    shock = _shockwave(b, gi, gi.outputs["Geometry"], radius, 4000, 46000)
+    soul = _soul_rings(b, gi, gi.outputs["Geometry"], radius, beat, 4000, 50000)
 
     join = b.node("GeometryNodeJoinGeometry", 2000, 250)
-    for part in (wire, suit, sparkles, venom, frames, smoke, column, arcs, strike):
+    for part in (wire, suit, sparkles, venom, frames, smoke, column, arcs, strike, lotus, flames, shock, soul):
         b.feed(join.inputs["Geometry"], part)
     b.feed(go.inputs["Geometry"], join.outputs["Geometry"])
     return ng
@@ -1979,6 +2036,456 @@ def _strike(b, gi, radius, me, x, y):
     return b.switch("GEOMETRY", striking, None, shaded.outputs["Geometry"], x=x + 7400, y=y)
 
 
+def _body_box(b, geometry, x, y):
+    """Rest-pose bounds of `geometry`, so what is set up by them stays put while the body dances: (centre x, centre y,
+    the floor (its lowest point), its height, its half width (the larger of its half sizes across, no more than a fifth
+    of its height: round the body, not the arms held out))."""
+    rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=x, y=y)
+    still = b.switch("VECTOR", has_rest, b.node("GeometryNodeInputPosition", x, y - 150).outputs[0], rest, x=x + 200,
+                     y=y)
+    stat = b.node("GeometryNodeAttributeStatistic", x + 400, y, data_type="FLOAT_VECTOR", domain="POINT")
+    b.feed(stat.inputs["Geometry"], geometry)
+    b.feed(_enabled(stat.inputs, "Attribute")[0], still)
+    lo, hi = _enabled(stat.outputs, "Min")[0], _enabled(stat.outputs, "Max")[0]
+    lo_x, lo_y, lo_z = b.split_xyz(lo, x=x + 600, y=y)
+    hi_x, hi_y, hi_z = b.split_xyz(hi, x=x + 600, y=y - 200)
+    mid_x = b.math("MULTIPLY", b.math("ADD", lo_x, hi_x, x=x + 800, y=y), 0.5, x=x + 1000, y=y)
+    mid_y = b.math("MULTIPLY", b.math("ADD", lo_y, hi_y, x=x + 800, y=y - 150), 0.5, x=x + 1000, y=y - 150)
+    tall = b.math("SUBTRACT", hi_z, lo_z, x=x + 800, y=y - 300)
+    half = b.math("MULTIPLY", b.math("MAXIMUM", b.math("SUBTRACT", hi_x, lo_x, x=x + 800, y=y - 450),
+                                     b.math("SUBTRACT", hi_y, lo_y, x=x + 800, y=y - 600), x=x + 1000, y=y - 500),
+                  0.5, x=x + 1200, y=y - 500)
+    half = b.math("MINIMUM", half, b.math("MULTIPLY", tall, 0.2, x=x + 1200, y=y - 650), x=x + 1400, y=y - 550)
+    return mid_x, mid_y, lo_z, tall, half
+
+
+def _unit_band(b, segments, width, x, y):
+    """A flat ring of radius 1 in the XY plane, `width` across, with ATTR_BAND running -1 .. 1 across it."""
+    grid = b.node("GeometryNodeMeshGrid", x, y)
+    for name, value in (("Size X", 1.0), ("Size Y", 1.0), ("Vertices X", segments + 1), ("Vertices Y", 2)):
+        grid.inputs[name].default_value = value
+    gx, gy, _gz = b.split_xyz(b.node("GeometryNodeInputPosition", x, y - 200).outputs[0], x=x + 200, y=y - 200)
+    band = b.store(grid.outputs["Mesh"], ATTR_BAND, b.math("MULTIPLY", gy, 2.0, x=x + 400, y=y - 300), x=x + 400, y=y)
+    angle = b.math("MULTIPLY", b.math("ADD", gx, 0.5, x=x + 400, y=y - 450), 2.0 * math.pi, x=x + 600, y=y - 450)
+    r = b.math("MULTIPLY_ADD", gy, width, 1.0, x=x + 600, y=y - 600)
+    spot = b.combine(b.math("MULTIPLY", b.math("COSINE", angle, x=x + 800, y=y - 400), r, x=x + 1000, y=y - 400),
+                     b.math("MULTIPLY", b.math("SINE", angle, x=x + 800, y=y - 550), r, x=x + 1000, y=y - 550), 0.0,
+                     x=x + 1200, y=y - 450)
+    return b.set_position(band, position=spot, x=x + 1200, y=y)
+
+
+def _petal(b, length, half_width, layer, x, y):
+    """One lotus petal standing up from the origin along Z, its inside facing -Y: narrow at the foot, widest a third
+    of the way up, pointed at the tip, cupped and bowed out a little. ATTR_PETAL: across it, up it, `layer`."""
+    grid = b.node("GeometryNodeMeshGrid", x, y)
+    for name, value in (("Size X", 1.0), ("Size Y", 1.0), ("Vertices X", 9), ("Vertices Y", 18)):
+        grid.inputs[name].default_value = value
+    gx, gy, _gz = b.split_xyz(b.node("GeometryNodeInputPosition", x, y - 200).outputs[0], x=x + 200, y=y - 200)
+    u = b.math("MULTIPLY", gx, 2.0, x=x + 400, y=y - 200)
+    v = b.math("ADD", gy, 0.5, x=x + 400, y=y - 350)
+    leaf = b.store(grid.outputs["Mesh"], ATTR_PETAL, b.combine(u, v, float(layer), x=x + 600, y=y - 250),
+                   "FLOAT_VECTOR", x=x + 600, y=y)
+    swell = b.math("POWER", b.math("SINE", b.math("MULTIPLY", b.math("POWER", v, 0.85, x=x + 600, y=y - 450),
+                                                  math.pi, x=x + 800, y=y - 450), x=x + 1000, y=y - 450), 0.8,
+                   x=x + 1200, y=y - 450)
+    w = b.math("MULTIPLY", b.math("MULTIPLY_ADD", swell, 0.78, 0.22, x=x + 1400, y=y - 450),
+               b.math("SUBTRACT", 1.0, b.math("POWER", v, 6.0, x=x + 1200, y=y - 600), x=x + 1400, y=y - 600),
+               x=x + 1600, y=y - 500)
+    across = b.math("MULTIPLY", b.math("MULTIPLY", u, w, x=x + 1800, y=y - 400), half_width, x=x + 2000, y=y - 400)
+    cup = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", u, u, x=x + 1800, y=y - 600), w, x=x + 2000,
+                                    y=y - 600), b.math("MULTIPLY", half_width, -0.4, x=x + 1800, y=y - 750),
+                 x=x + 2200, y=y - 650)
+    arch = b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY", v, math.pi, x=x + 1600, y=y - 900), x=x + 1800,
+                                     y=y - 900), 0.12, x=x + 2000, y=y - 900)
+    tip_in = b.math("MULTIPLY", b.math("POWER", v, 3.0, x=x + 1800, y=y - 1050), 0.07, x=x + 2000, y=y - 1050)
+    bow = b.math("MULTIPLY", b.math("SUBTRACT", arch, tip_in, x=x + 2200, y=y - 950), length, x=x + 2400, y=y - 950)
+    spot = b.combine(across, b.math("ADD", cup, bow, x=x + 2400, y=y - 700),
+                     b.math("MULTIPLY", v, length, x=x + 2400, y=y - 1150), x=x + 2600, y=y - 700)
+    return b.set_position(leaf, position=spot, x=x + 2600, y=y)
+
+
+def _lotus(b, gi, geometry, p, beat, x, y):
+    """The lotus (Ne Zha 2's seven-colour lotus, Malenia's bloom): two rings of big petals grow up from the floor round
+    the body, p running 0 -> 1 up to the moment, close into a bud over the first half (see-through, it glows), stay shut
+    (and breathe on a beat) while the outfits swap inside at the moment with a flash, open out after it and sink down
+    flat and shrink away. Each petal leans about the tangent at its foot, each on its own a little late. In Lotus
+    Material (the particle colour); ATTR_EDGE carries the glow of the flash."""
+    mid_x, mid_y, floor, tall, half = _body_box(b, geometry, x, y)
+    frame = b.node("GeometryNodeInputSceneTime", x, y - 900).outputs["Frame"]
+    count = gi.outputs["Lotus Petals"]
+    grow = b.map_range(p, 0.0, 0.25, x=x + 1400, y=y + 300, smooth=True)
+    fade = b.map_range(p, 1.38, 1.62, 1.0, 0.0, x=x + 1400, y=y + 150, smooth=True)
+    off = b.math("ABSOLUTE", b.math("SUBTRACT", p, 1.0, x=x + 1400, y=y + 600), x=x + 1600, y=y + 600)
+    flash = b.math("SUBTRACT", 1.0, b.math("DIVIDE", off, 0.08, x=x + 1800, y=y + 600), x=x + 2000, y=y + 600,
+                   clamp=True)
+    glow = b.math("MULTIPLY_ADD", flash, 0.65, 0.35, x=x + 2200, y=y + 600)
+    foot = b.math("MULTIPLY", half, 1.15, x=x + 1600, y=y - 500)
+    layers = []
+    for layer, (length_k, width_k, out_k, shut, offset) in enumerate(((1.18, 0.3, 1.0, 0.16, 0.0),
+                                                                     (1.06, 0.26, 0.82, 0.08, 0.5))):
+        yy = y - 1500 - 3600 * layer
+        length = b.math("MULTIPLY", tall, length_k, x=x + 1600, y=yy)
+        leaf = _petal(b, length, b.math("MULTIPLY", length, width_k * 0.5, x=x + 1600, y=yy - 150), layer, x + 1800,
+                      yy)
+        leaf = b.store(leaf, ATTR_EDGE, glow, x=x + 4600, y=yy)
+        shaded = b.node("GeometryNodeSetMaterial", x + 4800, yy)
+        b.feed(shaded.inputs["Geometry"], leaf)
+        b.feed(shaded.inputs["Material"], gi.outputs["Lotus Material"])
+        pts = b.node("GeometryNodePoints", x + 1800, yy - 1300)
+        b.feed(pts.inputs["Count"], count)
+        k = b.node("GeometryNodeInputIndex", x + 1400, yy - 1500).outputs[0]
+        angle = b.math("MULTIPLY", b.math("DIVIDE", b.math("ADD", k, offset, x=x + 1600, y=yy - 1500),
+                                          b.math("MAXIMUM", count, 1.0, x=x + 1600, y=yy - 1650), x=x + 1800,
+                                          y=yy - 1550), 2.0 * math.pi, x=x + 2000, y=yy - 1550)
+        out = b.math("MULTIPLY", foot, out_k, x=x + 2000, y=yy - 1700)
+        b.feed(pts.inputs["Position"], b.combine(
+            b.math("MULTIPLY_ADD", b.math("COSINE", angle, x=x + 2200, y=yy - 1450), out, mid_x, x=x + 2400,
+                   y=yy - 1450),
+            b.math("MULTIPLY_ADD", b.math("SINE", angle, x=x + 2200, y=yy - 1600), out, mid_y, x=x + 2400, y=yy - 1600),
+            floor, x=x + 2600, y=yy - 1500))
+        rnd = b.white_noise(b.combine(k, 0.37 + layer, 0.71, x=x + 1600, y=yy - 1900), x=x + 1800, y=yy - 1900)[0]
+        late = b.math("MULTIPLY_ADD", rnd, 0.08, 0.05 * layer, x=x + 2000, y=yy - 1900)
+        close = b.map_range(p, b.math("ADD", late, 0.1, x=x + 2200, y=yy - 2000),
+                            b.math("ADD", late, 0.5, x=x + 2200, y=yy - 2150), x=x + 2400, y=yy - 2050, smooth=True)
+        bloom = b.map_range(p, b.math("ADD", late, 1.02, x=x + 2200, y=yy - 2300),
+                            b.math("ADD", late, 1.3, x=x + 2200, y=yy - 2450), x=x + 2400, y=yy - 2350, smooth=True)
+        # lying open (leaning out) -> shut (leaning in a little) -> flat on the floor; while shut it breathes
+        lean = b.math("MULTIPLY_ADD", close, shut + 1.2, -1.2, x=x + 2600, y=yy - 2100)
+        lean = b.math("ADD", lean, b.math("MULTIPLY", bloom, b.math("SUBTRACT", -1.5, lean, x=x + 2600, y=yy - 2400),
+                                          x=x + 2800, y=yy - 2350), x=x + 3000, y=yy - 2200)
+        wave = b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.2, k, x=x + 2600, y=yy - 2800), x=x + 2800, y=yy - 2800)
+        breath = b.math("ADD", b.math("MULTIPLY", beat, -0.06, x=x + 2800, y=yy - 2600),
+                        b.math("MULTIPLY", wave, -0.015, x=x + 3000, y=yy - 2800), x=x + 3200, y=yy - 2700)
+        shut_now = b.math("MULTIPLY", close, b.math("SUBTRACT", 1.0, bloom, x=x + 3000, y=yy - 2950), x=x + 3200,
+                          y=yy - 2900)
+        lean = b.math("ADD", lean, b.math("MULTIPLY", breath, shut_now, x=x + 3400, y=yy - 2800), x=x + 3600,
+                      y=yy - 2300)
+        petals = b.node("GeometryNodeInstanceOnPoints", x + 5000, yy - 1300)
+        b.feed(petals.inputs["Points"], pts.outputs["Geometry"])
+        b.feed(petals.inputs["Instance"], shaded.outputs["Geometry"])
+        b.feed(petals.inputs["Rotation"], b.combine(lean, 0.0, b.math("SUBTRACT", angle, math.pi / 2, x=x + 3600,
+                                                                      y=yy - 1700), x=x + 3800, y=yy - 1800))
+        b.feed(petals.inputs["Scale"], b.math("MULTIPLY", grow, fade, x=x + 3800, y=yy - 1300))
+        layers.append(petals.outputs["Instances"])
+    there = b.boolean("AND", b.boolean("AND", gi.outputs["Lotus"], gi.outputs["Main"], x=x + 5200, y=y + 300),
+                      b.boolean("AND", b.compare("GREATER_THAN", p, 0.0, x=x + 5200, y=y + 150),
+                                b.compare("LESS_THAN", p, 1.62, x=x + 5200, y=y), x=x + 5400, y=y + 100),
+                      x=x + 5600, y=y + 200)
+    return b.switch("GEOMETRY", there, None, b.join(layers, x=x + 5400, y=y - 1500), x=x + 5800, y=y)
+
+
+def _flames(b, gi, geometry, d, radius, me, x, y):
+    """Toon flames (no simulation): a shell of flame just over the surface of `geometry`, burning in a band round the
+    edge (`d` is the distance the front measures) or, with Flame Aura, all over the body as the mask passes from Flame
+    Start (up) to Flame Peak (strongest) and Flame End (gone); and tongues of flame on it: cards standing up, turned to
+    the camera, flickering. In Flame Material: the shell carries ATTR_FLAME (how strongly it burns) and ATTR_FRAME, the
+    tongues ATTR_FLAME_CARD and, on their instances, ATTR_FLAME_SEED and ATTR_FRAME."""
+    width = b.math("MINIMUM", gi.outputs["Flame Width"], b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=x, y=y),
+                                                                 2.0, x=x + 200, y=y), x=x + 400, y=y)
+    off = b.math("ABSOLUTE", b.math("SUBTRACT", d, radius, x=x, y=y - 200), x=x + 200, y=y - 200)
+    band = b.math("SUBTRACT", 1.0, b.math("DIVIDE", off, b.math("MAXIMUM", width, 1e-4, x=x + 400, y=y - 300),
+                                          x=x + 600, y=y - 200), x=x + 800, y=y - 200, clamp=True)
+    aura = b.math("MULTIPLY", b.map_range(radius, gi.outputs["Flame Start"], gi.outputs["Flame Peak"], x=x, y=y - 500,
+                                          smooth=True),
+                  b.map_range(radius, gi.outputs["Flame Peak"], gi.outputs["Flame End"], 1.0, 0.0, x=x, y=y - 700,
+                              smooth=True), x=x + 200, y=y - 600)
+    amount = b.switch("FLOAT", gi.outputs["Flame Aura"], band, aura, x=x + 1000, y=y - 300)
+    frame = b.node("GeometryNodeInputSceneTime", x, y - 900).outputs["Frame"]
+    burning = b.separate(geometry, b.compare("GREATER_THAN", b.on_domain(amount, "FACE", x=x + 1000, y=y - 500), 0.02,
+                                             x=x + 1200, y=y - 500), "FACE", x=x + 1400, y=y)[0]
+    shell = b.store(burning, ATTR_FLAME, amount, x=x + 1600, y=y)
+    normal = b.node("GeometryNodeInputNormal", x + 1400, y - 300).outputs[0]
+    lift = b.math("MULTIPLY", gi.outputs["Flame Height"], 0.05, x=x + 1600, y=y - 400)
+    shell = b.set_position(shell, b.vmath("SCALE", normal, scale=lift, x=x + 1800, y=y - 300), x=x + 1800, y=y)
+    shell = b.store(shell, ATTR_FRAME, frame, x=x + 2000, y=y)
+    shell_mat = b.node("GeometryNodeSetMaterial", x + 2200, y)
+    b.feed(shell_mat.inputs["Geometry"], shell)
+    b.feed(shell_mat.inputs["Material"], gi.outputs["Flame Material"])
+
+    # the camera (the front of the scene without one)
+    cam = b.node("GeometryNodeObjectInfo", x + 1400, y - 1900, transform_space="RELATIVE")
+    b.feed(cam.inputs["Object"], gi.outputs["Camera"])
+    has_cam = b.compare("GREATER_THAN", b.vmath("LENGTH", cam.outputs["Scale"], x=x + 1600, y=y - 2100), 0.0,
+                        x=x + 1800, y=y - 2100)
+    # tongues of flame on the shell, as many as the density says where it burns, most of them along the outline as the
+    # camera sees it (there they stand out of the body; over the middle they would only hide it)
+    spot = b.node("GeometryNodeInputPosition", x + 1400, y - 1100).outputs[0]
+    to_cam = b.switch("VECTOR", has_cam, _unrotate(b, me, (0.0, -1.0, 0.0), x + 1600, y - 1300),
+                      b.vmath("SUBTRACT", cam.outputs["Location"], spot, x=x + 1600, y=y - 1100), x=x + 1800,
+                      y=y - 1200)
+    facing = b.math("ABSOLUTE", b.vmath("DOT_PRODUCT", b.vmath("NORMALIZE", to_cam, x=x + 2000, y=y - 1200),
+                                        b.node("GeometryNodeInputNormal", x + 1800, y - 1400).outputs[0],
+                                        x=x + 2200, y=y - 1300), x=x + 2400, y=y - 1300)
+    side = b.math("SUBTRACT", 1.0, facing, x=x + 2600, y=y - 1300, clamp=True)
+    outline = b.math("MULTIPLY_ADD", b.math("POWER", side, 2.0, x=x + 2800, y=y - 1300), 1.9, 0.1, x=x + 3000,
+                     y=y - 1300)  # (twice as dense as the panel says at the outline, a twentieth of that in the middle)
+    spread = b.node("GeometryNodeDistributePointsOnFaces", x + 2200, y - 600, distribute_method="RANDOM")
+    b.feed(spread.inputs["Mesh"], shell)
+    b.feed(spread.inputs["Density"], b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Flame Density"],
+                                                               b.named_attribute(ATTR_FLAME, "FLOAT", x=x + 2000,
+                                                                                 y=y - 800)[0], x=x + 2200,
+                                                               y=y - 800), outline, x=x + 3200, y=y - 900))
+    spread.inputs["Seed"].default_value = 11
+    pts = spread.outputs["Points"]
+    on_pt = b.named_attribute(ATTR_FLAME, "FLOAT", x=x + 2400, y=y - 1000)[0]
+    rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=x + 2400, y=y - 1150)
+    here = b.node("GeometryNodeInputPosition", x + 2400, y - 1300).outputs[0]
+    still = b.switch("VECTOR", has_rest, here, rest, x=x + 2600, y=y - 1200)
+    rnd = b.white_noise(b.vmath("SCALE", still, scale=3.7, x=x + 2800, y=y - 1200), x=x + 3000, y=y - 1200)[0]
+    phase = b.math("MULTIPLY_ADD", frame, 0.9, b.math("MULTIPLY", rnd, 2.0 * math.pi, x=x + 2800, y=y - 1500),
+                   x=x + 3000, y=y - 1500)
+    flicker = b.math("MULTIPLY_ADD", b.math("SINE", phase, x=x + 3200, y=y - 1500), 0.15, 0.85, x=x + 3400, y=y - 1500)
+    size = b.math("MULTIPLY", gi.outputs["Flame Height"], b.math("MULTIPLY_ADD", rnd, 0.9, 0.55, x=x + 3200,
+                                                                  y=y - 1300), x=x + 3400, y=y - 1300)
+    tall = b.math("MULTIPLY", size, b.math("MULTIPLY", b.math("MULTIPLY_ADD", on_pt, 0.65, 0.35, x=x + 3200,
+                                                               y=y - 1700), flicker, x=x + 3600, y=y - 1600),
+                  x=x + 3800, y=y - 1400)
+    # turned to face the camera about the upright (the front of the scene without a camera)
+    cx, cy, _cz = b.split_xyz(b.vmath("SUBTRACT", cam.outputs["Location"], here, x=x + 2600, y=y - 1900), x=x + 2800,
+                              y=y - 1900)
+    yaw = b.math("ADD", b.math("ARCTAN2", cy, cx, x=x + 3000, y=y - 1900), math.pi / 2, x=x + 3200, y=y - 1900)
+    yaw = b.switch("FLOAT", has_cam, 0.0, yaw, x=x + 3400, y=y - 2000)
+    pts = b.store(pts, ATTR_FLAME_SEED, rnd, x=x + 3600, y=y - 600)
+    pts = b.store(pts, ATTR_FRAME, frame, x=x + 3800, y=y - 600)
+    card = b.node("GeometryNodeMeshGrid", x + 3400, y - 2400)
+    for name, value in (("Size X", 1.0), ("Size Y", 1.0), ("Vertices X", 2), ("Vertices Y", 6)):
+        card.inputs[name].default_value = value
+    gx, gy, _gz = b.split_xyz(b.node("GeometryNodeInputPosition", x + 3400, y - 2600).outputs[0], x=x + 3600,
+                              y=y - 2600)
+    across_up = b.combine(b.math("MULTIPLY", gx, 2.0, x=x + 3800, y=y - 2600), b.math("ADD", gy, 0.5, x=x + 3800,
+                                                                                     y=y - 2750), 1.0, x=x + 4000,
+                          y=y - 2650)
+    card_mesh = b.store(card.outputs["Mesh"], ATTR_FLAME_CARD, across_up, "FLOAT_VECTOR", x=x + 3800, y=y - 2400)
+    stand = b.node("GeometryNodeTransform", x + 4000, y - 2400)
+    b.feed(stand.inputs["Geometry"], card_mesh)
+    stand.inputs["Rotation"].default_value = (math.pi / 2, 0.0, 0.0)
+    stand.inputs["Translation"].default_value = (0.0, 0.0, 0.5)
+    card_mat = b.node("GeometryNodeSetMaterial", x + 4200, y - 2400)
+    b.feed(card_mat.inputs["Geometry"], stand.outputs["Geometry"])
+    b.feed(card_mat.inputs["Material"], gi.outputs["Flame Material"])
+    tongues = b.node("GeometryNodeInstanceOnPoints", x + 4400, y - 600)
+    b.feed(tongues.inputs["Points"], pts)
+    b.feed(tongues.inputs["Instance"], card_mat.outputs["Geometry"])
+    b.feed(tongues.inputs["Rotation"], b.combine(0.0, 0.0, yaw, x=x + 3600, y=y - 2000))
+    b.feed(tongues.inputs["Scale"], b.combine(b.math("MULTIPLY", tall, 0.45, x=x + 4000, y=y - 1400), 1.0, tall,
+                                              x=x + 4200, y=y - 1400))
+    flames = b.join([shell_mat.outputs["Geometry"], tongues.outputs["Instances"]], x=x + 4600, y=y)
+    lit = b.switch("BOOLEAN", gi.outputs["Flame Aura"], b.compare("GREATER_THAN", radius, 0.0, x=x + 4400, y=y + 300),
+                   b.compare("GREATER_THAN", aura, 0.001, x=x + 4400, y=y + 150), x=x + 4600, y=y + 250)
+    return b.switch("GEOMETRY", b.boolean("AND", gi.outputs["Flames"], lit, x=x + 4800, y=y + 300), None, flames,
+                    x=x + 5000, y=y)
+
+
+def _shockwave(b, gi, geometry, radius, x, y):
+    """A shockwave on the floor at the big moment (the mask passing from Shock Start to Shock End): a bright ring
+    spreads from the feet out to Shock Size, a fainter wide one behind it, and puffs of dust are kicked up along it
+    (Dust Material, fading with ATTR_SMOKE). The rings glow by ATTR_EDGE in Shock Material, which fades them out
+    across the band by ATTR_BAND."""
+    mid_x, mid_y, floor, tall, half = _body_box(b, geometry, x, y)
+    length = b.math("MAXIMUM", b.math("SUBTRACT", gi.outputs["Shock End"], gi.outputs["Shock Start"], x=x, y=y + 150),
+                    1e-4, x=x + 200, y=y + 150)
+    u = b.math("DIVIDE", b.math("SUBTRACT", radius, gi.outputs["Shock Start"], x=x, y=y + 300), length, x=x + 400,
+               y=y + 250)
+    t = b.math("MINIMUM", b.math("MAXIMUM", u, 0.0, x=x + 600, y=y + 300), 1.0, x=x + 800, y=y + 300)
+    left = b.math("SUBTRACT", 1.0, t, x=x + 1000, y=y + 300)
+    ease = b.math("SUBTRACT", 1.0, b.math("MULTIPLY", left, left, x=x + 1200, y=y + 300), x=x + 1400, y=y + 300)
+    strength = b.math("MULTIPLY", b.math("POWER", left, 1.3, x=x + 1200, y=y + 500),
+                      b.map_range(t, 0.0, 0.04, x=x + 1200, y=y + 650), x=x + 1400, y=y + 500)
+    reach = b.math("MULTIPLY_ADD", gi.outputs["Shock Size"], ease, b.math("MULTIPLY", half, 1.2, x=x + 1400, y=y + 100),
+                   x=x + 1600, y=y + 200)
+    rings = []
+    for i, (width, shrink, level) in enumerate(((0.06, 1.0, 1.0), (0.3, 0.85, 0.35))):
+        yy = y - 600 - 900 * i
+        ring = _unit_band(b, 128, width, x + 1600, yy)
+        # (the glow falls off across the band in Shock Material, by ATTR_BAND: the band has vertices only on its rims)
+        ring = b.store(ring, ATTR_EDGE, b.math("MULTIPLY", strength, level, x=x + 2800, y=yy - 300), x=x + 3000, y=yy)
+        px, py, _pz = b.split_xyz(b.node("GeometryNodeInputPosition", x + 3000, yy - 600).outputs[0], x=x + 3200,
+                                  y=yy - 600)
+        r = b.math("MULTIPLY", reach, shrink, x=x + 3200, y=yy - 750)
+        spot = b.combine(b.math("MULTIPLY_ADD", px, r, mid_x, x=x + 3400, y=yy - 600),
+                         b.math("MULTIPLY_ADD", py, r, mid_y, x=x + 3400, y=yy - 750),
+                         b.math("MULTIPLY_ADD", tall, 0.003 * (i + 1), floor, x=x + 3400, y=yy - 900), x=x + 3600,
+                         y=yy - 700)
+        rings.append(b.set_position(ring, position=spot, x=x + 3800, y=yy))
+    shaded = b.node("GeometryNodeSetMaterial", x + 4000, y - 600)
+    b.feed(shaded.inputs["Geometry"], b.join(rings, x=x + 3900, y=y - 600))
+    b.feed(shaded.inputs["Material"], gi.outputs["Shock Material"])
+    # dust kicked up along the ring
+    dust = b.node("GeometryNodePoints", x + 1600, y - 2400)
+    dust.inputs["Count"].default_value = 28
+    k = b.node("GeometryNodeInputIndex", x + 1200, y - 2600).outputs[0]
+    rnd, rnd_color = b.white_noise(b.combine(k, 0.53, 0.19, x=x + 1400, y=y - 2600), x=x + 1600, y=y - 2600)
+    r1, r2, r3 = b.split_xyz(rnd_color, x=x + 1800, y=y - 2600)
+    angle = b.math("MULTIPLY_ADD", k, 2.0 * math.pi / 28.0, b.math("MULTIPLY", r1, 0.3, x=x + 1800, y=y - 2800),
+                   x=x + 2000, y=y - 2700)
+    out = b.math("MULTIPLY", reach, b.math("MULTIPLY_ADD", r2, 0.15, 0.9, x=x + 2000, y=y - 2900), x=x + 2200,
+                 y=y - 2900)
+    up = b.math("MULTIPLY", r3, b.math("SQRT", t, x=x + 2000, y=y - 3100), x=x + 2200, y=y - 3100)
+    lift = b.math("MULTIPLY", tall, b.math("MULTIPLY_ADD", up, 0.07, 0.01, x=x + 2400, y=y - 3100), x=x + 2600,
+                  y=y - 3100)
+    b.feed(dust.inputs["Position"], b.combine(
+        b.math("MULTIPLY_ADD", b.math("COSINE", angle, x=x + 2200, y=y - 2600), out, mid_x, x=x + 2400, y=y - 2600),
+        b.math("MULTIPLY_ADD", b.math("SINE", angle, x=x + 2200, y=y - 2750), out, mid_y, x=x + 2400, y=y - 2750),
+        b.math("ADD", floor, lift, x=x + 2800, y=y - 3000), x=x + 3000, y=y - 2700))
+    ball = b.node("GeometryNodeMeshIcoSphere", x + 2800, y - 2200)
+    ball.inputs["Radius"].default_value = 1.0
+    ball.inputs["Subdivisions"].default_value = 3  # (round puffs of dust, not faceted stones)
+    smooth = b.node("GeometryNodeSetShadeSmooth", x + 3000, y - 2200)
+    b.feed(smooth.inputs[0], ball.outputs["Mesh"])
+    puff = b.node("GeometryNodeSetMaterial", x + 3200, y - 2200)
+    b.feed(puff.inputs["Geometry"], smooth.outputs[0])
+    b.feed(puff.inputs["Material"], gi.outputs["Dust Material"])
+    puffs = b.node("GeometryNodeInstanceOnPoints", x + 3400, y - 2400)
+    b.feed(puffs.inputs["Points"], dust.outputs["Geometry"])
+    b.feed(puffs.inputs["Instance"], puff.outputs["Geometry"])
+    # kicked up as the ring passes, then shrinking away as they clear (puffs, not stones lying about)
+    grown = b.math("MULTIPLY", b.math("ADD", rnd, 0.5, x=x + 3000, y=y - 3450),
+                   b.math("MULTIPLY", b.map_range(t, 0.0, 0.15, 0.3, 1.0, x=x + 2800, y=y - 3600),
+                          b.math("SUBTRACT", 1.0, b.math("POWER", t, 1.5, x=x + 2800, y=y - 3750), x=x + 3000,
+                                 y=y - 3750), x=x + 3200, y=y - 3650), x=x + 3200, y=y - 3500)
+    puff_size = b.math("MULTIPLY", b.math("MULTIPLY", tall, 0.02, x=x + 3000, y=y - 3300), grown, x=x + 3400,
+                       y=y - 3400)
+    b.feed(puffs.inputs["Scale"], b.combine(b.math("MULTIPLY", puff_size, 1.3, x=x + 3600, y=y - 3300),
+                                            b.math("MULTIPLY", puff_size, 1.3, x=x + 3600, y=y - 3450),
+                                            b.math("MULTIPLY", puff_size, 0.75, x=x + 3600, y=y - 3600),
+                                            x=x + 3800, y=y - 3400))
+    clearing = b.store(puffs.outputs["Instances"], ATTR_SMOKE, b.math("POWER", t, 1.2, x=x + 3400, y=y - 2700),
+                       domain="INSTANCE", x=x + 3600, y=y - 2400)
+    there = b.boolean("AND", b.boolean("AND", gi.outputs["Shock"], gi.outputs["Main"], x=x + 3800, y=y + 300),
+                      b.boolean("AND", b.compare("GREATER_THAN", u, 0.0, x=x + 3800, y=y + 150),
+                                b.compare("LESS_THAN", u, 1.0, x=x + 3800, y=y), x=x + 4000, y=y + 100),
+                      x=x + 4200, y=y + 200)
+    return b.switch("GEOMETRY", there, None, b.join([shaded.outputs["Geometry"], clearing], x=x + 4200, y=y - 600),
+                    x=x + 4400, y=y)
+
+
+def _soul_rings(b, gi, geometry, radius, beat, x, y):
+    """Soul rings (Soul Land, 斗罗大陆): rings of light rise from the floor one after another as the mask grows from Soul
+    Start to Soul Peak, each to its own height (from the knees up to above the head), and float round the body, tilting
+    and bobbing, until they fade by Soul End. The instances carry ATTR_SOUL: which ring (its colour by the Soul Land
+    code: yellow, yellow, purple, purple, black, black, black, red, red) and how bright (flaring on a beat)."""
+    mid_x, mid_y, floor, tall, half = _body_box(b, geometry, x, y)
+    count = gi.outputs["Soul Rings"]
+    frame = b.node("GeometryNodeInputSceneTime", x, y - 900).outputs["Frame"]
+    rings = b.node("GeometryNodePoints", x + 1600, y)
+    b.feed(rings.inputs["Count"], count)
+    k = b.node("GeometryNodeInputIndex", x + 1200, y - 200).outputs[0]
+    many = b.math("MAXIMUM", count, 1.0, x=x + 1200, y=y - 400)
+    span = b.math("SUBTRACT", gi.outputs["Soul Peak"], gi.outputs["Soul Start"], x=x + 1200, y=y - 550)
+    start = b.math("MULTIPLY_ADD", b.math("DIVIDE", k, many, x=x + 1400, y=y - 450), span, gi.outputs["Soul Start"],
+                   x=x + 1600, y=y - 500)
+    rise_len = b.math("DIVIDE", b.math("MULTIPLY", span, 1.6, x=x + 1600, y=y - 700), many, x=x + 1800, y=y - 700)
+    rise = b.map_range(radius, start, b.math("ADD", start, rise_len, x=x + 2000, y=y - 650), x=x + 2200, y=y - 550,
+                       smooth=True)
+    late = b.math("MULTIPLY", b.math("SUBTRACT", gi.outputs["Soul End"], gi.outputs["Soul Peak"], x=x + 1600,
+                                     y=y - 900), 0.35, x=x + 1800, y=y - 900)
+    fade = b.map_range(radius, b.math("SUBTRACT", gi.outputs["Soul End"], late, x=x + 2000, y=y - 850),
+                       gi.outputs["Soul End"], 1.0, 0.0, x=x + 2200, y=y - 850, smooth=True)
+    order = b.math("DIVIDE", k, b.math("MAXIMUM", b.math("SUBTRACT", count, 1.0, x=x + 1400, y=y - 1100), 1.0,
+                                       x=x + 1600, y=y - 1100), x=x + 1800, y=y - 1050)
+    level = b.math("MULTIPLY_ADD", order, 0.76, 0.12, x=x + 2000, y=y - 1050)
+    swing = b.math("MULTIPLY_ADD", frame, 0.07, b.math("MULTIPLY", k, 1.9, x=x + 1800, y=y - 1350), x=x + 2000,
+                   y=y - 1300)
+    bob = b.math("MULTIPLY", b.math("SINE", swing, x=x + 2200, y=y - 1300), 0.012, x=x + 2400, y=y - 1300)
+    climb = b.math("MULTIPLY", b.math("ADD", level, bob, x=x + 2600, y=y - 1150), rise, x=x + 2800, y=y - 1100)
+    height = b.math("MULTIPLY_ADD", tall, climb, floor, x=x + 3000, y=y - 1000)
+    b.feed(rings.inputs["Position"], b.combine(mid_x, mid_y, height, x=x + 3400, y=y - 900))
+    glow = b.math("MULTIPLY", b.math("MULTIPLY", rise, fade, x=x + 2400, y=y - 700),
+                  b.math("MULTIPLY_ADD", beat, 0.6, 1.0, x=x + 2400, y=y - 850), x=x + 2600, y=y - 750)
+    pts = b.store(rings.outputs["Geometry"], ATTR_SOUL, b.combine(k, glow, 0.0, x=x + 2800, y=y - 750),
+                  "FLOAT_VECTOR", x=x + 3600, y=y)
+    ring = _unit_band(b, 128, 0.07, x + 1600, y - 1800)
+    shaded = b.node("GeometryNodeSetMaterial", x + 2800, y - 1800)
+    b.feed(shaded.inputs["Geometry"], ring)
+    b.feed(shaded.inputs["Material"], gi.outputs["Soul Material"])
+    tip_a = b.math("MULTIPLY_ADD", frame, 0.031, b.math("MULTIPLY", k, 2.3, x=x + 3000, y=y - 2300), x=x + 3200,
+                   y=y - 2200)
+    tip_b = b.math("MULTIPLY_ADD", frame, 0.027, b.math("MULTIPLY", k, 1.3, x=x + 3000, y=y - 2550), x=x + 3200,
+                   y=y - 2450)
+    tilt = b.combine(b.math("MULTIPLY", b.math("SINE", tip_a, x=x + 3400, y=y - 2200), 0.1, x=x + 3600, y=y - 2200),
+                     b.math("MULTIPLY", b.math("COSINE", tip_b, x=x + 3400, y=y - 2450), 0.1, x=x + 3600, y=y - 2450),
+                     b.math("MULTIPLY", frame, 0.01, x=x + 3600, y=y - 2700), x=x + 3800, y=y - 2400)
+    size = b.math("MULTIPLY", b.math("MULTIPLY", half, b.math("MULTIPLY_ADD", k, 0.04, 1.35, x=x + 3400, y=y - 2900),
+                                     x=x + 3600, y=y - 2900),
+                  b.math("MULTIPLY_ADD", rise, 0.2, 0.8, x=x + 3600, y=y - 3050), x=x + 3800, y=y - 2950)
+    circling = b.node("GeometryNodeInstanceOnPoints", x + 4000, y)
+    b.feed(circling.inputs["Points"], pts)
+    b.feed(circling.inputs["Instance"], shaded.outputs["Geometry"])
+    b.feed(circling.inputs["Rotation"], tilt)
+    b.feed(circling.inputs["Scale"], b.combine(size, size, 1.0, x=x + 4000, y=y - 2950))
+    some = b.boolean("AND", b.compare("GREATER_THAN", count, 0.5, x=x + 4000, y=y + 450), gi.outputs["Main"],
+                     x=x + 4200, y=y + 400)
+    window = b.boolean("AND", b.compare("GREATER_THAN", radius, gi.outputs["Soul Start"], x=x + 4200, y=y + 250),
+                       b.compare("LESS_THAN", radius, gi.outputs["Soul End"], x=x + 4200, y=y + 100), x=x + 4400,
+                       y=y + 150)
+    return b.switch("GEOMETRY", b.boolean("AND", some, window, x=x + 4600, y=y + 300), None,
+                    circling.outputs["Instances"], x=x + 4800, y=y)
+
+
+def _husk(b, gi, geometry, launch, has_launch, radius, anchor, wind, me, x, y):
+    """The husk (Black Myth's 聚形散气, a cicada's shell): from the moment the old outfit goes (Clamp Distance), all of
+    the old model, its locked parts too, stays behind where it was then (the recorded positions, so it holds still
+    while the body dances on), holds for Husk Hold and then over Husk Span either crumbles away from the top, its faces
+    breaking off and blowing away like flakes, or with Husk Float rises by Husk Rise and fades out. ATTR_HUSK tells the
+    materials it is the husk (1 solid .. 0 gone). Nothing without a recording."""
+    age = b.math("SUBTRACT", radius, gi.outputs["Clamp Distance"], x=x, y=y + 300)
+    hold, span = gi.outputs["Husk Hold"], gi.outputs["Husk Span"]
+    frozen = b.set_position(geometry, selection=has_launch, position=launch, x=x + 200, y=y)
+    frozen = b.delete(frozen, b.boolean("NOT", has_launch, x=x + 200, y=y - 200), "POINT", x=x + 400, y=y)
+    frozen = b.store(frozen, ATTR_EDGE, 0.0, x=x + 600, y=y)
+    frozen = b.store(frozen, ATTR_AHEAD, 1.0, x=x + 800, y=y)
+    # floating up and fading
+    gone = b.map_range(age, hold, b.math("ADD", hold, span, x=x + 600, y=y - 300), x=x + 800, y=y - 300, smooth=True)
+    up = _unrotate(b, me, (0.0, 0.0, 1.0), x + 800, y - 500)
+    rise = b.math("MULTIPLY", gi.outputs["Husk Rise"], b.math("MULTIPLY", gone, gone, x=x + 1000, y=y - 650),
+                  x=x + 1200, y=y - 600)
+    floated = b.set_position(frozen, b.vmath("SCALE", up, scale=rise, x=x + 1400, y=y - 500), x=x + 1400, y=y - 200)
+    floated = b.store(floated, ATTR_HUSK, b.math("SUBTRACT", 1.0, gone, x=x + 1400, y=y - 800), x=x + 1600, y=y - 200)
+    # crumbling from the top: faces break off one after another and blow away
+    rest_z = b.split_xyz(anchor, x=x, y=y - 1100)[2]
+    stat = b.node("GeometryNodeAttributeStatistic", x + 200, y - 1300, data_type="FLOAT", domain="POINT")
+    b.feed(stat.inputs["Geometry"], frozen)
+    b.feed(_enabled(stat.inputs, "Attribute")[0], rest_z)
+    up_body = b.math("DIVIDE", b.math("SUBTRACT", rest_z, stat.outputs["Min"], x=x + 400, y=y - 1100),
+                     b.math("MAXIMUM", stat.outputs["Range"], 1e-4, x=x + 400, y=y - 1250), x=x + 600, y=y - 1150)
+    face_up = b.on_domain(up_body, "FACE", x=x + 800, y=y - 1150)
+    seed = b.on_domain(anchor, "FACE", "FLOAT_VECTOR", x=x + 800, y=y - 1350)
+    rnd = b.white_noise(b.vmath("SCALE", seed, scale=5.7, x=x + 1000, y=y - 1350), x=x + 1200, y=y - 1350)[0]
+    order = b.math("MULTIPLY_ADD", b.math("SUBTRACT", 1.0, face_up, x=x + 1000, y=y - 1150), 0.65,
+                   b.math("MULTIPLY", rnd, 0.1, x=x + 1200, y=y - 1500), x=x + 1400, y=y - 1200)
+    start = b.math("MULTIPLY_ADD", span, order, hold, x=x + 1800, y=y - 1150)
+    tf = b.math("DIVIDE", b.math("SUBTRACT", age, start, x=x + 2000, y=y - 1150),
+                b.math("MAXIMUM", b.math("MULTIPLY", span, 0.3, x=x + 1800, y=y - 1350), 1e-4, x=x + 2000, y=y - 1350),
+                x=x + 2200, y=y - 1200, clamp=True)
+    face_t = b.on_domain(tf, "FACE", x=x + 2400, y=y - 1200)
+    intact = b.delete(frozen, b.compare("GREATER_THAN", face_t, 0.0, x=x + 2600, y=y - 1000), "FACE", x=x + 2800,
+                      y=y - 900)
+    breaking = b.boolean("AND", b.compare("GREATER_THAN", face_t, 0.0, x=x + 2600, y=y - 1300),
+                         b.compare("LESS_THAN", face_t, 0.999, x=x + 2600, y=y - 1450), x=x + 2800, y=y - 1350)
+    moving = b.separate(frozen, breaking, "FACE", x=x + 3000, y=y - 1200)[0]
+    split = b.node("GeometryNodeSplitEdges", x + 3200, y - 1200)
+    b.feed(split.inputs["Mesh"], moving)
+    flake_t = b.on_domain(tf, "FACE", x=x + 3000, y=y - 1600)
+    centre = b.on_domain(b.node("GeometryNodeInputPosition", x + 2800, y - 1800).outputs[0], "FACE", "FLOAT_VECTOR",
+                         x=x + 3000, y=y - 1800)
+    face_normal = b.on_domain(b.node("GeometryNodeInputNormal", x + 2800, y - 2000).outputs[0], "FACE",
+                              "FLOAT_VECTOR", x=x + 3000, y=y - 2000)
+    scaled = b.node("GeometryNodeScaleElements", x + 3400, y - 1200, domain="FACE")
+    b.feed(scaled.inputs["Geometry"], split.outputs["Mesh"])
+    b.feed(scaled.inputs["Scale"], b.math("POWER", b.math("SUBTRACT", 1.0, flake_t, x=x + 3200, y=y - 1600), 0.6,
+                                          x=x + 3400, y=y - 1600))
+    b.feed(scaled.inputs["Center"], centre)
+    fly = _fly(b, gi, flake_t, face_normal, seed, rnd, wind, me, x + 3400, y - 2200)
+    flown = b.set_position(scaled.outputs["Geometry"], fly, x=x + 4600, y=y - 1200)
+    crumbled = b.store(b.join([intact, flown], x=x + 4800, y=y - 1000), ATTR_HUSK, 1.0, x=x + 5000, y=y - 1000)
+    husk = b.switch("GEOMETRY", gi.outputs["Husk Float"], crumbled, floated, x=x + 5200, y=y - 500)
+    lasting = b.compare("LESS_THAN", age, b.math("ADD", hold, span, x=x + 4800, y=y + 50), x=x + 5000, y=y + 50)
+    there = b.boolean("AND", gi.outputs["Husk"], b.boolean("AND", b.compare("GREATER_EQUAL", age, 0.0, x=x + 5000,
+                                                                            y=y + 200), lasting, x=x + 5200,
+                                                           y=y + 150), x=x + 5400, y=y + 200)
+    return b.switch("GEOMETRY", there, None, husk, x=x + 5600, y=y)
+
+
 def _fly(b, gi, t, normal, seed, rnd, wind, me, x, y):
     """Offset of a piece that has left the surface, t going 0 -> 1 over its flight: it pops out along
     the normal, drifts with the wind (accelerating, each piece at its own speed) and swirls in a noise.
@@ -2222,12 +2729,13 @@ def _flip(b, gi, field_group, geometry, d, path, radius, keep, new, glow, x, y, 
 
 def _old_distance(b, gi, field, x, y):
     """The distance that times the old outfit: the edge's, or with the new outfit clamping shut (Clamp) the same for
-    all of it, so it all goes when the halves close (within a few percent)."""
+    all of it, so it all goes when the halves close (within Clamp Jitter: a few percent, none for the husk)."""
     rest, has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=x, y=y)
     seed = b.switch("VECTOR", has_rest, b.node("GeometryNodeInputPosition", x, y - 150).outputs[0], rest,
                     x=x + 200, y=y - 50)
     jitter = b.math("MULTIPLY_ADD", b.white_noise(b.vmath("SCALE", seed, scale=3.3, x=x + 400, y=y - 50),
-                                                  x=x + 600, y=y - 50)[0], 0.04, 1.0, x=x + 800, y=y - 50)
+                                                  x=x + 600, y=y - 50)[0], gi.outputs["Clamp Jitter"], 1.0, x=x + 800,
+                    y=y - 50)
     return b.switch("FLOAT", gi.outputs["Clamp"], field["Distance"],
                     b.math("MULTIPLY", gi.outputs["Clamp Distance"], jitter, x=x + 800, y=y - 200), x=x + 1000, y=y)
 
@@ -2668,8 +3176,15 @@ def build_base_group(field_group, venom_group):
     arcs = _arcs(b, gi, b.delete(geometry, lock, "FACE", x=3600, y=13000), field["Distance"], radius, beat, 3800,
                  13000)
     strike = _strike(b, gi, radius, me, 3800, 16000)
-    b.feed(tidy.inputs["Geometry"], b.join([old, particles, venom, crystals, brooch, column, arcs, strike], x=4400,
-                                           y=-150))
+    # 1.10: the husk (it keeps the old outfit's look and materials), flames on the old outfit along the real front (also
+    # while it waits to go all at once), and with no new outfit the lotus, the shockwave and the soul rings
+    husk = _husk(b, gi, geometry, launch, has_launch, radius, anchor, wind, me, 3800, 19000)
+    flames = _flames(b, gi, old, wave_d, radius, me, 3800, 23000)
+    lotus = _lotus(b, gi, geometry, t_p, beat, 3800, 27000)
+    shock = _shockwave(b, gi, geometry, radius, 3800, 35000)
+    soul = _soul_rings(b, gi, geometry, radius, beat, 3800, 39000)
+    b.feed(tidy.inputs["Geometry"], b.join([old, particles, venom, crystals, brooch, column, arcs, strike, husk, flames,
+                                            lotus, shock, soul], x=4400, y=-150))
     tidy.inputs["Name"].default_value = ATTR_AGE
     b.feed(go.inputs["Geometry"], tidy.outputs["Geometry"])
     return ng
@@ -2783,13 +3298,23 @@ def build_ring_group():
     end = b.math("MULTIPLY", span, 1.06, x=-1800, y=450)
     fade_out = b.map_range(s, span, end, 1.0, 0.0, x=-1600, y=600, smooth=True)
     vis = b.math("MULTIPLY", fade_in, fade_out, x=-1400, y=700)
+    # the mirrored ring (split from the waist) goes as far as its own front
+    back_span = b.switch("FLOAT", b.compare("GREATER_THAN", gi.outputs["Span Back"], 0.0, x=-2200, y=1100), span,
+                         gi.outputs["Span Back"], x=-2000, y=1100)
+    back_end = b.math("MULTIPLY", back_span, 1.06, x=-1800, y=1100)
+    back_vis = b.math("MULTIPLY", fade_in, b.map_range(s, back_span, back_end, 1.0, 0.0, x=-1600, y=1100, smooth=True),
+                      x=-1400, y=1100)
+    last = b.switch("FLOAT", gi.outputs["Mirror"], end, b.math("MAXIMUM", end, back_end, x=-1600, y=1300), x=-1400,
+                    y=1300)
     on = b.boolean("AND", b.compare("GREATER_THAN", s, 0.0, x=-1400, y=450),
-                   b.compare("LESS_THAN", s, end, x=-1400, y=300), x=-1200, y=400)
+                   b.compare("LESS_THAN", s, last, x=-1400, y=300), x=-1200, y=400)
     beat = b.node("GeometryNodeObjectInfo", -2400, 300, transform_space="ORIGINAL")
     b.feed(beat.inputs["Object"], gi.outputs["Beat Object"])
     pulse = b.switch("FLOAT", gi.outputs["Beat Sync"], 0.0, b.split_xyz(beat.outputs["Location"], x=-2200, y=300)[0],
                      x=-2000, y=300)
-    glow = b.math("MULTIPLY", vis, b.math("MULTIPLY_ADD", pulse, 0.6, 1.0, x=-1400, y=150), x=-1200, y=200)
+    on_beat = b.math("MULTIPLY_ADD", pulse, 0.6, 1.0, x=-1400, y=150)
+    glow = b.math("MULTIPLY", vis, on_beat, x=-1200, y=200)
+    back_glow = b.math("MULTIPLY", back_vis, on_beat, x=-1200, y=1000)
     big = b.math("MAXIMUM", gi.outputs["Half U"], gi.outputs["Half V"], x=-2200, y=0)
     margin = b.math("MULTIPLY", big, 0.08, x=-2000, y=0)
     size = gi.outputs["Size"]
@@ -2913,23 +3438,40 @@ def build_ring_group():
     def is_style(k_, y):
         return b.compare("EQUAL", gi.outputs["Style"], float(k_), x=1600, y=y)
 
+    # --- Halo: a plain ring of light, a thin bright line in a soft wider one (Danny Phantom's rings).
+    halo = b.join([_tube(b, _circle(b, ring_r, 128, -600, -6400), b.math("MULTIPLY", width, 1.2, x=-800, y=-6600),
+                         ring_mat, -400, -6400),
+                   _tube(b, _circle(b, b.math("MULTIPLY", ring_r, 1.015, x=-800, y=-6900), 128, -600, -6900),
+                         b.math("MULTIPLY", width, 3.0, x=-800, y=-7100), ring_mat, -400, -6900)], x=600, y=-6600)
     flat = b.switch("GEOMETRY", is_style(1, -200), magic, spark_ring, x=1800, y=0)
     flat = b.switch("GEOMETRY", is_style(2, -400), flat, panel, x=2000, y=0)
     flat = b.switch("GEOMETRY", is_style(3, -600), flat, static, x=2200, y=0)
+    flat = b.switch("GEOMETRY", is_style(5, -1000), flat, halo, x=2300, y=0)
     # drawn in the plane (x along u, y along v, z along the axis), moved to the front
     centre = b.vmath("ADD", gi.outputs["Start"], b.vmath("SCALE", gi.outputs["Axis"], scale=s, x=1800, y=600),
                      x=2000, y=600)
 
-    def placed(local, x, y):
+    def placed(local, x, y, at=None):
         lx, ly, lz = b.split_xyz(local, x=x, y=y)
         spot_ = b.vmath("ADD", b.vmath("SCALE", gi.outputs["U"], scale=lx, x=x + 200, y=y),
                         b.vmath("SCALE", gi.outputs["V"], scale=ly, x=x + 200, y=y - 150), x=x + 400, y=y)
         spot_ = b.vmath("ADD", spot_, b.vmath("SCALE", gi.outputs["Axis"], scale=lz, x=x + 400, y=y - 150), x=x + 600,
                         y=y)
-        return b.vmath("ADD", centre, spot_, x=x + 800, y=y)
+        return b.vmath("ADD", centre if at is None else at, spot_, x=x + 800, y=y)
 
-    flat = b.set_position(flat, position=placed(b.node("GeometryNodeInputPosition", 2000, 300).outputs[0], 2200, 300),
-                          x=2600, y=0)
+    here = b.node("GeometryNodeInputPosition", 2000, 300).outputs[0]
+    ahead = b.set_position(flat, position=placed(here, 2200, 300), x=2600, y=0)
+    ahead = b.store(ahead, ATTR_EDGE, glow, x=2700, y=0)
+    ahead_on = b.switch("GEOMETRY", b.compare("LESS_THAN", s, end, x=2600, y=200), None, ahead, x=2800, y=100)
+    # ... and with Mirror a second one the other way from the start
+    back = b.vmath("SUBTRACT", gi.outputs["Start"], b.vmath("SCALE", gi.outputs["Axis"], scale=s, x=1800, y=900),
+                   x=2000, y=900)
+    behind = b.set_position(flat, position=placed(here, 2200, 1100, back), x=2600, y=-200)
+    behind = b.store(behind, ATTR_EDGE, back_glow, x=2700, y=-200)
+    behind_on = b.switch("GEOMETRY", b.compare("LESS_THAN", s, back_end, x=2600, y=-400), None, behind, x=2800,
+                         y=-300)
+    flat = b.switch("GEOMETRY", gi.outputs["Mirror"], ahead, b.join([ahead_on, behind_on], x=2900, y=-100), x=3000,
+                    y=0)
 
     # --- Comet: a big head and a tight trail of sparkles on the last two thirds of the turn it has just come round (the
     # spiral's front: once round per pitch, starting in front of the body), standing to face the front.
@@ -2981,8 +3523,8 @@ def build_ring_group():
     b.feed(comet_mat.inputs["Geometry"], comet.outputs["Geometry"])
     b.feed(comet_mat.inputs["Material"], ring_mat)
 
-    drawn = b.switch("GEOMETRY", is_style(4, -800), flat, comet_mat.outputs["Geometry"], x=3800, y=0)
-    drawn = b.store(drawn, ATTR_EDGE, glow, x=4000, y=0)
+    comet_lit = b.store(comet_mat.outputs["Geometry"], ATTR_EDGE, glow, x=3700, y=-5200)
+    drawn = b.switch("GEOMETRY", is_style(4, -800), flat, comet_lit, x=3800, y=0)  # (the flat rings carry their glow)
     b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", on, None, drawn, x=4200, y=0))
     return ng
 

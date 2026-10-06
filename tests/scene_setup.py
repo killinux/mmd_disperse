@@ -70,11 +70,19 @@ def load_dance(armature, path, scale=1.0):
     enable_mmd_tools()
     folder, name = os.path.split(os.path.abspath(path))
     with bpy.context.temp_override(selected_objects=[armature], active_object=armature, object=armature):
-        bpy.ops.mmd_tools.import_vmd(directory=folder, files=[{"name": name}], scale=scale,
-                                     update_scene_settings=False)
+        try:
+            bpy.ops.mmd_tools.import_vmd(directory=folder, files=[{"name": name}], scale=scale,
+                                         update_scene_settings=False)
+        except TypeError:  # the legacy mmd_tools of Blender 3.6 takes one file path
+            bpy.ops.mmd_tools.import_vmd(filepath=os.path.join(folder, name), scale=scale,
+                                         update_scene_settings=False)
     action = armature.animation_data.action if armature.animation_data else None
     if action is None:
         raise RuntimeError("no motion was imported from " + path)
+    # the scene runs at least to the end of the dance (as mmd_tools' own import sets it up): moves of the dance that
+    # start the transformation are looked for up to the scene's end frame
+    scene = bpy.context.scene
+    scene.frame_end = max(scene.frame_end, int(action.frame_range[1]))
     return action
 
 

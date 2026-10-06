@@ -165,7 +165,7 @@ def flash_expression(wave, rise, fall, amount, strike=None):
 def _flash_factor(node):
     if node.bl_idname == "ShaderNodeMix":
         return next(s for s in node.inputs if s.identifier == "Factor_Float")
-    return node.inputs["Fac"]
+    return next(s for s in node.inputs if s.identifier == "Fac")  # (shown as "Factor" in Blender 5.0+)
 
 
 def add_white_flash(scene):
@@ -182,6 +182,76 @@ def add_white_flash(scene):
 
     idname = "CompositorNodeMixRGB" if hasattr(bpy.types, "CompositorNodeMixRGB") else "ShaderNodeMix"
     return _insert_before_output(scene, FLASH_NAME, idname, setup)
+
+
+IMPACT_GREY = "MMD Disperse Impact Grey"
+IMPACT_CONTRAST = "MMD Disperse Impact Contrast"
+IMPACT_INVERT = "MMD Disperse Impact Invert"
+IMPACT_NODES = ((IMPACT_GREY, False), (IMPACT_CONTRAST, False), (IMPACT_INVERT, True))  # (inverting every other frame)
+
+
+def _set_b(node, color):
+    """The B colour of a Mix node we splice in (MixRGB, or the Mix node of Blender 5.0+)."""
+    if node.bl_idname == "ShaderNodeMix":
+        node.data_type = "RGBA"
+        next(s for s in node.inputs if s.identifier == "B_Color").default_value = color
+    else:
+        node.inputs[2].default_value = color
+
+
+def add_impact(scene):
+    """Anime impact frames: three nodes before the output, one draining the colour out of the picture (Saturation
+    with grey), RGB Curves with a hard S that leaves it black and white, one inverting it (Difference with white);
+    update_impact() drives them for a few frames."""
+    def grey(node):
+        node.blend_type = "SATURATION"
+        _set_b(node, (0.5, 0.5, 0.5, 1.0))
+        _flash_factor(node).default_value = 0.0
+
+    def stark(node):
+        curve = node.mapping.curves[3]  # the combined curve
+        for x, y in ((0.3, 0.0), (0.42, 0.04), (0.58, 0.96)):
+            curve.points.new(x, y)
+        node.mapping.update()
+        _flash_factor(node).default_value = 0.0
+
+    def invert(node):
+        node.blend_type = "DIFFERENCE"
+        _set_b(node, (1.0, 1.0, 1.0, 1.0))
+        _flash_factor(node).default_value = 0.0
+
+    idname = "CompositorNodeMixRGB" if hasattr(bpy.types, "CompositorNodeMixRGB") else "ShaderNodeMix"
+    return (_insert_before_output(scene, IMPACT_GREY, idname, grey),
+            _insert_before_output(scene, IMPACT_CONTRAST, "CompositorNodeCurveRGB", stark),
+            _insert_before_output(scene, IMPACT_INVERT, idname, invert))
+
+
+def impact_expression(first, frames, invert):
+    """Driver expression on the frame: on for `frames` frames from frame `first`; the inverting one only on every other
+    of them (the first, the third ...). Counted in frames, not in mask radius: the front speeds up as it sets off
+    (when a move of the dance starts it), and a frame's worth of radius there would skip frames."""
+    text = "(frame >= {f}) * (frame < {e})".format(f=int(first), e=int(first) + int(frames))
+    if invert:
+        text += " * (fmod(frame - {f}, 2) < 0.5)".format(f=int(first))
+    return text
+
+
+def update_impact(scene, first, frames):
+    """Drive the impact frames (when the scene has them) for `frames` frames from frame `first`; off when `first` is
+    None or there are no frames."""
+    tree = _existing_tree(scene)
+    for name, invert in IMPACT_NODES:
+        node = tree.nodes.get(name) if tree is not None else None
+        if node is None:
+            continue
+        socket = _flash_factor(node)
+        socket.driver_remove("default_value")
+        if first is None or frames <= 0:
+            socket.default_value = 0.0
+            continue
+        driver = socket.driver_add("default_value").driver
+        driver.type = "SCRIPTED"
+        driver.expression = impact_expression(first, frames, invert)
 
 
 def update_white_flash(scene, mask, wave, rise, fall, amount, strike=None):

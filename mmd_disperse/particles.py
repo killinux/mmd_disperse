@@ -375,8 +375,9 @@ def remove_assets():
     if coll is not None and not coll.all_objects:
         bpy.data.collections.remove(coll)
     for name in (materials.PARTICLE_MATERIAL, materials.COIN_MATERIAL, materials.ICE_MATERIAL, materials.CARD_MATERIAL,
-                 materials.BAT_MATERIAL, materials.INK_MATERIAL, materials.SMOKE_MATERIAL, materials.PEBBLE_MATERIAL,
-                 materials.ARC_MATERIAL, materials.BEAM_MATERIAL):
+                 materials.BAT_MATERIAL, materials.INK_MATERIAL, materials.SMOKE_MATERIAL, materials.DUST_MATERIAL,
+                 materials.PEBBLE_MATERIAL, materials.ARC_MATERIAL, materials.BEAM_MATERIAL, materials.FLAME_MATERIAL,
+                 materials.LOTUS_MATERIAL, materials.SOUL_MATERIAL, materials.SHOCK_MATERIAL):
         mat = bpy.data.materials.get(name)
         if mat is not None and mat.users == 0:
             bpy.data.materials.remove(mat)

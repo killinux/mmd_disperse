@@ -1,12 +1,14 @@
 """Build, update and remove a suit-up effect (mask empty + modifiers + materials)."""
 
 import fnmatch
+import math
 import time
 
 import bpy
+import numpy as np
 from mathutils import Matrix, Vector
 
-from . import arrival, beats, compositor, launch, materials, particles, ribbons, rings, venom
+from . import arrival, beats, compositor, impact, launch, materials, motion, particles, ribbons, rings, venom
 from . import model as mdl
 from .node_groups import BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups, input_identifiers
 
@@ -33,6 +35,8 @@ P_LAYOUT = "mmd_disperse_layout"  # sweeps and the spiral: where the front start
 P_ROOT = "mmd_disperse_root"  # the model the effect follows when it moves as a whole
 P_PITCH = "mmd_disperse_pitch"  # the spiral's pitch the arrival field was built with
 P_BROOCH = "mmd_disperse_brooch"  # world rest position the old outfit is sucked into (the start bone)
+P_TRIGGER = "mmd_disperse_trigger"  # the frame the move of the dance that starts it was found on (-1: none found)
+P_SPEED = "mmd_disperse_speed"  # hand path: how far the front gets in a frame (its keys go linearly at that pace)
 FLAKES = ("FRAGMENTS", "SUCK")  # exit styles that break the old outfit into flakes
 
 # Sizes as a fraction of the model height (tuned on Tifa, ~20.7 MMD units tall).
@@ -86,6 +90,10 @@ SIZE_RATIOS = {
     "arc_reach": 0.03,
     "arc_thickness": 0.001,
     "silk_swell": 0.008,
+    "hand_reach": 0.07,
+    "flame_width": 0.1,
+    "flame_height": 0.12,
+    "shock_size": 0.6,
 }
 PAINT_STYLES = ("NONE", "LINEART", "INK", "CODE")
 PAINT_CELL = 0.012  # size of the hatching / washes of the drawings, fraction of the model height
@@ -101,8 +109,14 @@ ABSORB = 0.6  # how far behind the edge the goo swallows a tendril, in tendril l
 CLAMP_AT = 0.8  # share of the wave at which the halves of the new outfit clamp shut, or the ghosts meet
 # entrances where all of the new outfit is there at that moment (the old one goes then): the halves clamp shut, the
 # ghosts meet, the evolution flash ends, the smoke puff hides the swap, the new outfit has stood up out of the shadow
-# or shimmered in in the transporter beam
-AT_ONCE = ("CLAMP", "GHOSTS", "EVOLVE", "POOF", "SHADOW", "BEAM")
+# or shimmered in in the transporter beam, it simply swaps, or the lotus bud is shut round it
+AT_ONCE = ("CLAMP", "GHOSTS", "EVOLVE", "POOF", "SHADOW", "BEAM", "SWAP", "LOTUS")
+LOTUS_END = 1.65  # share of the moment by which the lotus has opened and sunk away
+FLAME_AFTER = 0.25  # share of the wave the flames' aura burns on after the big moment
+SHOCK_SPAN = 0.2  # share of the wave the shockwave takes to spread
+SOUL_PEAK = 0.6  # share of the big moment by which the soul rings have risen ...
+SOUL_AFTER = 0.3  # ... and the share of the wave they stay after it
+HUSK_RISE = 0.5  # how far the husk floats up, in model heights
 SHATTER_AT = 1.0  # share of the wave at which the old outfit goes all at once (exit timing): when the wave is done
 BEAT_REACH = 2.0  # seconds a moment may wait for the next beat
 NOISE_CELLS_PER_HEIGHT = 6.0
@@ -159,7 +173,7 @@ def _insert_scale_keys(mask, frames_values, interpolation):
         prefs.keyframe_new_interpolation_type = old
 
 
-def _create_mask(settings, location, armature, bone, collection, radius_max, path, root=None, axis=None):
+def _create_mask(settings, location, armature, bone, collection, radius_max, path, root=None, axis=None, speed=0.0):
     mask = bpy.data.objects.new(MASK_NAME, None)
     # The scale is how far the wave has travelled; for the sweeps an arrow shows the direction.
     mask.empty_display_type = "SINGLE_ARROW" if path in arrival.SWEEPS else "SPHERE"
@@ -185,10 +199,12 @@ def _create_mask(settings, location, armature, bone, collection, radius_max, pat
         con.inverse_matrix = Matrix.LocRotScale(loc, rot, None).inverted()
     start = settings.frame_start
     end = max(settings.frame_end, start + 1)
+    if speed > 0.0:  # (the hand path: at the pace the hands set)
+        end = start + radius_max / speed
     keys = [(start, 0.0), (end, radius_max)]
     if settings.direction == "SHRINK":
         keys = [(start, radius_max), (end, 0.0)]
-    _insert_scale_keys(mask, keys, "LINEAR" if settings.easing == "LINEAR" else "BEZIER")
+    _insert_scale_keys(mask, keys, "LINEAR" if settings.easing == "LINEAR" or speed > 0.0 else "BEZIER")
     return mask
 
 
@@ -199,16 +215,19 @@ def _layer(settings):
 
 def _old_at_once(settings):
     """True when all of the old outfit goes at one moment: the new outfit's halves clamp shut or its ghosts meet, or
-    the old outfit stays (freezing over ...) while the wave crosses it and then goes all at once."""
-    return settings.entrance in AT_ONCE or (settings.exit_timing == "AT_ONCE" and settings.entrance != "SCALES")
+    the old outfit stays (freezing over ...) while the wave crosses it and then goes all at once, or leaves its husk."""
+    return (settings.entrance in AT_ONCE or settings.exit_style == "HUSK"
+            or (settings.exit_timing == "AT_ONCE" and settings.entrance != "SCALES"))
 
 
 def _held(settings):
     """True when the new outfit waits under the old one's opaque surface (veins, char, ink, stone, gold, silk, code)
-    until the old outfit goes all at once, instead of growing at the edge and showing through it. (Under clear ice it
-    is seen forming.)"""
-    return (settings.exit_timing == "AT_ONCE" and settings.entrance == "GROW"
-            and settings.old_surface not in ("NONE", "FROST"))
+    until the old outfit goes all at once, instead of growing at the edge and showing through it (under clear ice it
+    is seen forming), or for the moment the old outfit is left behind as a husk."""
+    if settings.entrance != "GROW":
+        return False
+    return settings.exit_style == "HUSK" or (settings.exit_timing == "AT_ONCE"
+                                             and settings.old_surface not in ("NONE", "FROST"))
 
 
 def _on_beat(settings, mask, radius):
@@ -266,6 +285,19 @@ def _extra(settings, wave, has_base, has_target):
         extra = max(extra, (1.35 * CLAMP_AT - 1.0) * wave)
     if settings.venom_enable:  # the last strands snap
         extra = max(extra, STRAND_LIFE * settings.venom_length)
+    # 1.10: what goes on after the big moment (the swap, or the new outfit complete)
+    big = (CLAMP_AT * wave if settings.entrance in AT_ONCE else wave + _layer(settings))
+    if settings.entrance == "LOTUS":  # the lotus opens and sinks away
+        extra = max(extra, (LOTUS_END * CLAMP_AT - 1.0) * wave)
+    if has_base and settings.exit_style == "HUSK":  # the husk holds, then crumbles or floats away
+        moment = (CLAMP_AT if settings.entrance in AT_ONCE else SHATTER_AT) * wave
+        extra = max(extra, moment - wave + (settings.husk_hold + settings.husk_time + 0.02) * wave)
+    if settings.flame_enable and settings.flame_mode == "AURA":
+        extra = max(extra, big + FLAME_AFTER * wave - wave)
+    if settings.impact_enable and settings.shockwave:
+        extra = max(extra, big + SHOCK_SPAN * wave - wave)
+    if settings.soul_enable:
+        extra = max(extra, big + SOUL_AFTER * wave - wave)
     return extra
 
 
@@ -296,12 +328,18 @@ def _retime(settings, mask, objects):
     if abs(radius - old) <= 1e-6 * radius or not curves:
         return
     ratio = radius / old
+    speed = float(mask.get(P_SPEED, 0.0))  # the hand path keeps its pace: the keys move later instead
     for fc in curves:
+        first = fc.keyframe_points[0].co[0]
         for key in fc.keyframe_points:
             key.co[1] *= ratio
             key.handle_left[1] *= ratio
             key.handle_right[1] *= ratio
+            if speed > 0.0 and settings.direction == "GROW":
+                key.co[0] = key.handle_left[0] = key.handle_right[0] = first + key.co[1] / speed
         fc.update()
+    if speed > 0.0 and settings.direction == "GROW":
+        settings.frame_end = int(math.ceil(curves[0].keyframe_points[-1].co[0]))
     mask[P_REACH] = radius
     for ob in objects:  # recorded for the old timing: follow the body until the next build
         launch.remove(ob)
@@ -398,6 +436,7 @@ def _cleanup_mesh(ob):
     if ob.get(P_ROLE) in ("TARGET", "BASE"):
         for slot in ob.material_slots:
             if slot.material is not None:
+                materials.remove_husk(slot.material)
                 materials.remove_edge_glow(slot.material)
                 materials.remove_hologram(slot.material)
                 materials.remove_inner_glow(slot.material)
@@ -452,8 +491,10 @@ def remove_effect(mask):
         settings = getattr(scene, "mmd_disperse", None)
         if settings is not None and settings.mask == mask:
             compositor.update_white_flash(scene, None, 0.0, 0.0, 0.0, 0.0)
+            compositor.update_impact(scene, None, 0)
     ribbons.remove(mask)
     rings.remove(mask)
+    impact.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
     bpy.data.objects.remove(mask)
     if action is not None and action.users == 0:
@@ -564,6 +605,19 @@ def _update_surface(ob, settings):
             materials.remove_surface(mat)
 
 
+def _update_husk(ob, settings):
+    """The husk: every material of the old outfit (its head and hair are left behind too) shows it as the husk style."""
+    for slot in ob.material_slots:
+        mat = slot.material
+        if mat is None or mat.name == WIRE_MATERIAL:
+            continue
+        if settings.exit_style == "HUSK":
+            materials.add_husk(mat)
+            materials.update_husk(mat, settings.husk_style, settings.glow_color)
+        else:
+            materials.remove_husk(mat)
+
+
 def _venom_owners(objects):
     """The meshes the symbiote's tendrils run over: the old outfit's, or the new one's when there is no old one."""
     meshes = [ob for ob in objects if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
@@ -670,6 +724,54 @@ def _striking(settings):
     return settings.arc_enable and settings.arc_strike and settings.direction == "GROW"
 
 
+def _from_move(settings, mask):
+    """True when a move of the dance (a clap ...) was found and the front sets off from it."""
+    return settings.trigger in motion.GESTURES and mask is not None and mask.get(P_TRIGGER, -1.0) >= 0.0
+
+
+def _impact_start(settings, mask, wave):
+    """Mask radius the impact frames (and the shockwave) start at: as the front sets off when a move of the dance
+    starts it, otherwise a frame after the big moment (the swap, or the new outfit complete), when its glow is up and
+    the figure stands out of a dark stage in black and white."""
+    if _from_move(settings, mask):
+        return max(0.5 * _radius_at(mask, 1.0), 1e-6)
+    big = _finale_start(settings, wave, mask)
+    return big + (_radius_step(mask, big) if mask is not None else 0.0)
+
+
+def _focus(mask):
+    """World point the speed lines rush towards: the middle of the body, a little above (the chest)."""
+    meshes = [ob for ob in effect_objects(mask) if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
+    if not meshes:
+        return None
+    lo, hi = mdl.rest_bounds(meshes)
+    return Vector(((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z + 0.62 * (hi.z - lo.z)))
+
+
+def update_impact(settings):
+    """Drive the impact frames (when the compositor has them) and the speed lines from the current effect."""
+    mask = settings.mask
+    scene = settings.id_data
+    wave = float(mask.get(P_WAVE, 0.0)) if mask is not None else 0.0
+    if mask is None or wave <= 0.0 or not settings.impact_enable:
+        compositor.update_impact(scene, None, 0)
+        if mask is not None:
+            impact.remove(mask)
+        return
+    # the first whole frame at which the mask radius gets there, counted on in frames from it (the mask keys as they
+    # are now: this runs again whenever the effect syncs)
+    at = _frame_at(mask, _impact_start(settings, mask, wave))
+    first = None if at is None else int(math.ceil(at - 1e-6))
+    compositor.update_impact(scene, first, settings.impact_frames)
+    if settings.speed_lines and scene.camera is not None and first is not None:
+        if not impact.sheets(mask):
+            collection = mask.users_collection[0] if mask.users_collection else scene.collection
+            impact.create(scene, mask, collection)
+        impact.sync(scene, mask, _focus(mask), first, settings.impact_frames)
+    else:
+        impact.remove(mask)
+
+
 def update_white_flash(settings):
     """Drive the compositor's white flash (when the scene has one) from the current effect's finale: it comes up
     within a frame where the finale starts and is gone about six frames later, however long the finale is. When
@@ -680,6 +782,9 @@ def update_white_flash(settings):
     step = _radius_step(mask, start) if mask is not None else 0.0
     if step <= 0.0:  # no keys to measure: a share of the finale instead
         step = 0.05 * settings.finale_length * wave
+    if settings.impact_enable and wave > 0.0 and not _from_move(settings, mask):
+        # the impact frames first, then the flash (it would wash them out)
+        start = _impact_start(settings, mask, wave) + settings.impact_frames * step
     amount = settings.finale_white if settings.finale else 0.0
     strike = None
     if _striking(settings) and _radius_at(mask, STRIKE_FRAMES) > 0.0:  # a frame or two, the bolt shows after it
@@ -714,19 +819,25 @@ def _record_parts(settings, role, shown=False):
     switching between flakes and chunks needs no new recording."""
     if role == "BASE":
         pieces = settings.exit_style == "CHUNKS"
-        vertices = settings.exit_style in FLAKES or settings.particles != "NONE"
+        vertices = settings.exit_style in FLAKES or settings.particles != "NONE" or settings.exit_style == "HUSK"
         return vertices or (pieces and not shown), pieces
     stars = settings.finale and settings.finale_sparkles > 0
     # with Subdivide the fly-in pieces are cut from another mesh than the one recorded
     return stars, settings.entrance == "ASSEMBLE" and settings.subdivide == 0
 
 
+def _recording(settings, role):
+    """True when the meshes of `role` are recorded: with leave behind, or the old outfit for its husk."""
+    return settings.leave_behind or (role == "BASE" and settings.exit_style == "HUSK")
+
+
 def missing_recording(settings):
-    """True when leave behind is on but some part of the built effect that needs a recording has none (rebuild)."""
-    if not settings.leave_behind or settings.mask is None:
+    """True when leave behind (or the husk) is on but some part of the built effect that needs a recording has none
+    (rebuild)."""
+    if settings.mask is None:
         return False
     for ob in effect_objects(settings.mask):
-        if ob.type != "MESH" or ob.get(P_ROLE) not in ("BASE", "TARGET"):
+        if ob.type != "MESH" or ob.get(P_ROLE) not in ("BASE", "TARGET") or not _recording(settings, ob.get(P_ROLE)):
             continue
         vertices, chunks = _record_parts(settings, ob.get(P_ROLE), shown=True)
         if (vertices and not launch.has_launch(ob)) or (chunks and not launch.has_launch(ob, chunks=True)):
@@ -742,6 +853,7 @@ def sync(settings):
     objects = effect_objects(mask)
     _retime(settings, mask, objects)
     update_white_flash(settings)
+    update_impact(settings)
     wire = bpy.data.materials.get(WIRE_MATERIAL)
     materials.update_wire_material(wire, settings)
     shape = _particle_object(settings)
@@ -780,6 +892,25 @@ def sync(settings):
         materials.ensure_beam_material()
     materials.update_beam_material(settings)
     strike_until = _radius_at(mask, STRIKE_FRAMES) if _striking(settings) else 0.0
+    # 1.10: the lotus, flames, the shockwave and the soul rings, timed by the big moment
+    scene = settings.id_data
+    wave_at = float(mask.get(P_WAVE, 0.0))
+    big = _finale_start(settings, wave_at, mask)
+    lotus = settings.entrance == "LOTUS"
+    if lotus:
+        materials.ensure_lotus_material()
+    materials.update_lotus_material(settings.particle_color, settings.glow_color, settings.edge_glow_strength)
+    if settings.flame_enable:
+        materials.ensure_flame_material()
+    materials.update_flame_material(settings.flame_color, settings.flame_strength, height)
+    shock = settings.impact_enable and settings.shockwave
+    if shock:
+        materials.ensure_shock_material()
+    materials.update_shock_material(settings.glow_color, 1.5 * settings.edge_glow_strength)
+    if settings.soul_enable:
+        materials.ensure_soul_material()
+    materials.update_soul_material(settings.soul_strength)
+    shock_start = _impact_start(settings, mask, wave_at) if wave_at > 0.0 else 0.0
     common = {
         "Mask": mask,
         "Use Rest Position": settings.space == "REST",
@@ -821,6 +952,30 @@ def sync(settings):
         "Beam Material": bpy.data.materials.get(materials.BEAM_MATERIAL),
         "Star Object": particles.ensure_asset("STAR", settings.id_data) if beam else None,
         "Star Size": settings.particle_size,
+        "Swap": settings.entrance == "SWAP",
+        "Lotus": lotus,
+        "Lotus Petals": settings.lotus_petals,
+        "Lotus Material": bpy.data.materials.get(materials.LOTUS_MATERIAL),
+        "Flames": settings.flame_enable,
+        "Flame Aura": settings.flame_mode == "AURA",
+        "Flame Width": settings.flame_width,
+        "Flame Height": settings.flame_height,
+        "Flame Start": 0.05 * big,
+        "Flame Peak": big,
+        "Flame End": big + FLAME_AFTER * wave_at,
+        "Flame Material": bpy.data.materials.get(materials.FLAME_MATERIAL),
+        "Camera": scene.camera,
+        "Shock": shock,
+        "Shock Start": shock_start,
+        "Shock End": shock_start + SHOCK_SPAN * wave_at,
+        "Shock Size": settings.shock_size,
+        "Shock Material": bpy.data.materials.get(materials.SHOCK_MATERIAL),
+        "Dust Material": materials.ensure_dust_material() if shock else None,
+        "Soul Rings": settings.soul_count if settings.soul_enable else 0,
+        "Soul Start": 0.0,
+        "Soul Peak": SOUL_PEAK * big,
+        "Soul End": big + SOUL_AFTER * wave_at,
+        "Soul Material": bpy.data.materials.get(materials.SOUL_MATERIAL),
     }
     values = {
         TARGET_GROUP: dict(common, **{
@@ -906,6 +1061,13 @@ def sync(settings):
             "Clamp": _old_at_once(settings),  # the old outfit goes all at once
             "Swell": settings.silk_swell if settings.old_surface == "SILK" else 0.0,
             "Glyphs": settings.particles in particles.VARIANTS,
+            "Husk": settings.exit_style == "HUSK",
+            "Husk Hold": settings.husk_hold * wave_at,
+            "Husk Span": settings.husk_time * wave_at,
+            "Husk Float": settings.husk_away == "FLOAT",
+            "Husk Rise": HUSK_RISE * height,
+            # the husk is the old outfit at one moment: all of it goes then, none of it a little before or after
+            "Clamp Jitter": 0.0 if settings.exit_style == "HUSK" else 0.04,
         }),
     }
     reach = float(mask.get(P_REACH, 0.0)) or 1e6
@@ -924,7 +1086,10 @@ def sync(settings):
         # frequencies grow), so a scaled model looks the same as an unscaled one.
         s = _object_scale(ob)
         skeleton = venom.skeleton(ob)
+        flame_area = float(mask.get(P_AREA_NEW if role == "TARGET" else P_AREA, 0.0))
+        flame_density = settings.flame_count / flame_area if flame_area > 0.0 else 0.0
         own = {"Reach": reach, "Venom": skeleton is not None, "Venom Skeleton": skeleton, "Clamp Distance": moment,
+               "Flame Density": flame_density * s * s,
                "Main": ob == main, "Arcs": settings.arc_enable and role == arc_role, "Arc Density": arc_density * s * s,
                "Strike": _striking(settings) and ob == main,
                "Code": (role == "TARGET" and settings.paint_style == "CODE")
@@ -990,6 +1155,7 @@ def sync(settings):
                          settings.frag_glow_strength if (flakes or settings.silhouette) and not (evolve or timeline)
                          else settings.edge_glow_strength)
             _update_surface(ob, settings)
+            _update_husk(ob, settings)
         if role in ("TARGET", "BASE"):
             _update_inner_glow(ob, settings)
             _update_shadow(ob, settings)
@@ -1000,6 +1166,69 @@ def _seeds(settings, location, model):
     if settings.seeds != "ORIGIN":
         seeds += arrival.limb_points(model.armature)
     return seeds or [location]
+
+
+def _find_move(context, settings, owner, meshes, height):
+    """The first move of the kind the panel asks for (Start On) in the old model's motion, from the start frame to the
+    end of the scene: a dict with its frame (on the nearest beat with beat sync) and the rest positions and bone names
+    the front starts from; None when there is none."""
+    scene = context.scene
+    fps = scene.render.fps / scene.render.fps_base
+    first = settings.frame_start
+    frames = list(range(first, max(scene.frame_end, first + 1) + 1))
+    track = motion.play(scene, owner.armature, frames, hidden=meshes)
+    hit = motion.find(track, settings.trigger, height, fps)
+    if hit is None:
+        return None
+    index, parts = hit
+    frame = float(frames[index])
+    if settings.beat_sync:
+        frame = motion.snap(frame, beats.beat_frames(), fps)
+    points, names = motion.start_points(owner.armature, parts)
+    return {"frame": frame, "points": points, "bones": names}
+
+
+def _hand_arrival(context, settings, owner, meshes, height, location):
+    """Hand path: arrival distances (one array per mesh) and the front's pace (world units a frame). A point arrives
+    when a hand first sweeps over it during the transformation (a body height of the front for the whole of it), the
+    rest of the body in turn from there, along it."""
+    scene = context.scene
+    start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
+    speed = height / float(end - start)
+    sides = {"BOTH": ("L", "R"), "LEFT": ("L",), "RIGHT": ("R",)}[settings.hand_side]
+    touches = motion.hand_touches(scene, owner.armature, meshes, range(start, end + 1), sides, settings.hand_reach)
+    known = [np.where(np.isfinite(t), (t - start) * speed, np.inf) for t in touches]
+    points = [mdl.rest_points_world(ob) for ob in meshes]
+    tris = [arrival._triangles(ob) for ob in meshes]
+    if any(np.isfinite(k).any() for k in known):
+        return arrival.surface_fill(points, tris, known, height), speed
+    # the hands never came near the body: flow out from the wrists
+    seeds = arrival.limb_points(owner.armature)[:2] or [location]
+    return arrival.surface_distances(points, tris, seeds, height), speed
+
+
+def _shift_keys(mask, delta):
+    """Move the mask's keys `delta` frames later."""
+    for fc in _scale_curves(mask):
+        for key in fc.keyframe_points:
+            key.co[0] += delta
+            key.handle_left[0] += delta
+            key.handle_right[0] += delta
+        fc.update()
+
+
+def _frame_at(mask, radius):
+    """First frame (to a quarter) at which the mask radius reaches `radius`; None if it never does."""
+    curves = _scale_curves(mask)
+    keys = curves[0].keyframe_points if curves else []
+    if len(keys) < 2:
+        return None
+    frame, last = keys[0].co[0], keys[-1].co[0]
+    while frame <= last:
+        if curves[0].evaluate(frame) >= radius:
+            return frame
+        frame += 0.25
+    return None
 
 
 def build(context, settings):
@@ -1053,22 +1282,46 @@ def build(context, settings):
     seeds = []
     layout = None
     t0 = time.time()
+    # A move of the dance starts it (Start On): found from the start frame on. A clap, a kiss, a salute or a toss of
+    # the head moves the transformation to start there, from the hands or the head; turning away moves it so the swap
+    # (or the middle of the wave) comes as the back is turned to the camera (after the mask is made).
+    found = None
+    if settings.trigger != "NONE" and owner.armature is not None:
+        found = _find_move(context, settings, owner, meshes, height)
+    if found is not None and settings.trigger in motion.GESTURES:
+        length = max(settings.frame_end - settings.frame_start, 1)
+        settings.frame_start = int(round(found["frame"]))
+        settings.frame_end = settings.frame_start + length
+        if found["points"] and path == "SPHERE":
+            location, bone = found["points"][0], found["bones"][0]
+    speed = 0.0
     if path == "SPHERE":
         reach = mdl.max_distance(meshes, location)
     else:
         if path == "SURFACE":
-            seeds = _seeds(settings, location, owner)
+            moved = found is not None and settings.trigger in motion.GESTURES and found["points"]
+            seeds = found["points"] if moved else _seeds(settings, location, owner)
         # Start a little short of the surface so nothing (not even the wire ahead of the edge) shows at
         # radius 0, like the sphere that starts inside the body.
         lead = settings.wire_outer + 0.005 * height
         # sweeps and the spiral follow the model's own axes (it may stand turned in the world)
         frame = (owner.root or meshes[0]).matrix_world.to_3x3().normalized()
-        values = [v + lead for v in arrival.compute(meshes, path, seeds, height, frame, settings.spiral_pitch)]
+        if path == "HAND":
+            values, speed = _hand_arrival(context, settings, owner, meshes, height, location)
+        else:
+            patterns = mdl.split_patterns(settings.lock_patterns) if settings.use_lock else []
+            keys = [[None if s.material is None or any(fnmatch.fnmatchcase(mdl.material_key(s.material), q)
+                                                       for q in patterns) else mdl.material_key(s.material)
+                     for s in ob.material_slots] for ob in meshes]
+            roles = ["TARGET"] * len(target.meshes) + ["BASE"] * len(base.meshes)
+            values = arrival.compute(meshes, path, seeds, height, frame, settings.spiral_pitch, owner.armature, roles,
+                                     keys, settings.garment_order)
+        values = [v + lead for v in values]
         for ob, v in zip(meshes, values):
             arrival.write(ob, v / _object_scale(ob))
         reach = max(float(v.max()) for v in values)
-        if path != "SURFACE":
-            layout = arrival.front_layout(meshes, path, frame)
+        if path in arrival.LAID_OUT:
+            layout = arrival.front_layout(meshes, path, frame, owner.armature)
             location = layout["start"].copy()
             layout["lead"] = lead
     arrival_seconds = time.time() - t0
@@ -1082,7 +1335,20 @@ def build(context, settings):
     root = target.root or base.root
     collection = root.users_collection[0] if root.users_collection else context.scene.collection
     mask = _create_mask(settings, location, owner.armature, bone, collection, radius, path, owner.root,
-                        layout["axis"] if layout else None)
+                        layout["axis"] if layout else None, speed)
+    if speed > 0.0:  # the hand path runs at its own pace: the transformation lasts as long as that takes
+        mask[P_SPEED] = speed
+        settings.frame_end = int(math.ceil(settings.frame_start + radius / speed))
+    if found is not None and settings.trigger == "TURN" and path != "HAND":
+        # the swap (or the middle of the wave) as the back is turned to the camera
+        aim = _moment(settings, wave) if _old_at_once(settings) else 0.5 * wave
+        at = _frame_at(mask, aim)
+        if at is not None:
+            delta = found["frame"] - at
+            _shift_keys(mask, delta)
+            settings.frame_start = int(round(settings.frame_start + delta))
+            settings.frame_end = int(round(settings.frame_end + delta))
+    mask[P_TRIGGER] = found["frame"] if found is not None else -1.0
     mask[P_ROOTS] = roots
     mask[P_FOLLOWERS] = followers
     mask[P_PATH] = path
@@ -1111,8 +1377,8 @@ def build(context, settings):
     # the new outfit's stars are born and where its pieces take off.
     recorded, record_seconds = 0, 0.0
     jobs = []
-    if settings.leave_behind:
-        for role, outfit in (("BASE", base.meshes), ("TARGET", target.meshes)):
+    for role, outfit in (("BASE", base.meshes), ("TARGET", target.meshes)):
+        if _recording(settings, role):
             vertices, chunks = _record_parts(settings, role)
             for ob in outfit if vertices or chunks else ():
                 jobs.append(launch.Job(ob, role == "TARGET", vertices, chunks,
@@ -1141,4 +1407,5 @@ def build(context, settings):
         "unbound": unbound,
         "recorded": recorded,
         "record_seconds": record_seconds,
+        "trigger": found["frame"] if found is not None else None,
     }

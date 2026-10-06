@@ -29,7 +29,7 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
-from mmd_disperse import beats, compositor, presets  # noqa: E402
+from mmd_disperse import beats, compositor, effect, presets  # noqa: E402
 from mmd_disperse.model import resolve, rest_bounds  # noqa: E402
 from scene_setup import add_model_args, apply_settings, load_dance, load_models  # noqa: E402
 
@@ -347,12 +347,15 @@ def main():
         print("BEATS", bpy.ops.mmd_disperse.find_beats())
 
     setup_stage(scene, rest_bounds(base.meshes), args)
+    effect.sync(s)  # now there is a camera: the tongues of flame turn to it, the speed lines hang in front of it
     compositor.add_bloom(scene)
     if args.glitch_fx:  # (on the beat when the beats were found)
         compositor.add_glitch(scene, s.frame_start, s.frame_end, s.glitch_rate,
                               beat=beats.beat_object() if s.beat_sync else None)
     if args.white_flash:
         print("WHITE FLASH", bpy.ops.mmd_disperse.add_white_flash())
+    if s.impact_enable:
+        print("IMPACT", bpy.ops.mmd_disperse.add_impact())
 
     print("FPS", scene.render.fps / scene.render.fps_base)
     frames = [int(f) for f in args.frames.split(",") if f]

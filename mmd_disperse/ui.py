@@ -1,4 +1,5 @@
 import bpy
+from bpy.app.translations import pgettext_iface as iface_
 
 from . import beats, effect
 from .model import find_armature
@@ -45,6 +46,19 @@ class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
             col.prop(s, "space")
         if s.path == "SPIRAL":
             col.prop(s, "spiral_pitch")
+        elif s.path == "GARMENTS":
+            col.prop(s, "garment_order")
+        elif s.path == "HAND":
+            col.prop(s, "hand_side")
+            col.prop(s, "hand_reach")
+        col.prop(s, "trigger")
+        if s.trigger != "NONE" and s.mask is not None and "mmd_disperse_trigger" in s.mask:
+            found = float(s.mask["mmd_disperse_trigger"])
+            if found >= 0.0:
+                col.label(text=iface_("Found at frame %d") % round(found), translate=False, icon="CHECKMARK")
+            else:
+                col.label(text="Not found before the scene's end frame: starts at the start frame",
+                          icon="INFO")
 
         col = layout.column(align=True)
         col.prop(s, "frame_start")
@@ -144,8 +158,8 @@ class MMDDISPERSE_PT_ring(_Panel, bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(s, "ring_size")
         col.prop(s, "ring_strength")
-        if s.path in ("SPHERE", "SURFACE"):
-            layout.label(text="Only with the sweeps or Spiral Up", icon="INFO")
+        if s.path in ("SPHERE", "SURFACE", "GARMENTS", "HAND"):
+            layout.label(text="Only with the sweeps, Spiral Up or Split from the Waist", icon="INFO")
         else:
             layout.label(text="Uses the glow color of the wire layer", icon="INFO")
 
@@ -176,6 +190,79 @@ class MMDDISPERSE_PT_lightning(_Panel, bpy.types.Panel):
             col.prop(s, "finale_white")
             col.operator("mmd_disperse.add_white_flash", icon="NODE_COMPOSITING")
         layout.label(text="Uses the glow color of the wire layer", icon="INFO")
+
+
+class MMDDISPERSE_PT_flames(_Panel, bpy.types.Panel):
+    bl_label = "Toon Flames"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "flame_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.flame_enable
+        layout.prop(s, "flame_mode")
+        col = layout.column()
+        col.prop(s, "flame_color")
+        col.prop(s, "flame_strength")
+        col = layout.column(align=True)
+        col.prop(s, "flame_height")
+        if s.flame_mode == "EDGE":
+            col.prop(s, "flame_width")
+        col.prop(s, "flame_count")
+        if s.flame_mode == "AURA" and s.entrance not in effect.AT_ONCE:
+            layout.label(text="Strongest when the new outfit is complete", icon="INFO")
+
+
+class MMDDISPERSE_PT_impact(_Panel, bpy.types.Panel):
+    bl_label = "Impact Frames"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "impact_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.impact_enable
+        layout.prop(s, "impact_frames")
+        layout.operator("mmd_disperse.add_impact", icon="NODE_COMPOSITING")
+        col = layout.column()
+        col.prop(s, "speed_lines")
+        if s.speed_lines and context.scene.camera is None:
+            col.label(text="Speed lines need a scene camera", icon="INFO")
+        col.prop(s, "shockwave")
+        sub = col.column()
+        sub.active = s.shockwave
+        sub.prop(s, "shock_size")
+
+
+class MMDDISPERSE_PT_soul(_Panel, bpy.types.Panel):
+    bl_label = "Soul Rings"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "soul_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.soul_enable
+        col = layout.column(align=True)
+        col.prop(s, "soul_count")
+        col.prop(s, "soul_strength")
+        layout.label(text="Yellow, purple, black and red by age", icon="INFO")
 
 
 class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
@@ -238,6 +325,10 @@ class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
             col.prop(s, "particle_size")
             layout.prop(s, "particle_color")
             layout.label(text="The column uses the glow color", icon="INFO")
+        elif s.entrance == "LOTUS":
+            layout.prop(s, "lotus_petals")
+            layout.prop(s, "particle_color")
+            layout.label(text="The petals' rim uses the glow color", icon="INFO")
 
 
 class MMDDISPERSE_PT_paint(_Panel, bpy.types.Panel):
@@ -512,6 +603,19 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
             col.prop(s, "frag_life")
             col.prop(s, "suck_turns")
             col.prop(s, "frag_spin")
+        elif s.exit_style == "HUSK":
+            col = layout.column(align=True)
+            col.prop(s, "husk_style")
+            col.prop(s, "husk_away")
+            col.prop(s, "husk_hold")
+            col.prop(s, "husk_time")
+            if s.husk_away == "CRUMBLE":
+                col = layout.column(align=True)
+                col.prop(s, "frag_burst")
+                col.prop(s, "frag_wind")
+                col.prop(s, "frag_wind_dir")
+                col.prop(s, "frag_turbulence")
+            layout.label(text="Building records where it is left behind", icon="INFO")
         else:
             col = layout.column(align=True)
             col.prop(s, "frag_size")
@@ -572,6 +676,9 @@ classes = (
     MMDDISPERSE_PT_wire,
     MMDDISPERSE_PT_ring,
     MMDDISPERSE_PT_lightning,
+    MMDDISPERSE_PT_flames,
+    MMDDISPERSE_PT_impact,
+    MMDDISPERSE_PT_soul,
     MMDDISPERSE_PT_entrance,
     MMDDISPERSE_PT_paint,
     MMDDISPERSE_PT_undersuit,

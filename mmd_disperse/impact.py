@@ -110,9 +110,9 @@ def _material():
     return mat
 
 
-def create(scene, mask, collection):
-    """The sheet of the effect of `mask`, just in front of the scene camera (None without a camera)."""
-    camera = scene.camera
+def create(scene, mask, collection, camera=None):
+    """The sheet of the effect of `mask`, just in front of `camera` (the scene camera by default; None without one)."""
+    camera = camera or scene.camera
     if camera is None or camera.type != "CAMERA":
         return None
     data = camera.data
@@ -146,10 +146,10 @@ def create(scene, mask, collection):
     return ob
 
 
-def sync(scene, mask, focus, first, frames):
-    """Aim the sheet at `focus` (a world point: the character) and drive it on for the `frames` impact frames from
-    frame `first`, fading over LINGER more."""
-    camera = scene.camera
+def sync(scene, mask, focus, first, frames, camera=None):
+    """Aim the sheet at `focus` (a world point: the character, as `camera` sees it: the scene camera by default) and
+    drive it on for the `frames` impact frames from frame `first`, fading over LINGER more."""
+    camera = camera or scene.camera
     for ob in sheets(mask):
         if camera is not None and focus is not None:
             seen = world_to_camera_view(scene, camera, focus)

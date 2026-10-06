@@ -9,7 +9,8 @@ _OFF = dict(
     finale_length=0.15, layer_enable=False, layer_style="NANO", inner_glow=False, venom_enable=False,
     venom_metallic=0.0, old_surface="NONE", particle_count=600, easing="EASE", ring_enable=False, paint_style="NONE",
     reactor=False, plates=False, arc_enable=False, trigger="NONE", flame_enable=False, impact_enable=False,
-    soul_enable=False,
+    soul_enable=False, domain_enable=False, shot_enable=False, time_warp="NONE", toon_style="NONE", float_up=False,
+    husk_motion="STILL", trail_enable=False, step_flowers=False, look_style="NONE", holo_style="SCAN",
 )
 
 PRESETS = (
@@ -252,13 +253,130 @@ PRESETS = (
           frag_glow_strength=1.5, ribbon_enable=True, ribbon_strength=2.5, particles="STAR", finale=True,
           particle_color=(1.0, 0.85, 0.55), particle_glow=4.0,
           glow_color=(1.0, 0.45, 0.8), frag_wind_dir=(0.0, 0.2, 1.0))),
+    # --- 1.11: the world, the camera and time, cartoon physics, the split self, ribbons, moves, looks
+    ("DOMAIN", "Domain Expansion", "A starry void opens out from the dancer and swallows the picture; the outfits swap "
+                                   "at its height with a zoom punch and impact frames, then the world shatters "
+                                   "(Jujutsu Kaisen)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", domain_enable=True, domain_style="VOID", domain_close="SHATTER",
+          shot_enable=True, shot_style="PUNCH", impact_enable=True, speed_lines=True, shockwave=False, finale=True,
+          finale_white=0.5, particle_color=(0.7, 0.85, 1.0), glow_color=(0.45, 0.65, 1.0))),
+    ("CRIMSON", "Crimson Wasteland", "A red sky with a dark sun opens behind the dancer, swords rise out of the "
+                                     "cracked ground, and the old outfit chars and burns away into embers (Honkai: "
+                                     "Star Rail)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", domain_enable=True, domain_style="CRIMSON", old_surface="CHAR",
+          surface_color=(0.03, 0.022, 0.016), exit_style="FRAGMENTS", frag_glow=True, particles="EMBER",
+          particle_count=500, particle_color=(1.0, 0.4, 0.08), particle_glow=6.0, glow_color=(1.0, 0.3, 0.05),
+          frag_wind_dir=(0.0, 0.3, 1.0))),
+    ("FLOWER_FIELD", "Flower Field", "A meadow of flowers opens out from the dancer under a pastel sky; the old outfit "
+                                     "blows away in petals from the feet up and a lotus blooms at every step",
+     dict(_OFF, path="UP", domain_enable=True, domain_style="FLOWERS", exit_style="FRAGMENTS", frag_glow=False,
+          particles="PETAL", particle_count=600, step_flowers=True, step_style="LOTUS",
+          particle_color=(1.0, 0.55, 0.7), particle_glow=1.0, glow_color=(1.0, 0.6, 0.8),
+          frag_wind_dir=(0.4, 0.2, 0.6))),
+    ("SKY_MIRROR", "Sky Mirror", "The dancer floats up into a blue sky over still water with white feathers falling, "
+                                 "and lands in the new outfit (a magical girl's transformation; Precure)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", domain_enable=True, domain_style="WATER", float_up=True,
+          exit_style="FRAGMENTS", frag_glow=True, particles="FEATHER", particle_count=300,
+          particle_color=(1.0, 1.0, 1.0), particle_glow=0.5, finale=True, finale_white=0.6,
+          glow_color=(0.75, 0.9, 1.0), frag_wind_dir=(0.0, 0.2, 0.6))),
+    ("CONCERT", "Concert", "The stage goes dark, beams of light sweep the hall and the light sticks wave; trails of "
+                           "light follow the dancing hands and the picture cuts like a music video at the swap: a low "
+                           "angle, the eyes, a wide shot (needs a dance)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", domain_enable=True, domain_style="STAGE", trail_enable=True,
+          trail_style="LIGHT", trail_length=0.8, shot_enable=True, shot_style="CUTS", shot_length=2.0, finale=True,
+          finale_white=0.4, particle_color=(1.0, 0.85, 1.0), glow_color=(0.85, 0.45, 1.0))),
+    ("BULLET_TIME", "Bullet Time", "The dance freezes, hair and skirt hanging in the air, the camera circles the "
+                                   "dancer while the outfits swap, then the dance catches up with the music (The "
+                                   "Matrix; needs a dance)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", time_warp="FREEZE", warp_length=1.5, shot_enable=True,
+          shot_style="ORBIT", shot_angle=360.0, shot_length=1.5, exit_style="FRAGMENTS", frag_glow=True,
+          particles="SHARD", particle_count=400, particle_color=(0.75, 0.9, 1.0), particle_glow=2.0,
+          glow_color=(0.4, 0.8, 1.0), frag_wind_dir=(0.0, 0.0, 0.0))),
+    ("WHIP", "Whip Pan", "The camera whips away and back, the picture smearing, and the outfits swap in the blur (the "
+                         "classic outfit change cut of short videos)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", shot_enable=True, shot_style="WHIP", edge_glow=False,
+          glow_color=(1.0, 1.0, 1.0))),
+    ("VELOCITY", "Velocity Edit", "The dance slows to a quarter at the moment, a zoom punch and impact frames hit, "
+                                  "then it speeds up to catch the music (the velocity edits of short videos; needs a "
+                                  "dance)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", time_warp="SLOW", warp_length=1.0, shot_enable=True,
+          shot_style="PUNCH", impact_enable=True, speed_lines=True, shockwave=True, finale=True, finale_white=0.4,
+          particle_color=(1.0, 0.9, 0.7), glow_color=(1.0, 0.4, 0.3))),
+    ("SQUISH", "Squash and Bounce", "The body squashes flat as if pressed from above, the outfits swap when it is "
+                                    "flattest and it bounces back up, wobbling (Pika's Squish)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", toon_style="SQUASH", edge_glow=False,
+          particle_color=(1.0, 0.95, 0.9), glow_color=(1.0, 0.9, 0.6))),
+    ("PAPER_FLIP", "Paper Flip", "The body presses into a sheet of paper that turns over, the old outfit on one side "
+                                 "and the new one on the other (Paper Mario)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", toon_style="PAPER", edge_glow=False,
+          particle_color=(1.0, 1.0, 1.0), glow_color=(1.0, 1.0, 0.9))),
+    ("CARD_FLIP", "Card Flip", "The dancer floats up, turns into a magic card that flips over and lands in the new "
+                               "outfit, sparkles bursting off (a tarot card)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", toon_style="CARD", float_up=True, exit_style="FRAGMENTS",
+          frag_glow=True, particles="STAR", particle_count=300,
+          particle_color=(1.0, 0.8, 0.45), particle_glow=4.0, glow_color=(0.8, 0.5, 1.0),
+          frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("SPLIT", "Split Self", "At the moment the old self steps out beside the dancer and dances on as a mirror image "
+                            "while the dancer goes on in the new outfit, then it crumbles away (Lady Gaga's "
+                            "Abracadabra; needs a dance)",
+     dict(_OFF, entrance="SWAP", exit_style="HUSK", husk_style="ASIS", husk_motion="DANCE", husk_away="CRUMBLE",
+          split_mirror=True, husk_hold=1.2, husk_time=0.4, finale=True, finale_white=0.4,
+          particle_color=(1.0, 0.9, 0.8), glow_color=(1.0, 0.75, 0.5), frag_wind_dir=(0.3, 0.3, 0.6))),
+    ("FIGURINE", "Figurine", "The old self is left behind and shrinks to a glossy figurine on a clear stand beside "
+                             "the dancer (the AI figurine craze of 2025)",
+     dict(_OFF, entrance="SWAP", exit_style="HUSK", husk_style="PVC", husk_away="FIGURINE", husk_hold=0.1,
+          husk_time=0.25, finale=True, finale_white=0.4, particle_color=(1.0, 0.95, 0.85),
+          glow_color=(1.0, 0.85, 0.6))),
+    ("SLEEVES", "Water Sleeves", "Long white silk sleeves trail from the dancing hands and the new outfit appears "
+                                 "wherever they sweep (Chinese opera's water sleeves; needs a dance)",
+     dict(_OFF, path="HAND", trail_enable=True, trail_style="SLEEVE", trail_length=0.8, exit_style="FRAGMENTS",
+          frag_glow=False, particles="PETAL", particle_count=300, particle_color=(1.0, 0.8, 0.85),
+          particle_glow=0.5, glow_color=(0.9, 0.95, 1.0), frag_wind_dir=(0.2, 0.2, 0.5))),
+    ("NEZHA", "Red Silk Sash", "A red silk sash with gold hems flies from the hands, a lotus opens at every step, and "
+                               "the change flows over the body from the chest (Ne Zha; needs a dance)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", trail_enable=True, trail_style="SASH", trail_length=0.8,
+          step_flowers=True, step_style="LOTUS", exit_style="FRAGMENTS", frag_glow=True, particles="PETAL",
+          particle_count=300, finale=True, finale_white=0.5, particle_color=(1.0, 0.36, 0.5), particle_glow=1.5,
+          glow_color=(1.0, 0.6, 0.3), frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("HEART", "Finger Heart", "On the first finger heart of the dance the change bursts out from the hands in pink "
+                              "sparkles, a zoom punch at the moment (needs a dance with a finger heart)",
+     dict(_OFF, path="SURFACE", trigger="HEART", exit_style="FRAGMENTS", frag_glow=True, particles="STAR",
+          particle_count=500, shot_enable=True, shot_style="PUNCH", finale=True, finale_white=0.5,
+          particle_color=(1.0, 0.6, 0.8), particle_glow=4.0, glow_color=(1.0, 0.4, 0.7),
+          frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("SILHOUETTE", "Silhouette", "At the moment the dancer turns into a black silhouette on red and the outfits swap "
+                                 "inside it (a magical girl transformation)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", look_style="SILHOUETTE", look_length=0.8,
+          look_color=(1.0, 0.08, 0.03), finale=True, finale_white=0.4, glow_color=(1.0, 0.4, 0.3))),
+    ("SONG_PAINTING", "Old Painting", "Ink spreads over the old outfit and the picture turns into an old Chinese "
+                                      "painting at the moment, the dance going on twos",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", old_surface="INK", look_style="SONG", look_length=1.5,
+          time_warp="TWOS", warp_length=1.5, exit_style="FRAGMENTS", frag_glow=False, particles="INK",
+          particle_count=300, edge_glow=False, glow_color=(0.2, 0.2, 0.2))),
+    ("STARRY_VEIL", "Starry Veil", "The new outfit shows up as a veil of night sky full of stars, sweeping up from the "
+                                   "feet, then turns real; the old outfit bursts into sparkles",
+     dict(_OFF, path="UP", holo_enable=True, holo_style="STARS", holo_opacity=0.5, exit_style="FRAGMENTS",
+          frag_glow=True, particles="STAR", particle_count=400, finale=True, finale_white=0.4,
+          particle_color=(0.8, 0.85, 1.0), particle_glow=4.0, glow_color=(0.5, 0.6, 1.0),
+          frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("PAPER_CUT", "Paper Cut", "The old outfit turns into a red paper cut from the feet up and flies away as red "
+                               "paper birds (Chinese paper window flowers)",
+     dict(_OFF, path="UP", old_surface="PAPERCUT", surface_color=(0.75, 0.04, 0.03), exit_style="FRAGMENTS",
+          frag_glow=False, particles="PAPER_BIRD", particle_count=300, edge_glow=True, glow_color=(1.0, 0.75, 0.4),
+          frag_wind_dir=(0.3, 0.2, 0.8))),
+    ("WATER_BREATHING", "Water Breathing", "A band of cartoon water winds up round the body and the outfit changes "
+                                           "where it passes (Demon Slayer)",
+     dict(_OFF, path="SPIRAL", ring_enable=True, ring_style="WATER", ring_size=1.1, exit_style="FRAGMENTS",
+          frag_glow=False, particles="SHARD", particle_count=300, particle_color=(0.7, 0.9, 1.0),
+          particle_glow=1.0, glow_color=(0.4, 0.75, 1.0), frag_wind_dir=(0.0, 0.0, 0.5))),
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
 BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles", "spiral_pitch", "trigger", "garment_order"}
 WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPARKLE_SPIRAL", "BROOCH", "MARK50",
                "LIGHTNING", "COCOON", "CLAP", "TURN", "HAND_SWIPE", "BLUE_FLAME", "SUPER_AURA", "LOTUS", "HUSK",
-               "SOUL_DEPART", "IMPACT", "IDOL", "SOUL_RINGS"}
+               "SOUL_DEPART", "IMPACT", "IDOL", "SOUL_RINGS", "DOMAIN", "SKY_MIRROR", "CONCERT", "VELOCITY",
+               "SPLIT", "FIGURINE", "NEZHA", "HEART", "SILHOUETTE", "STARRY_VEIL"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

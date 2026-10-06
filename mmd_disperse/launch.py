@@ -293,6 +293,16 @@ def _key_motion(sp, matrices):
                 sp.keyframe_insert(path, frame=frame)
     finally:
         prefs.keyframe_new_interpolation_type = old
+    ad = sp.animation_data
+    action = ad.action if ad is not None else None
+    curves = getattr(action, "fcurves", None) if action is not None else []
+    if curves is None:  # Blender 5.0+: the curves are kept per slot
+        from bpy_extras import anim_utils
+        bag = anim_utils.action_get_channelbag_for_slot(action, ad.action_slot)
+        curves = bag.fcurves if bag is not None else []
+    for fc in curves:  # (Blender 3.6 run from the command line keeps Bezier keys whatever the preference says)
+        for key in fc.keyframe_points:
+            key.interpolation = "LINEAR"
 
 
 def _write(track, scene):

@@ -28,10 +28,11 @@ BAT = "MMD Disperse Bat"
 INK = "MMD Disperse Ink Drop"
 GLYPH = "MMD Disperse Glyphs"
 PEBBLE = "MMD Disperse Pebble"
+PAPER_BIRD = "MMD Disperse Paper Bird"
 NAMES = {"PETAL": PETAL, "BUTTERFLY": BUTTERFLY, "STAR": STAR, "CUBE": CUBE, "COIN": COIN, "SHARD": SHARD,
          "EMBER": EMBER, "CRYSTAL": CRYSTAL, "NOTE": NOTE, "CARD": CARD, "FEATHER": FEATHER, "BAT": BAT, "INK": INK,
-         "GLYPH": GLYPH, "PEBBLE": PEBBLE}
-FLAPPING = ("BUTTERFLY", "BAT")  # shapes with two wings in the XY plane (x > 0, x < 0) that flap
+         "GLYPH": GLYPH, "PEBBLE": PEBBLE, "PAPER_BIRD": PAPER_BIRD}
+FLAPPING = ("BUTTERFLY", "BAT", "PAPER_BIRD")  # shapes with two wings in the XY plane (x > 0, x < 0) that flap
 UPRIGHT = ("NOTE", "GLYPH")  # shapes that stand facing the front (-Y) and only sway
 VARIANTS = ("GLYPH",)  # shapes made of several (ATTR_VARIANT on their faces), one shown at a time
 
@@ -257,6 +258,29 @@ def _bat(size=3.5):
     return verts, faces, uvs
 
 
+def _paper_bird(size=1.6):
+    """Folded paper bird (an origami crane seen from above) about 1.6 units across: flat swept wings in the XY plane
+    (x > 0 right, x < 0 left) that flap like the butterfly's, a pointed neck and tail along Y."""
+    wing = [(0.03, 0.08), (0.28, 0.06), (0.5, 0.0), (0.42, -0.05), (0.2, -0.08), (0.03, -0.1)]
+    hub = (0.1, -0.01)
+    verts, faces, uvs = [], [], []
+    for sign in (1.0, -1.0):
+        start = len(verts)
+        for x, y in [hub] + wing:
+            verts.append((sign * x * size, y * size, 0.0))
+            uvs.append((x / 0.5, y + 0.5))
+        faces += _fan(list(range(start + 1, len(verts))), start, flip=sign < 0)
+    body = [(0.0, 0.42), (0.03, 0.1), (0.035, -0.1), (0.0, -0.38), (-0.035, -0.1), (-0.03, 0.1)]
+    start = len(verts)
+    verts.append((0.0, 0.0, 0.01 * size))
+    uvs.append((0.0, 0.5))
+    for x, y in body:
+        verts.append((x * size, y * size, 0.006 * size))
+        uvs.append((0.0, y + 0.5))
+    faces += _fan(list(range(start + 1, len(verts))), start)
+    return verts, faces, uvs
+
+
 def _ink_drop(sides=18):
     """Splash of ink about 1 unit across, flat in the XY plane: an uneven blot with a small drop beside it."""
     verts = [(0.0, 0.0, 0.0)]
@@ -310,7 +334,7 @@ def _pebble():
 
 _SHAPES = {"PETAL": _petal, "BUTTERFLY": _butterfly, "STAR": _star, "CUBE": _cube, "COIN": _coin, "SHARD": _shard,
            "EMBER": _ember, "CRYSTAL": _crystal, "NOTE": _note, "CARD": _card, "FEATHER": _feather, "BAT": _bat,
-           "INK": _ink_drop, "GLYPH": _glyphs, "PEBBLE": _pebble}
+           "INK": _ink_drop, "GLYPH": _glyphs, "PEBBLE": _pebble, "PAPER_BIRD": _paper_bird}
 
 
 def _material(kind):
@@ -326,6 +350,8 @@ def _material(kind):
         return materials.ensure_ink_material()
     if kind == "PEBBLE":
         return materials.ensure_pebble_material()
+    if kind == "PAPER_BIRD":
+        return materials.ensure_paper_material()
     return materials.ensure_particle_material()
 
 

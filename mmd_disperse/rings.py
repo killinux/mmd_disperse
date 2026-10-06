@@ -1,5 +1,5 @@
 """The front's decoration for the sweeps and the spiral: a magic circle, a ring of sparks, a glowing panel or a sheet of
-TV static the body passes through, or a comet of sparkles circling it.
+TV static the body passes through, a ring of light, or a comet of sparkles or a band of toon water circling it.
 
 One mesh object with no vertices of its own and a Geometry Nodes modifier (node_groups.build_ring_group) that draws the
 decoration where the front is (the mask radius). It is made at the start of a sweep (where build() put the mask) in
@@ -44,7 +44,9 @@ def sync(settings, mask, layout, beat):
     """Push the style, sizes and timing to the ring modifiers and the colour to their materials."""
     ring_mat = materials.ensure_ring_material()
     screen_mat = materials.ensure_screen_material()
+    water_mat = materials.ensure_water_ring_material() if settings.ring_style == "WATER" else None
     materials.update_ring_materials(settings)
+    materials.update_water_ring_material(settings.ring_strength)
     star = particles.ensure_asset("STAR", settings.id_data)
     height = max(settings.size_reference, 1e-3)
     pitch = float(mask.get("mmd_disperse_pitch", settings.spiral_pitch))  # as the spiral was built
@@ -71,6 +73,7 @@ def sync(settings, mask, layout, beat):
         "Ring Material": ring_mat,
         "Screen Material": screen_mat,
         "Star Object": star,
+        "Water Material": water_mat,
     }
     for ob in ring_objects(mask):
         for mod in ob.modifiers:
@@ -88,7 +91,7 @@ def remove(mask):
         bpy.data.objects.remove(ob)
         if me is not None and me.users == 0:
             bpy.data.meshes.remove(me)
-    for name in (materials.RING_MATERIAL, materials.SCREEN_MATERIAL):
+    for name in (materials.RING_MATERIAL, materials.SCREEN_MATERIAL, materials.WATER_RING_MATERIAL):
         mat = bpy.data.materials.get(name)
         if mat is not None and mat.users == 0:
             bpy.data.materials.remove(mat)

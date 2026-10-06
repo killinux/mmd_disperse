@@ -26,7 +26,7 @@ import math
 
 import bpy
 
-VERSION = 15
+VERSION = 16
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
@@ -35,6 +35,9 @@ RIBBON_GROUP = "MMDDisperse Ribbon"
 PROBE_GROUP = "MMDDisperse Probe"
 VENOM_GROUP = "MMDDisperse Venom"
 RING_GROUP = "MMDDisperse Ring"
+DOMAIN_GROUP = "MMDDisperse Domain"
+TRAIL_GROUP = "MMDDisperse Trail"
+STEPS_GROUP = "MMDDisperse Steps"
 
 ATTR_EDGE = "disperse_edge"
 ATTR_LOCK = "disperse_lock"
@@ -66,6 +69,7 @@ ATTR_PAINT = "disperse_paint"  # new outfit, line art / ink wash: 1 still a draw
 ATTR_SHADOW = "disperse_shadow"  # rising from the shadow: 1 where the outfit is (flattened into) its black shadow
 ATTR_SCREEN = "mmdd_screen"  # the front's panel / TV static (rings.py): x, y across it (-1 .. 1), z the frame
 ATTR_SCREEN_STYLE = "mmdd_screen_style"  # ... 0 the glowing panel, 1 the static
+ATTR_WATER = "mmdd_water"  # ... the toon water: x along it (0 at its head .. 1), y across it (-1 .. 1), z the frame
 ATTR_SMOKE = "mmdd_smoke_clear"  # smoke puff (on its instances): 0 dense .. 1 cleared (0 when missing: still dense)
 ATTR_FRAME = "mmdd_frame"  # the frame, on what the materials animate: the digital rain, the transporter beam's column
 ATTR_BEAM = "mmdd_beam"  # the beam's column: x, y round it (cosine, sine), z up it (0 at the bottom .. 1 at the top)
@@ -77,6 +81,14 @@ ATTR_PETAL = "mmdd_petal"  # the lotus: x across a petal (-1 .. 1), y up it (0 .
 ATTR_BAND = "mmdd_band"  # rings drawn as bands (soul rings, the shockwave): across the band, -1 .. 1
 ATTR_SOUL = "mmdd_soul"  # soul rings (on the instances): x which ring (its colour), y how bright
 ATTR_HUSK = "disperse_husk"  # the old outfit's husk left behind: 1 solid .. 0 gone (0 elsewhere)
+ATTR_DIR = "mmdd_dir"  # the world change's sky: the direction from its centre (a unit vector)
+ATTR_GROUND = "mmdd_ground"  # ... its floor: x, y from the centre and z the floor's radius now, all in Reach
+ATTR_DOMAIN = "mmdd_domain"  # ... all of it: x how far it has opened (0 .. 1), y how far it has closed, z the frame
+ATTR_CARD = "mmdd_card"  # the card of the cartoon physics: x, y across it (0 .. 1)
+ATTR_T = "mmdd_t"  # the dance ribbons and the flowers underfoot (trails.py): the frame a recorded point is from
+ATTR_TRAIL = "mmdd_trail"  # ... a ribbon: x how far back along it (0 at the hand .. 1), y how far it is shown
+ATTR_ACROSS = "mmdd_across"  # ... across the silk (0 .. 1)
+STEP_GLOW = 0.7  # how bright the seal underfoot is
 _ARC_DIR = "mmdd_arc_dir"  # scratch: the way the distance grows over the surface, where the arcs crackle
 _ARC_ATTRS = ("mmdd_arc_normal", "mmdd_arc_side", "mmdd_arc_len", "mmdd_arc_rnd")  # scratch: each arc's own values
 
@@ -175,6 +187,15 @@ EXTRA_INPUTS = (
     ("Soul Peak", "NodeSocketFloat", 1.0, -1e9, 1e9, "DISTANCE"),
     ("Soul End", "NodeSocketFloat", 2.0, -1e9, 1e9, "DISTANCE"),
     ("Soul Material", "NodeSocketMaterial", None, None, None, None),
+    # 1.11: cartoon physics round Toon Frame about Toon Anchor (on the floor under the hips): 1 squash and bounce, 2
+    # pressed into paper turning over, 3 the same on a card (Card Material, drawn by the main mesh); Toon Rate makes
+    # the timing (in frames at 30 a second) frame rate free; Toon Gap keeps the paper off the card
+    ("Toon", "NodeSocketInt", 0, 0, 3, None),
+    ("Toon Frame", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Toon Rate", "NodeSocketFloat", 1.0, 0.0, 100.0, None),
+    ("Toon Anchor", "NodeSocketObject", None, None, None, None),
+    ("Toon Gap", "NodeSocketFloat", 0.05, 0.0, 1e9, "DISTANCE"),
+    ("Card Material", "NodeSocketMaterial", None, None, None, None),
 )
 
 # Scales (Mystique): both outfits break into scales that turn over where the edge passes.
@@ -297,6 +318,16 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Husk Span", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
     ("Husk Float", "NodeSocketBool", False, None, None, None),
     ("Husk Rise", "NodeSocketFloat", 3.0, -1e9, 1e9, "DISTANCE"),
+    # 1.11: the husk dances on beside the dancer (Husk Dance: the live old self, slid out by Split Offset, a world
+    # vector, over Split Slide of the mask radius, mirrored with Split Mirror), and turns into a figurine (shrunk on a
+    # stand of Stand Material by Figurine Offset, also a world vector)
+    ("Husk Dance", "NodeSocketBool", False, None, None, None),
+    ("Split Offset", "NodeSocketVector", (5.0, 0.0, 0.0), None, None, "TRANSLATION"),
+    ("Split Slide", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
+    ("Split Mirror", "NodeSocketBool", True, None, None, None),
+    ("Husk Figurine", "NodeSocketBool", False, None, None, None),
+    ("Figurine Offset", "NodeSocketVector", (4.0, -2.0, 0.0), None, None, "TRANSLATION"),
+    ("Stand Material", "NodeSocketMaterial", None, None, None, None),
     ("Clamp Jitter", "NodeSocketFloat", 0.04, 0.0, 1.0, None),
 ) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS
 
@@ -316,7 +347,7 @@ PROBE_INPUTS = FIELD_INPUTS + (
     ("Clamp Jitter", "NodeSocketFloat", 0.04, 0.0, 1.0, None),
 )
 
-RING_STYLES = ("MAGIC", "SPARKS", "PANEL", "STATIC", "COMET", "HALO")
+RING_STYLES = ("MAGIC", "SPARKS", "PANEL", "STATIC", "COMET", "HALO", "WATER")
 # The front's decoration (rings.py), in world units: the ring object is not scaled.
 RING_INPUTS = (
     ("Mask", "NodeSocketObject", None, None, None, None),
@@ -340,6 +371,7 @@ RING_INPUTS = (
     ("Star Object", "NodeSocketObject", None, None, None, None),
     ("Mirror", "NodeSocketBool", False, None, None, None),
     ("Span Back", "NodeSocketFloat", 0.0, 0.0, 1e9, None),  # how far the mirrored front goes (0: as far as Span)
+    ("Water Material", "NodeSocketMaterial", None, None, None, None),
 )
 
 RIBBON_INPUTS = (
@@ -351,6 +383,55 @@ RIBBON_INPUTS = (
     ("Linger", "NodeSocketFloat", 2.0, 0.0, 10000.0, "DISTANCE"),
     ("Width", "NodeSocketFloat", 0.15, 0.0, 10000.0, "DISTANCE"),
     ("Material", "NodeSocketMaterial", None, None, None, None),
+)
+
+TRAIL_STYLES = ("LIGHT", "SLEEVE", "SASH", "PETALS")
+# The dance ribbons (trails.py), in world units: the trail object stands at the origin, unscaled; its points are the
+# recorded hands (and feet), ATTR_T on each, joined along each limb. Length and Fade are frames.
+TRAIL_INPUTS = (
+    ("Style", "NodeSocketInt", 0, 0, len(TRAIL_STYLES) - 1, None),
+    ("Length", "NodeSocketFloat", 18.0, 0.0, 1e9, None),
+    ("Width", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Sag", "NodeSocketFloat", 2.0, 0.0, 1e9, None),
+    ("Height", "NodeSocketFloat", 20.0, 0.0, 1e9, None),
+    ("Start", "NodeSocketFloat", 1.0, -1e9, 1e9, None),
+    ("End", "NodeSocketFloat", 100.0, -1e9, 1e9, None),
+    ("Fade", "NodeSocketFloat", 10.0, 0.0, 1e9, None),
+    ("Material", "NodeSocketMaterial", None, None, None, None),
+    ("Petal Object", "NodeSocketObject", None, None, None, None),
+)
+# The flowers underfoot: a point on the floor for each footfall, ATTR_T its frame. Rate turns frames into frames at
+# 30 a second.
+STEPS_INPUTS = (
+    ("Seal", "NodeSocketBool", False, None, None, None),
+    ("Height", "NodeSocketFloat", 20.0, 0.0, 1e9, None),
+    ("Floor", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Rate", "NodeSocketFloat", 1.0, 0.0, 100.0, None),
+    ("Petal Material", "NodeSocketMaterial", None, None, None, None),
+    ("Glow Material", "NodeSocketMaterial", None, None, None, None),
+)
+
+DOMAIN_STYLES = ("VOID", "CRIMSON", "FLOWERS", "WATER", "STAGE")
+# The world change (domain.py), in world units: the domain object stands at the origin, unscaled. Open End, Close Start
+# and Close End are mask radii.
+DOMAIN_INPUTS = (
+    ("Mask", "NodeSocketObject", None, None, None, None),
+    ("Center", "NodeSocketVector", (0.0, 0.0, 0.0), None, None, None),
+    ("Back", "NodeSocketVector", (0.0, 1.0, 0.0), None, None, None),  # level, from the camera through the centre
+    ("Floor", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Reach", "NodeSocketFloat", 100.0, 0.0, 1e9, None),
+    ("Height", "NodeSocketFloat", 20.0, 0.0, 1e9, None),
+    ("Open End", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Close Start", "NodeSocketFloat", 10.0, 0.0, 1e9, None),
+    ("Close End", "NodeSocketFloat", 11.0, 0.0, 1e9, None),
+    ("Shatter", "NodeSocketBool", True, None, None, None),
+    ("Style", "NodeSocketInt", 0, 0, len(DOMAIN_STYLES) - 1, None),
+    ("Prop Count", "NodeSocketInt", 60, 0, 10000, None),
+    ("Prop Object", "NodeSocketObject", None, None, None, None),
+    ("Sky Material", "NodeSocketMaterial", None, None, None, None),
+    ("Ground Material", "NodeSocketMaterial", None, None, None, None),
+    ("Prop Material", "NodeSocketMaterial", None, None, None, None),
+    ("Rim Material", "NodeSocketMaterial", None, None, None, None),
 )
 
 # Inputs measured in object space: the add-on's sizes are world units, divided by the object's scale.
@@ -1531,8 +1612,123 @@ def build_target_group(field_group, venom_group):
     join = b.node("GeometryNodeJoinGeometry", 2000, 250)
     for part in (wire, suit, sparkles, venom, frames, smoke, column, arcs, strike, lotus, flames, shock, soul):
         b.feed(join.inputs["Geometry"], part)
-    b.feed(go.inputs["Geometry"], join.outputs["Geometry"])
+    b.feed(go.inputs["Geometry"], _toon(b, gi, join.outputs["Geometry"], True, 2200, 4000))
     return ng
+
+
+SQUASH = 0.35  # how flat the body is squashed (its height)
+FLATTEN = 8.0  # frames (at 30 a second) the body takes to press into paper before the turn ...
+TURN = 10.0  # ... the turn over (half of it before the moment, when it is edge-on) ...
+PUFF = 8.0  # ... and puffing back out after it
+
+
+def _toon(b, gi, geometry, new, x, y):
+    """Cartoon physics round Toon Frame, about Toon Anchor (on the floor under the hips) and the world's up. Squash
+    (Toon 1): the body squashes down to SQUASH of its height over five frames, keeping its volume, holds two and
+    bounces back up, wobbling. Paper (2, 3): it presses into a sheet facing the camera, turns over about the up (the
+    old outfit on one side, edge-on at the moment, the new one on the other: `new` turns half a turn behind) and puffs
+    back out; with 3 the main mesh draws a card in the plane of the sheet, the paper a little off it on either side."""
+    me = _self_info(b, x, y)
+    anchor = b.node("GeometryNodeObjectInfo", x, y - 200, transform_space="RELATIVE")
+    b.feed(anchor.inputs["Object"], gi.outputs["Toon Anchor"])
+    c = anchor.outputs["Location"]
+    up = b.vmath("NORMALIZE", _unrotate(b, me, (0.0, 0.0, 1.0), x, y - 400), x=x + 200, y=y - 400)
+    frame = b.node("GeometryNodeInputSceneTime", x, y - 600).outputs["Frame"]
+    tau = b.math("MULTIPLY", b.math("SUBTRACT", frame, gi.outputs["Toon Frame"], x=x + 200, y=y - 600),
+                 gi.outputs["Toon Rate"], x=x + 400, y=y - 600)
+    pos = b.node("GeometryNodeInputPosition", x, y - 800).outputs[0]
+    v = b.vmath("SUBTRACT", pos, c, x=x + 200, y=y - 800)
+    v_up = b.vmath("SCALE", up, scale=b.vmath("DOT_PRODUCT", up, v, x=x + 400, y=y - 900), x=x + 600, y=y - 850)
+    v_side = b.vmath("SUBTRACT", v, v_up, x=x + 800, y=y - 850)
+    # --- squash and bounce
+    down = b.math("DIVIDE", b.math("ADD", tau, 5.0, x=x + 400, y=y - 1100), 5.0, x=x + 600, y=y - 1100, clamp=True)
+    s_down = b.math("SUBTRACT", 1.0, b.math("MULTIPLY", b.math("MULTIPLY", down, down, x=x + 800, y=y - 1100),
+                                            1.0 - SQUASH, x=x + 1000, y=y - 1100), x=x + 1200, y=y - 1100)
+    u = b.math("MAXIMUM", b.math("SUBTRACT", tau, 2.0, x=x + 400, y=y - 1300), 0.0, x=x + 600, y=y - 1300)
+    wobble = b.math("MULTIPLY", b.math("EXPONENT", b.math("MULTIPLY", u, -0.18, x=x + 800, y=y - 1300), x=x + 1000,
+                                       y=y - 1300),
+                    b.math("COSINE", b.math("MULTIPLY", u, 0.6, x=x + 800, y=y - 1450), x=x + 1000, y=y - 1450),
+                    x=x + 1200, y=y - 1350)
+    s_up = b.math("SUBTRACT", 1.0, b.math("MULTIPLY", wobble, 1.0 - SQUASH, x=x + 1400, y=y - 1350), x=x + 1600,
+                  y=y - 1350)
+    s = b.switch("FLOAT", b.compare("LESS_THAN", tau, 0.0, x=x + 1400, y=y - 1000),
+                 b.switch("FLOAT", b.compare("LESS_THAN", tau, 2.0, x=x + 1600, y=y - 1200), s_up, SQUASH, x=x + 1800,
+                          y=y - 1250), s_down, x=x + 2000, y=y - 1100)
+    squashed = b.vmath("ADD", c, b.vmath("ADD", b.vmath("SCALE", v_up, scale=s, x=x + 2200, y=y - 900),
+                                         b.vmath("SCALE", v_side, scale=b.math("DIVIDE", 1.0, b.math(
+                                             "SQRT", s, x=x + 2000, y=y - 1300), x=x + 2200, y=y - 1300),
+                                                 x=x + 2400, y=y - 1100), x=x + 2600, y=y - 1000), x=x + 2800,
+                       y=y - 900)
+    # --- paper: pressed flat towards the camera, turned over about the up through the anchor
+    cam = b.node("GeometryNodeObjectInfo", x, y - 1700, transform_space="RELATIVE")
+    b.feed(cam.inputs["Object"], gi.outputs["Camera"])
+    view = b.vmath("SUBTRACT", cam.outputs["Location"], c, x=x + 200, y=y - 1700)
+    level = b.vmath("SUBTRACT", view, b.vmath("SCALE", up, scale=b.vmath("DOT_PRODUCT", up, view, x=x + 400,
+                                                                         y=y - 1850), x=x + 600, y=y - 1800),
+                    x=x + 800, y=y - 1750)
+    n = b.vmath("NORMALIZE", level, x=x + 1000, y=y - 1750)
+    pressing = b.map_range(tau, -TURN / 2 - FLATTEN, -TURN / 2, x=x + 400, y=y - 2000, smooth=True)
+    out = b.map_range(tau, TURN / 2, TURN / 2 + PUFF, x=x + 400, y=y - 2300, smooth=True)
+    flat = b.math("SUBTRACT", pressing, out, x=x + 800, y=y - 2150, clamp=True)
+    depth = b.vmath("DOT_PRODUCT", n, v, x=x + 1200, y=y - 1900)
+    keep = b.math("SUBTRACT", 1.0, b.math("MULTIPLY", flat, 0.96, x=x + 1000, y=y - 2150), x=x + 1200, y=y - 2150)
+    lift = b.math("MULTIPLY", flat, gi.outputs["Toon Gap"], x=x + 1200, y=y - 2300)  # off the card, on its own side
+    v_flat = b.vmath("ADD", b.vmath("SUBTRACT", v, b.vmath("SCALE", n, scale=depth, x=x + 1400, y=y - 1900),
+                                    x=x + 1600, y=y - 1850),
+                     b.vmath("SCALE", n, scale=b.math("ADD", b.math("MULTIPLY", depth, keep, x=x + 1400, y=y - 2100),
+                                                      lift, x=x + 1600, y=y - 2150), x=x + 1800, y=y - 2050),
+                     x=x + 2000, y=y - 1950)
+    turn = b.math("MULTIPLY", b.map_range(tau, -TURN / 2, TURN / 2, x=x + 1400, y=y - 2500, smooth=True), math.pi,
+                  x=x + 1600, y=y - 2500)
+    behind = b.math("SUBTRACT", turn, math.pi, x=x + 1800, y=y - 2500)
+    if new:
+        turn_own = behind
+    else:  # the old model's locked parts (head, hair) stay with the dancer: on the new outfit's side after the moment
+        locked = b.named_attribute(ATTR_LOCK, "BOOLEAN", x=x + 1400, y=y - 2700)[0]
+        swapped = b.boolean("AND", locked, b.compare("GREATER_EQUAL", tau, 0.0, x=x + 1600, y=y - 2800), x=x + 1800,
+                            y=y - 2700)
+        turn_own = b.switch("FLOAT", swapped, turn, behind, x=x + 2000, y=y - 2600)
+    turned = b.vmath("ADD", c, b.rotate(v_flat, (0.0, 0.0, 0.0), up, turn_own, x=x + 2200, y=y - 2000), x=x + 2400,
+                     y=y - 2000)
+    moved = b.switch("VECTOR", b.compare("EQUAL", gi.outputs["Toon"], 1.0, x=x + 2800, y=y - 1200), turned, squashed,
+                     x=x + 3000, y=y - 1300)
+    shaped = b.set_position(geometry, position=moved, x=x + 3200, y=y)
+    # --- the card in the plane of the sheet (drawn once, by the main mesh): a little taller than the body and three
+    # fifths as wide, coming in as the body presses flat
+    _mid_x, _mid_y, _floor, tall, _half = _body_box(b, gi.outputs["Geometry"], x, y - 3000)
+    quad = b.node("GeometryNodeMeshGrid", x + 1200, y - 2900)
+    for name, value in (("Size X", 1.0), ("Size Y", 1.0), ("Vertices X", 2), ("Vertices Y", 2)):
+        quad.inputs[name].default_value = value
+    qx, qy, _qz = b.split_xyz(b.node("GeometryNodeInputPosition", x + 1200, y - 3100).outputs[0], x=x + 1400,
+                              y=y - 3100)
+    card = b.store(quad.outputs["Mesh"], ATTR_CARD, b.combine(b.math("ADD", qx, 0.5, x=x + 1600, y=y - 3050),
+                                                               b.math("ADD", qy, 0.5, x=x + 1600, y=y - 3200), 0.0,
+                                                               x=x + 1800, y=y - 3100), "FLOAT_VECTOR", x=x + 1800,
+                   y=y - 2900)
+    side = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", up, n, x=x + 1400, y=y - 3400), x=x + 1600, y=y - 3400)
+    grow = b.math("MULTIPLY", b.math("SQRT", flat, x=x + 1200, y=y - 3600), tall, x=x + 1400, y=y - 3600)
+    across = b.vmath("SCALE", side, scale=b.math("MULTIPLY", qx, b.math("MULTIPLY", grow, 0.62, x=x + 1800,
+                                                                        y=y - 3600), x=x + 2000, y=y - 3500),
+                     x=x + 2200, y=y - 3450)
+    upward = b.vmath("SCALE", up, scale=b.math("MULTIPLY_ADD", qy, b.math("MULTIPLY", grow, 1.15, x=x + 1800,
+                                                                          y=y - 3750),
+                                              b.math("MULTIPLY", tall, 0.5, x=x + 1800, y=y - 3900), x=x + 2000,
+                                              y=y - 3750), x=x + 2200, y=y - 3700)
+    spot = b.vmath("ADD", across, upward, x=x + 2400, y=y - 3550)
+    card = b.set_position(card, position=b.vmath("ADD", c, b.rotate(spot, (0.0, 0.0, 0.0), up, turn, x=x + 2600,
+                                                                   y=y - 3550), x=x + 2800, y=y - 3550),
+                          x=x + 3000, y=y - 2900)
+    card_mat = b.node("GeometryNodeSetMaterial", x + 3200, y - 2900)
+    b.feed(card_mat.inputs["Geometry"], card)
+    b.feed(card_mat.inputs["Material"], gi.outputs["Card Material"])
+    drawn = b.boolean("AND", b.boolean("AND", gi.outputs["Main"], b.compare("EQUAL", gi.outputs["Toon"], 3.0,
+                                                                              x=x + 3000, y=y - 3200), x=x + 3200,
+                                       y=y - 3200), b.compare("GREATER_THAN", flat, 0.001, x=x + 3000, y=y - 3350),
+                      x=x + 3400, y=y - 3250)
+    shaped = b.join([shaped, b.switch("GEOMETRY", drawn, None, card_mat.outputs["Geometry"], x=x + 3600,
+                                      y=y - 2900)], x=x + 3800, y=y)
+    return b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Toon"], 0.0, x=x + 3800, y=y + 200), geometry,
+                    shaped, x=x + 4000, y=y)
 
 
 def _evolve(b, p, x, y):
@@ -2432,6 +2628,26 @@ def _husk(b, gi, geometry, launch, has_launch, radius, anchor, wind, me, x, y):
     hold, span = gi.outputs["Husk Hold"], gi.outputs["Husk Span"]
     frozen = b.set_position(geometry, selection=has_launch, position=launch, x=x + 200, y=y)
     frozen = b.delete(frozen, b.boolean("NOT", has_launch, x=x + 200, y=y - 200), "POINT", x=x + 400, y=y)
+    # ... or dancing on beside the dancer: the live old self slid out sideways (Split Offset, turned into object
+    # space), or its mirror image across a plane half way out (Split Mirror: they dance facing each other's way)
+    out = b.vmath("DIVIDE", _unrotate(b, me, gi.outputs["Split Offset"], x - 800, y + 900), me.outputs["Scale"],
+                  x=x - 600, y=y + 900)
+    slid = b.vmath("SCALE", out, scale=b.map_range(age, 0.0, gi.outputs["Split Slide"], x=x - 600, y=y + 1100,
+                                                   smooth=True), x=x - 400, y=y + 1000)
+    beside = b.set_position(geometry, slid, x=x - 200, y=y + 700)
+    mid_x, mid_y, _floor, _tall, _half = _body_box(b, geometry, x - 1400, y + 1400)
+    normal = b.vmath("NORMALIZE", out, x=x - 400, y=y + 1300)
+    plane = b.vmath("ADD", b.combine(mid_x, mid_y, 0.0, x=x - 600, y=y + 1500), b.vmath("SCALE", slid, scale=0.5,
+                                                                                      x=x - 400, y=y + 1500),
+                    x=x - 200, y=y + 1450)
+    pos = b.node("GeometryNodeInputPosition", x - 600, y + 1700).outputs[0]
+    across = b.vmath("DOT_PRODUCT", b.vmath("SUBTRACT", pos, plane, x=x - 200, y=y + 1650), normal, x=x, y=y + 1600)
+    flipped = b.node("GeometryNodeFlipFaces", x + 200, y + 1300)
+    b.feed(flipped.inputs["Mesh"], b.set_position(geometry, position=b.vmath(
+        "SUBTRACT", pos, b.vmath("SCALE", normal, scale=b.math("MULTIPLY", across, 2.0, x=x, y=y + 1800), x=x + 200,
+                                 y=y + 1750), x=x + 400, y=y + 1700), x=x, y=y + 1300))
+    beside = b.switch("GEOMETRY", gi.outputs["Split Mirror"], beside, flipped.outputs["Mesh"], x=x + 400, y=y + 700)
+    frozen = b.switch("GEOMETRY", gi.outputs["Husk Dance"], frozen, beside, x=x + 500, y=y)
     frozen = b.store(frozen, ATTR_EDGE, 0.0, x=x + 600, y=y)
     frozen = b.store(frozen, ATTR_AHEAD, 1.0, x=x + 800, y=y)
     # floating up and fading
@@ -2479,7 +2695,62 @@ def _husk(b, gi, geometry, launch, has_launch, radius, anchor, wind, me, x, y):
     flown = b.set_position(scaled.outputs["Geometry"], fly, x=x + 4600, y=y - 1200)
     crumbled = b.store(b.join([intact, flown], x=x + 4800, y=y - 1000), ATTR_HUSK, 1.0, x=x + 5000, y=y - 1000)
     husk = b.switch("GEOMETRY", gi.outputs["Husk Float"], crumbled, floated, x=x + 5200, y=y - 500)
-    lasting = b.compare("LESS_THAN", age, b.math("ADD", hold, span, x=x + 4800, y=y + 50), x=x + 5000, y=y + 50)
+    # ... or shrinking to a figurine on a clear stand beside the dancer, there to stay: about its own feet (it may be
+    # dancing), hopping over in an arc and landing with a little bounce
+    shrink = b.map_range(age, hold, b.math("ADD", hold, span, x=x + 600, y=y - 2600), x=x + 800, y=y - 2600,
+                         smooth=True)
+    stat = b.node("GeometryNodeAttributeStatistic", x + 800, y - 2800, data_type="FLOAT_VECTOR", domain="POINT")
+    b.feed(stat.inputs["Geometry"], frozen)
+    b.feed(_enabled(stat.inputs, "Attribute")[0], b.node("GeometryNodeInputPosition", x + 600, y - 3000).outputs[0])
+    lo_x, lo_y, lo_z = b.split_xyz(_enabled(stat.outputs, "Min")[0], x=x + 1000, y=y - 2800)
+    hi_x, hi_y, hi_z = b.split_xyz(_enabled(stat.outputs, "Max")[0], x=x + 1000, y=y - 3000)
+    feet = b.combine(b.math("MULTIPLY", b.math("ADD", lo_x, hi_x, x=x + 1200, y=y - 2800), 0.5, x=x + 1400,
+                            y=y - 2800),
+                     b.math("MULTIPLY", b.math("ADD", lo_y, hi_y, x=x + 1200, y=y - 2950), 0.5, x=x + 1400,
+                            y=y - 2950), lo_z, x=x + 1600, y=y - 2850)
+    size = b.math("SUBTRACT", 1.0, b.math("MULTIPLY", shrink, 6.0 / 7.0, x=x + 1200, y=y - 3200), x=x + 1400,
+                  y=y - 3200)
+    away = b.vmath("DIVIDE", _unrotate(b, me, gi.outputs["Figurine Offset"], x + 1200, y - 3400), me.outputs["Scale"],
+                   x=x + 1400, y=y - 3400)
+    hop = b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY", shrink, math.pi, x=x + 1200, y=y - 3600), x=x + 1400,
+                                    y=y - 3600), b.math("MULTIPLY", b.math("SUBTRACT", hi_z, lo_z, x=x + 1200,
+                                                                           y=y - 3800), 0.3, x=x + 1400, y=y - 3800),
+                 x=x + 1600, y=y - 3700)
+    landed = b.vmath("ADD", b.vmath("ADD", feet, b.vmath("SCALE", away, scale=shrink, x=x + 1600, y=y - 3400),
+                                    x=x + 1800, y=y - 3300),
+                     b.vmath("SCALE", up, scale=hop, x=x + 1800, y=y - 3600), x=x + 2000, y=y - 3400)
+    here = b.node("GeometryNodeInputPosition", x + 1800, y - 3000).outputs[0]
+    figure = b.set_position(frozen, position=b.vmath("ADD", landed, b.vmath("SCALE", b.vmath(
+        "SUBTRACT", here, feet, x=x + 2000, y=y - 3000), scale=size, x=x + 2200, y=y - 3000), x=x + 2400, y=y - 3000),
+                            x=x + 2600, y=y - 2700)
+    figure = b.store(figure, ATTR_HUSK, 1.0, x=x + 2800, y=y - 2700)
+    # the stand: a clear disc under its feet, coming in as it lands
+    tall_now = b.math("SUBTRACT", hi_z, lo_z, x=x + 1800, y=y - 4000)
+    disc = b.node("GeometryNodeMeshCylinder", x + 2000, y - 4200, fill_type="NGON")
+    disc.inputs["Vertices"].default_value = 48
+    disc.inputs["Radius"].default_value = 1.0
+    disc.inputs["Depth"].default_value = 1.0
+    grown = b.map_range(shrink, 0.6, 1.0, x=x + 2000, y=y - 4400, smooth=True)
+    stand_r = b.math("MULTIPLY", b.math("MULTIPLY", tall_now, 0.06, x=x + 2200, y=y - 4400), grown, x=x + 2400,
+                     y=y - 4400)
+    stand_h = b.math("MULTIPLY", tall_now, 0.012, x=x + 2200, y=y - 4550)
+    stand = b.node("GeometryNodeTransform", x + 2600, y - 4200)
+    b.feed(stand.inputs["Geometry"], disc.outputs["Mesh"])
+    b.feed(stand.inputs["Translation"], b.vmath("ADD", b.vmath("ADD", feet, b.vmath("SCALE", away, scale=shrink,
+                                                                                     x=x + 2200, y=y - 4700),
+                                                               x=x + 2400, y=y - 4700),
+                                                b.vmath("SCALE", up, scale=b.math("MULTIPLY", stand_h, -0.5, x=x + 2400,
+                                                                                  y=y - 4850), x=x + 2600, y=y - 4850),
+                                                x=x + 2800, y=y - 4750))
+    b.feed(stand.inputs["Scale"], b.combine(stand_r, stand_r, stand_h, x=x + 2600, y=y - 4500))
+    stand_mat = b.node("GeometryNodeSetMaterial", x + 2800, y - 4200)
+    b.feed(stand_mat.inputs["Geometry"], stand.outputs["Geometry"])
+    b.feed(stand_mat.inputs["Material"], gi.outputs["Stand Material"])
+    figure = b.join([figure, b.switch("GEOMETRY", b.compare("GREATER_THAN", grown, 0.0, x=x + 2800, y=y - 4400), None,
+                                      stand_mat.outputs["Geometry"], x=x + 3000, y=y - 4300)], x=x + 3200, y=y - 2700)
+    husk = b.switch("GEOMETRY", gi.outputs["Husk Figurine"], husk, figure, x=x + 5300, y=y - 500)
+    lasting = b.boolean("OR", b.compare("LESS_THAN", age, b.math("ADD", hold, span, x=x + 4800, y=y + 50), x=x + 5000,
+                                        y=y + 50), gi.outputs["Husk Figurine"], x=x + 5100, y=y + 50)
     there = b.boolean("AND", gi.outputs["Husk"], b.boolean("AND", b.compare("GREATER_EQUAL", age, 0.0, x=x + 5000,
                                                                             y=y + 200), lasting, x=x + 5200,
                                                            y=y + 150), x=x + 5400, y=y + 200)
@@ -3186,7 +3457,7 @@ def build_base_group(field_group, venom_group):
     b.feed(tidy.inputs["Geometry"], b.join([old, particles, venom, crystals, brooch, column, arcs, strike, husk, flames,
                                             lotus, shock, soul], x=4400, y=-150))
     tidy.inputs["Name"].default_value = ATTR_AGE
-    b.feed(go.inputs["Geometry"], tidy.outputs["Geometry"])
+    b.feed(go.inputs["Geometry"], _toon(b, gi, tidy.outputs["Geometry"], False, 4800, 4000))
     return ng
 
 
@@ -3525,6 +3796,50 @@ def build_ring_group():
 
     comet_lit = b.store(comet_mat.outputs["Geometry"], ATTR_EDGE, glow, x=3700, y=-5200)
     drawn = b.switch("GEOMETRY", is_style(4, -800), flat, comet_lit, x=3800, y=0)  # (the flat rings carry their glow)
+
+    # --- Toon water (Demon Slayer's Water Breathing, ukiyo-e waves): a band of water on the comet's way, over the last
+    # two thirds of the turn it has just come round, widest at its head, its sides rippling, bulging out a little in
+    # the middle; the material draws the waves from ATTR_WATER.
+    sheet_w = b.node("GeometryNodeMeshGrid", 1600, -7600)
+    for name, value in (("Size X", 1.0), ("Size Y", 2.0), ("Vertices X", 120), ("Vertices Y", 7)):
+        sheet_w.inputs[name].default_value = value
+    wx, wy, _wz = b.split_xyz(b.node("GeometryNodeInputPosition", 1400, -7900).outputs[0], x=1600, y=-7900)
+    along = b.math("ADD", wx, 0.5, x=1800, y=-7900)  # 0 at the head .. 1 at the tail
+    behind_w = b.math("SUBTRACT", s, b.math("MULTIPLY", along, b.math("MULTIPLY", pitch, 0.66, x=1800, y=-8100),
+                                            x=2000, y=-8000), x=2200, y=-7900)
+    angle_w = b.math("MULTIPLY", b.math("DIVIDE", behind_w, pitch, x=2400, y=-7900), 2.0 * math.pi, x=2600, y=-7900)
+    head = b.math("SUBTRACT", 1.0, b.map_range(along, 0.0, 0.08, x=1800, y=-8300, smooth=True), x=2000, y=-8300)
+    half_w = b.math("MULTIPLY", b.math("MULTIPLY", ring_r, 0.13, x=2000, y=-8500), b.math(
+        "MULTIPLY", b.math("SUBTRACT", 1.0, b.math("MULTIPLY", b.math("POWER", along, 1.5, x=1800, y=-8700), 0.75,
+                                                   x=2000, y=-8700), x=2200, y=-8700),
+        b.math("MULTIPLY_ADD", head, 0.5, 1.0, x=2200, y=-8850), x=2400, y=-8750), x=2600, y=-8600)
+    ripple = b.math("MULTIPLY_ADD", b.math("SINE", b.math("SUBTRACT", b.math("MULTIPLY", along, 31.0, x=2000, y=-9050),
+                                                          b.math("MULTIPLY", frame, 0.35, x=2000, y=-9200), x=2200,
+                                                          y=-9100), x=2400, y=-9100),
+                    b.math("MULTIPLY", b.math("ABSOLUTE", wy, x=2400, y=-9300), 0.18, x=2600, y=-9300), 1.0, x=2800,
+                    y=-9100)
+    swell = b.math("MULTIPLY", b.math("SUBTRACT", 1.0, b.math("MULTIPLY", wy, wy, x=2400, y=-9500), x=2600, y=-9500),
+                   b.math("MULTIPLY", half_w, 0.35, x=2600, y=-9650), x=2800, y=-9550)
+    out_r = b.math("ADD", ring_r, swell, x=3000, y=-9500)
+    water_local = b.combine(b.math("MULTIPLY", b.math("COSINE", angle_w, x=2800, y=-7900), out_r, x=3200, y=-7900),
+                            b.math("MULTIPLY", b.math("SINE", angle_w, x=2800, y=-8050), out_r, x=3200, y=-8050),
+                            b.math("ADD", b.math("ADD", b.math("SUBTRACT", behind_w, s, x=2800, y=-8250), b.math(
+                                "MULTIPLY", b.math("SINE", b.math("MULTIPLY_ADD", along, 9.0, b.math(
+                                    "MULTIPLY", frame, 0.12, x=2400, y=-8650), x=2600, y=-8650), x=2800, y=-8650),
+                                b.math("MULTIPLY", half_w, 0.45, x=2800, y=-8800), x=3000, y=-8700), x=3000,
+                                y=-8250),
+                                   b.math("MULTIPLY", b.math("MULTIPLY", wy, half_w, x=2800, y=-8400), ripple, x=3000,
+                                          y=-8400), x=3200, y=-8300), x=3400, y=-8000)
+    # (stored and trimmed while the grid is still flat: the fields read its positions)
+    water = b.store(sheet_w.outputs["Mesh"], ATTR_WATER, b.combine(along, wy, frame, x=3600, y=-8900), "FLOAT_VECTOR",
+                    x=3800, y=-7600)
+    water = b.delete(water, b.compare("LESS_THAN", behind_w, 0.0, x=3800, y=-9000), "POINT", x=4000, y=-7600)
+    water = b.set_position(water, position=placed(water_local, 3400, -8600), x=4200, y=-7600)
+    water_mat = b.node("GeometryNodeSetMaterial", 4400, -7600)
+    b.feed(water_mat.inputs["Geometry"], water)
+    b.feed(water_mat.inputs["Material"], gi.outputs["Water Material"])
+    water = b.store(water_mat.outputs["Geometry"], ATTR_EDGE, glow, x=4600, y=-7600)
+    drawn = b.switch("GEOMETRY", is_style(6, -1200), drawn, water, x=3900, y=0)
     b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", on, None, drawn, x=4200, y=0))
     return ng
 
@@ -3533,6 +3848,506 @@ def ensure_ring_group():
     if not _is_current(RING_GROUP):
         build_ring_group()
     return bpy.data.node_groups[RING_GROUP]
+
+
+def build_trail_group():
+    """Modifier of the dance ribbons (trails.py): of the recorded hands (and feet) only the last Length frames are
+    shown, as a tapering tube of light (Style 0), a hanging silk sleeve that sags and flutters (1), a silk sash (2, red
+    with gold edges in its material) or a trail of petals (3, Petal Object); they come in at Start and fade out after
+    End. ATTR_TRAIL tells the material where along (and across) a ribbon it is."""
+    ng = _new_group(TRAIL_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in TRAIL_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -2400, 0)
+    go = b.node("NodeGroupOutput", 3600, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -2400, 400).outputs["Frame"]
+    t = b.named_attribute(ATTR_T, "FLOAT", x=-2400, y=-300)[0]
+    age = b.math("SUBTRACT", frame, t, x=-2200, y=-300)
+    length = b.math("MAXIMUM", gi.outputs["Length"], 1.0, x=-2200, y=-450)
+    gone = b.boolean("OR", b.compare("LESS_THAN", age, -0.01, x=-2000, y=-300),
+                     b.compare("GREATER_THAN", age, length, x=-2000, y=-450), x=-1800, y=-350)
+    kept = b.delete(gi.outputs["Geometry"], gone, "POINT", x=-1600, y=0)
+    u = b.math("DIVIDE", age, length, x=-1800, y=-600, clamp=True)
+    shown = b.math("MULTIPLY", b.map_range(frame, b.math("SUBTRACT", gi.outputs["Start"], 4.0, x=-2000, y=600),
+                                           b.math("ADD", gi.outputs["Start"], 4.0, x=-2000, y=750), x=-1800, y=650,
+                                           smooth=True),
+                   b.map_range(frame, gi.outputs["End"], b.math("ADD", gi.outputs["End"], gi.outputs["Fade"],
+                                                                 x=-2000, y=900), 1.0, 0.0, x=-1800, y=850,
+                               smooth=True), x=-1600, y=750)
+    tall = gi.outputs["Height"]
+    silk = b.compare("GREATER_THAN", gi.outputs["Style"], 0.5, x=-1400, y=500)
+    # silk hangs back and down the further back it is, and flutters in the air it moves through
+    flutter = b.math("MULTIPLY_ADD", frame, 0.25, b.math("MULTIPLY", t, 0.15, x=-1600, y=-900), x=-1400, y=-900)
+    wobble = b.vmath("SCALE", b.combine(b.math("SINE", flutter, x=-1200, y=-900), b.math("COSINE", flutter, x=-1200,
+                                                                                         y=-1050), 0.0, x=-1000,
+                                        y=-950), scale=b.math("MULTIPLY", b.math("MULTIPLY", tall, 0.02, x=-1200,
+                                                                                  y=-1200), u, x=-1000, y=-1150),
+                     x=-800, y=-1000)
+    sag = b.combine(0.0, 0.0, b.math("MULTIPLY", b.math("MULTIPLY", u, u, x=-1200, y=-1350),
+                                     b.math("MULTIPLY", gi.outputs["Sag"], -1.0, x=-1200, y=-1500), x=-1000, y=-1400),
+                    x=-800, y=-1350)
+    drifted = b.set_position(kept, b.switch("VECTOR", silk, (0.0, 0.0, 0.0), b.vmath("ADD", wobble, sag, x=-600,
+                                                                                    y=-1100), x=-400, y=-1000),
+                             x=-200, y=0)
+    drifted = b.store(drifted, ATTR_TRAIL, b.combine(u, shown, 0.0, x=-400, y=-600), "FLOAT_VECTOR", x=0, y=0)
+    curve = b.node("GeometryNodeMeshToCurve", 200, 0)
+    b.feed(curve.inputs["Mesh"], drifted)
+    # light: a tube, thinning towards its tail
+    fine = b.node("GeometryNodeSetCurveRadius", 400, 300)
+    b.feed(fine.inputs["Curve"], curve.outputs["Curve"])
+    b.feed(fine.inputs["Radius"], b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Width"], b.math(
+        "POWER", b.math("SUBTRACT", 1.0, u, x=0, y=500), 0.7, x=200, y=500), x=400, y=500), shown, x=600, y=500))
+    tube = b.curve_to_mesh(fine.outputs["Curve"], _circle(b, 1.0, 6, 400, 700), x=800, y=300)
+    # silk: a band across the way it moves, its width up and down (the normal turned up), the profile marking across
+    upright = b.node("GeometryNodeSetCurveNormal", 400, -300)
+    if hasattr(upright, "mode"):
+        upright.mode = "Z_UP"
+    else:  # Blender 5.0+: a menu socket
+        upright.inputs["Mode"].default_value = "Z Up"
+    b.feed(upright.inputs["Curve"], curve.outputs["Curve"])
+    wide = b.node("GeometryNodeSetCurveRadius", 600, -300)
+    b.feed(wide.inputs["Curve"], upright.outputs["Curve"])
+    b.feed(wide.inputs["Radius"], b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Width"], b.math(
+        "MULTIPLY_ADD", b.math("SUBTRACT", 1.0, u, x=200, y=-500), 0.45, 0.55, x=400, y=-500), x=600, y=-500), shown,
+        x=800, y=-500))
+    line = b.node("GeometryNodeCurvePrimitiveLine", 400, -700, mode="POINTS")
+    line.inputs["Start"].default_value = (-1.0, 0.0, 0.0)
+    line.inputs["End"].default_value = (1.0, 0.0, 0.0)
+    band = b.node("GeometryNodeResampleCurve", 600, -700)  # (by count, as it comes)
+    b.feed(band.inputs["Curve"], line.outputs["Curve"])
+    band.inputs["Count"].default_value = 5
+    profile = b.store(band.outputs["Curve"], ATTR_ACROSS, b.node("GeometryNodeSplineParameter", 600, -900).outputs[
+        "Factor"], x=800, y=-700)
+    ribbon = b.curve_to_mesh(wide.outputs["Curve"], profile, x=1000, y=-300)
+    # petals strewn along the way (every other recorded point), shrinking and sinking as they fall behind
+    every = b.compare("GREATER_THAN", b.math("MODULO", b.math("FLOOR", b.math("MULTIPLY", t, 2.0, x=200, y=-1300),
+                                                               x=400, y=-1300), 3.0, x=600, y=-1300), 0.5, x=800,
+                      y=-1300)
+    strewn = b.delete(drifted, every, "POINT", x=1000, y=-1200)
+    petal = b.node("GeometryNodeObjectInfo", 1000, -1500, transform_space="ORIGINAL")
+    b.feed(petal.inputs["Object"], gi.outputs["Petal Object"])
+    rnd, rnd_color = b.white_noise(b.combine(t, 0.37, 0.71, x=1000, y=-1700), x=1200, y=-1700)
+    sinking = b.set_position(strewn, b.combine(0.0, 0.0, b.math("MULTIPLY", b.math("MULTIPLY", u, u, x=1000,
+                                                                                    y=-1900),
+                                                               b.math("MULTIPLY", tall, -0.15, x=1000, y=-2050),
+                                                               x=1200, y=-1950), x=1400, y=-1950), x=1400, y=-1200)
+    petals = b.node("GeometryNodeInstanceOnPoints", 1600, -1200)
+    b.feed(petals.inputs["Points"], sinking)
+    b.feed(petals.inputs["Instance"], petal.outputs["Geometry"])
+    b.feed(petals.inputs["Rotation"], b.vmath("SCALE", rnd_color, scale=2.0 * math.pi, x=1400, y=-1700))
+    b.feed(petals.inputs["Scale"], b.math("MULTIPLY", b.math("MULTIPLY", tall, 0.018, x=1400, y=-2100), b.math(
+        "MULTIPLY", b.math("SUBTRACT", 1.0, b.math("MULTIPLY", u, 0.6, x=1200, y=-2300), x=1400, y=-2300), b.math(
+            "MULTIPLY", shown, b.math("MULTIPLY_ADD", rnd, 0.6, 0.7, x=1400, y=-2450), x=1600, y=-2400), x=1800,
+        y=-2300), x=2000, y=-2200))
+
+    def is_style(k_, y):
+        return b.compare("EQUAL", gi.outputs["Style"], float(k_), x=2000, y=y)
+
+    drawn = b.switch("GEOMETRY", is_style(0, 200), ribbon, tube, x=2200, y=0)
+    painted = b.node("GeometryNodeSetMaterial", 2400, 0)
+    b.feed(painted.inputs["Geometry"], drawn)
+    b.feed(painted.inputs["Material"], gi.outputs["Material"])
+    drawn = b.switch("GEOMETRY", is_style(3, -200), painted.outputs["Geometry"], petals.outputs["Instances"], x=2600,
+                     y=0)
+    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", b.compare("GREATER_THAN", shown, 0.0, x=2800, y=200), None,
+                                           drawn, x=3000, y=0))
+    return ng
+
+
+def ensure_trail_group():
+    if not _is_current(TRAIL_GROUP):
+        build_trail_group()
+    return bpy.data.node_groups[TRAIL_GROUP]
+
+
+def build_steps_group():
+    """Modifier of the flowers underfoot (trails.py, 步步生莲): where a foot comes down a lotus opens on the floor (or
+    with Seal a golden seal lights up), a ripple spreads from it, and after a while it closes and is gone."""
+    ng = _new_group(STEPS_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in STEPS_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -2400, 0)
+    go = b.node("NodeGroupOutput", 3600, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -2400, 400).outputs["Frame"]
+    t = b.named_attribute(ATTR_T, "FLOAT", x=-2400, y=-300)[0]
+    age = b.math("MULTIPLY", b.math("SUBTRACT", frame, t, x=-2200, y=-300), gi.outputs["Rate"], x=-2000, y=-300)
+    # opens over 8 frames (at 30 a second), stays, closes from 50 to 65
+    bloom = b.math("MULTIPLY", b.map_range(age, 0.0, 8.0, x=-1800, y=-200, smooth=True),
+                   b.map_range(age, 50.0, 65.0, 1.0, 0.0, x=-1800, y=-400, smooth=True), x=-1600, y=-300)
+    there = b.boolean("AND", b.compare("GREATER_EQUAL", age, 0.0, x=-1800, y=-600),
+                      b.compare("LESS_THAN", age, 65.0, x=-1800, y=-750), x=-1600, y=-650)
+    tall = gi.outputs["Height"]
+    pos = b.node("GeometryNodeInputPosition", -2000, 0).outputs[0]
+    px, py, _pz = b.split_xyz(pos, x=-1800, y=0)
+    on_floor = b.set_position(b.delete(gi.outputs["Geometry"], b.boolean("NOT", there, x=-1400, y=-650), "POINT",
+                                       x=-1200, y=0),
+                              position=b.combine(px, py, b.math("MULTIPLY_ADD", tall, 0.002, gi.outputs["Floor"],
+                                                                x=-1600, y=200), x=-1400, y=150), x=-1000, y=0)
+    rnd = b.white_noise(b.combine(t, 0.13, 0.57, x=-1200, y=-900), x=-1000, y=-900)[0]
+    # a lotus: eight petals round, leaning out
+    ring = b.node("GeometryNodeMeshCircle", -600, -1400)
+    ring.inputs["Vertices"].default_value = 8
+    ring.inputs["Radius"].default_value = 0.06
+    k = b.node("GeometryNodeInputIndex", -800, -1600).outputs[0]
+    petals = b.node("GeometryNodeInstanceOnPoints", -200, -1400)
+    b.feed(petals.inputs["Points"], ring.outputs["Mesh"])
+    b.feed(petals.inputs["Instance"], _petal(b, 1.0, 0.32, 0, -1400, -2000))
+    b.feed(petals.inputs["Rotation"], b.combine(0.95, 0.0, b.math("MULTIPLY_ADD", k, 2.0 * math.pi / 8.0, math.pi / 2,
+                                                                  x=-400, y=-1600), x=-200, y=-1600))
+    flower = b.node("GeometryNodeRealizeInstances", 0, -1400)
+    b.feed(flower.inputs["Geometry"], petals.outputs["Instances"])
+    lotus_mat = b.node("GeometryNodeSetMaterial", 200, -1400)
+    b.feed(lotus_mat.inputs["Geometry"], flower.outputs["Geometry"])
+    b.feed(lotus_mat.inputs["Material"], gi.outputs["Petal Material"])
+    # ... or a seal: a star in two rings of light, lying on the floor
+    seal = b.join([_circle(b, 1.0, 48, -600, -2600), _circle(b, 0.82, 48, -600, -2800),
+                   _star(b, 5, 0.38, 0.8, -600, -3000)], x=-400, y=-2800)
+    seal = _tube(b, seal, 0.025, gi.outputs["Glow Material"], -200, -2800)
+    seal = b.store(seal, ATTR_EDGE, STEP_GLOW, x=0, y=-2800)
+    shape = b.switch("GEOMETRY", gi.outputs["Seal"], lotus_mat.outputs["Geometry"], seal, x=400, y=-1800)
+    size = b.math("MULTIPLY", b.math("MULTIPLY", tall, b.switch("FLOAT", gi.outputs["Seal"], 0.085, 0.07, x=-200,
+                                                                y=-1100), x=0, y=-1100),
+                  b.math("MULTIPLY", bloom, b.math("MULTIPLY_ADD", rnd, 0.3, 0.85, x=0, y=-1250), x=200, y=-1200),
+                  x=400, y=-1150)
+    flowers = b.node("GeometryNodeInstanceOnPoints", 600, 0)
+    b.feed(flowers.inputs["Points"], on_floor)
+    b.feed(flowers.inputs["Instance"], shape)
+    b.feed(flowers.inputs["Rotation"], b.combine(0.0, 0.0, b.math("MULTIPLY", rnd, 2.0 * math.pi, x=400, y=-300),
+                                                 x=600, y=-300))
+    b.feed(flowers.inputs["Scale"], size)
+    # a ripple spreading from each
+    wave = _unit_band(b, 64, 0.06, -600, -3600)
+    ripple_t = b.map_range(age, 0.0, 20.0, x=-200, y=-3400)
+    ripples = b.node("GeometryNodeInstanceOnPoints", 600, -3600)
+    b.feed(ripples.inputs["Points"], on_floor)
+    ripple_mat = b.node("GeometryNodeSetMaterial", 400, -3600)
+    b.feed(ripple_mat.inputs["Geometry"], wave)
+    b.feed(ripple_mat.inputs["Material"], gi.outputs["Glow Material"])
+    b.feed(ripples.inputs["Instance"], ripple_mat.outputs["Geometry"])
+    b.feed(ripples.inputs["Scale"], b.math("MULTIPLY", tall, b.math("MULTIPLY_ADD", ripple_t, 0.1, 0.02, x=0,
+                                                                      y=-3800), x=200, y=-3800))
+    rippling = b.delete(ripples.outputs["Instances"], b.compare("GREATER_EQUAL", ripple_t, 1.0, x=400, y=-4000),
+                        "INSTANCE", x=800, y=-3600)
+    # (the ripple fades as it spreads: its glow stored on each instance, realized onto its points)
+    rippling = b.store(rippling, ATTR_EDGE, b.math("SUBTRACT", 1.0, ripple_t, x=800, y=-3800), domain="INSTANCE",
+                       x=1000, y=-3600)
+    real = b.node("GeometryNodeRealizeInstances", 1200, -3600)
+    b.feed(real.inputs["Geometry"], rippling)
+    rippling = real.outputs["Geometry"]
+    b.feed(go.inputs["Geometry"], b.join([flowers.outputs["Instances"], rippling], x=1400, y=0))
+    return ng
+
+
+def ensure_steps_group():
+    if not _is_current(STEPS_GROUP):
+        build_steps_group()
+    return bpy.data.node_groups[STEPS_GROUP]
+
+
+def build_domain_group():
+    """Modifier of the world change (domain.py, Jujutsu Kaisen's domain expansion): from Center a sphere opens out to
+    Reach as the mask grows to Open End (eased). Its faces are turned inwards, so from outside only its far inner wall
+    shows, a round window onto the new world behind the body, and once it has swallowed the camera all of the picture
+    is the new world. A thin shell just outside it lights up the window's rim. A floor (a disc where the sphere meets
+    the floor) covers the stage inside it, and props of the style rise out of it where it has reached (crystals, swords
+    in the ground, flowers, falling feathers, beams of light). From Close Start to Close End of the mask radius it
+    shatters into pieces flying off (or with Shatter off shrinks back), the floor drawing in. ATTR_DIR, ATTR_GROUND and
+    ATTR_DOMAIN (opened, closed, frame) tell the materials what to draw."""
+    ng = _new_group(DOMAIN_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in DOMAIN_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -3400, 0)
+    go = b.node("NodeGroupOutput", 6400, 0)
+
+    info = b.node("GeometryNodeObjectInfo", -3200, 1000, transform_space="RELATIVE")
+    b.feed(info.inputs["Object"], gi.outputs["Mask"])
+    r = b.vmath("DOT_PRODUCT", info.outputs["Scale"], (1 / 3, 1 / 3, 1 / 3), x=-3000, y=1000)
+    opened = b.map_range(r, 0.0, b.math("MAXIMUM", gi.outputs["Open End"], 1e-4, x=-3000, y=850), x=-2800, y=1000,
+                         smooth=True)
+    closed = b.map_range(r, gi.outputs["Close Start"], gi.outputs["Close End"], x=-2800, y=800)
+    shrink = b.switch("FLOAT", gi.outputs["Shatter"], b.map_range(closed, 0.0, 1.0, 1.0, 0.0, x=-2600, y=700,
+                                                                   smooth=True), 1.0, x=-2400, y=700)
+    reach = b.math("MAXIMUM", gi.outputs["Reach"], 1e-4, x=-2800, y=1150)
+    size = b.math("MULTIPLY", b.math("MULTIPLY", reach, opened, x=-2400, y=950), shrink, x=-2200, y=900)
+    frame = b.node("GeometryNodeInputSceneTime", -3200, 600).outputs["Frame"]
+    state = b.combine(opened, closed, frame, x=-2200, y=600)
+    cx, cy, cz = b.split_xyz(gi.outputs["Center"], x=-3200, y=300)
+    tall = gi.outputs["Height"]
+    floor = gi.outputs["Floor"]
+    position = b.node("GeometryNodeInputPosition", -3200, 100).outputs[0]
+
+    def placed(geometry, scale, x, y):
+        tr = b.node("GeometryNodeTransform", x, y)
+        b.feed(tr.inputs["Geometry"], geometry)
+        b.feed(tr.inputs["Translation"], gi.outputs["Center"])
+        b.feed(tr.inputs["Scale"], b.combine(scale, scale, scale, x=x - 200, y=y - 200))
+        return tr.outputs["Geometry"]
+
+    def shaded(geometry, material, x, y):
+        n = b.node("GeometryNodeSetMaterial", x, y)
+        b.feed(n.inputs["Geometry"], geometry)
+        b.feed(n.inputs["Material"], gi.outputs[material])
+        return n.outputs["Geometry"]
+
+    def sphere(segments, x, y):
+        n = b.node("GeometryNodeMeshUVSphere", x, y)
+        n.inputs["Segments"].default_value = segments
+        n.inputs["Rings"].default_value = segments // 2
+        n.inputs["Radius"].default_value = 1.0
+        return b.store(n.outputs["Mesh"], ATTR_DIR, position, "FLOAT_VECTOR", x=x + 200, y=y)
+
+    # --- the sky: a sphere turned inside out; shattering, every face is a piece that breaks off at its own time,
+    # flies out and shrinks away
+    flip = b.node("GeometryNodeFlipFaces", -2400, -200)
+    b.feed(flip.inputs["Mesh"], sphere(64, -2800, -200))
+    inward = flip.outputs["Mesh"]
+    split = b.node("GeometryNodeSplitEdges", -2200, -500)
+    b.feed(split.inputs["Mesh"], inward)
+    centre = b.on_domain(position, "FACE", "FLOAT_VECTOR", x=-2200, y=-700)
+    rnd = b.white_noise(b.vmath("SCALE", centre, scale=7.31, x=-2000, y=-800), x=-1800, y=-800)[0]
+    t = b.math("DIVIDE", b.math("SUBTRACT", closed, b.math("MULTIPLY", rnd, 0.55, x=-1600, y=-900), x=-1400, y=-850),
+               0.45, x=-1200, y=-850, clamp=True)
+    face_t = b.on_domain(t, "FACE", x=-1000, y=-850)
+    pieces = b.node("GeometryNodeScaleElements", -1000, -500, domain="FACE")
+    b.feed(pieces.inputs["Geometry"], split.outputs["Mesh"])
+    b.feed(pieces.inputs["Scale"], b.math("SUBTRACT", 1.0, face_t, x=-1200, y=-650))
+    b.feed(pieces.inputs["Center"], centre)
+    out = b.math("MULTIPLY", b.math("MULTIPLY", face_t, face_t, x=-1000, y=-1000), 0.6, x=-800, y=-1000)
+    flown = b.set_position(pieces.outputs["Geometry"], b.vmath("SCALE", centre, scale=out, x=-600, y=-950),
+                           x=-600, y=-500)
+    broken = b.delete(flown, b.compare("GREATER_EQUAL", face_t, 0.999, x=-600, y=-1150), "FACE", x=-400, y=-500)
+    sky = b.switch("GEOMETRY", gi.outputs["Shatter"], inward, broken, x=-200, y=-200)
+    sky = b.store(placed(sky, size, 0, -200), ATTR_DOMAIN, state, "FLOAT_VECTOR", x=200, y=-200)
+    sky = shaded(sky, "Sky Material", 400, -200)
+    # --- the window's rim: a shell just outside, glowing towards its outline (gone once it closes)
+    rim = b.store(placed(sphere(48, -1000, 300), b.math("MULTIPLY", size, 1.01, x=-400, y=200), -200, 300),
+                  ATTR_DOMAIN, state, "FLOAT_VECTOR", x=200, y=300)
+    rim = b.switch("GEOMETRY", b.compare("GREATER_THAN", closed, 0.0, x=200, y=500), shaded(rim, "Rim Material", 400,
+                                                                                            300), None, x=600, y=300)
+
+    # --- the floor: a disc where the sphere meets the floor, drawing in as it closes
+    rise_c = b.math("MAXIMUM", b.math("SUBTRACT", cz, floor, x=-2000, y=-1600), 0.0, x=-1800, y=-1600)
+    disc_r = b.math("SQRT", b.math("MAXIMUM", b.math("SUBTRACT", b.math("MULTIPLY", size, size, x=-1800, y=-1400),
+                                                     b.math("MULTIPLY", rise_c, rise_c, x=-1600, y=-1600), x=-1400,
+                                                     y=-1500), 0.0, x=-1200, y=-1500), x=-1000, y=-1500)
+    ground_r = b.math("MULTIPLY", disc_r, b.math("SUBTRACT", 1.0, closed, x=-1000, y=-1700), x=-800, y=-1600)
+    disc = b.node("GeometryNodeMeshCircle", -1000, -1900, fill_type="TRIANGLE_FAN")
+    disc.inputs["Vertices"].default_value = 128
+    disc.inputs["Radius"].default_value = 1.0
+    gx, gy, _gz = b.split_xyz(position, x=-800, y=-2100)
+    across = b.math("DIVIDE", ground_r, reach, x=-800, y=-2300)
+    ground = b.store(disc.outputs["Mesh"], ATTR_GROUND,
+                     b.combine(b.math("MULTIPLY", gx, across, x=-600, y=-2100),
+                               b.math("MULTIPLY", gy, across, x=-600, y=-2250), across, x=-400, y=-2150),
+                     "FLOAT_VECTOR", x=-400, y=-1900)
+    ground = b.set_position(ground, position=b.combine(
+        b.math("MULTIPLY_ADD", gx, ground_r, cx, x=-200, y=-2100), b.math("MULTIPLY_ADD", gy, ground_r, cy, x=-200,
+                                                                            y=-2250),
+        b.math("MULTIPLY_ADD", tall, 0.0015, floor, x=-200, y=-2400), x=0, y=-2200), x=200, y=-1900)
+    ground = shaded(b.store(ground, ATTR_DOMAIN, state, "FLOAT_VECTOR", x=400, y=-1900), "Ground Material", 600, -1900)
+
+    # --- props: scattered over the floor, each coming once the floor has spread over its spot
+    pts = b.node("GeometryNodePoints", 600, -3200)
+    b.feed(pts.inputs["Count"], gi.outputs["Prop Count"])
+    k = b.node("GeometryNodeInputIndex", 0, -3400).outputs[0]
+    _rnd, col = b.white_noise(b.combine(k, 0.31, 0.77, x=200, y=-3400), x=400, y=-3400)
+    r1, r2, r3 = b.split_xyz(col, x=600, y=-3500)
+    back_x, back_y, _back_z = b.split_xyz(gi.outputs["Back"], x=200, y=-3000)
+    back_angle = b.math("ARCTAN2", back_y, back_x, x=400, y=-3000)
+    theta = b.math("MULTIPLY", r1, 2.0 * math.pi, x=800, y=-3400)
+    # (none in front of the dancer, between the camera and the body: those go round to the back)
+    clear = b.compare("GREATER_THAN", b.math("COSINE", b.math("SUBTRACT", theta, back_angle, x=1000, y=-3200),
+                                             x=1200, y=-3200), -0.9, x=1400, y=-3200)
+    theta = b.switch("FLOAT", clear, b.math("ADD", theta, math.pi, x=1400, y=-3050), theta, x=1600, y=-3100)
+    rho = b.math("MULTIPLY", reach, b.math("MULTIPLY_ADD", b.math("SQRT", r2, x=800, y=-3600), 0.75, 0.1, x=1000,
+                                           y=-3600), x=1200, y=-3600)
+    rise = b.map_range(b.math("SUBTRACT", ground_r, rho, x=1400, y=-3700), 0.0,
+                       b.math("MULTIPLY", reach, 0.08, x=1400, y=-3850), x=1600, y=-3700, smooth=True)
+    left = b.math("MULTIPLY", rise, b.math("SUBTRACT", 1.0, closed, x=1600, y=-3900), x=1800, y=-3800)
+    px = b.math("MULTIPLY_ADD", b.math("COSINE", theta, x=1000, y=-3300), rho, cx, x=1400, y=-3300)
+    py = b.math("MULTIPLY_ADD", b.math("SINE", theta, x=1000, y=-3450), rho, cy, x=1400, y=-3450)
+    two_pi = 2.0 * math.pi
+
+    def scattered(z, rotation, scale, shape, x, y):
+        # (none is deleted: the indices, and so each prop's own random numbers, stay put; the scale hides them)
+        spot = b.set_position(pts.outputs["Geometry"], position=b.combine(px, py, z, x=x - 200, y=y - 200), x=x,
+                              y=y)
+        on = b.node("GeometryNodeInstanceOnPoints", x + 400, y)
+        b.feed(on.inputs["Points"], spot)
+        b.feed(on.inputs["Instance"], shape)
+        b.feed(on.inputs["Rotation"], rotation)
+        b.feed(on.inputs["Scale"], scale)
+        return on.outputs["Instances"]
+
+    def box(size_xyz, z, x, y):
+        cube = b.node("GeometryNodeMeshCube", x, y)
+        cube.inputs["Size"].default_value = size_xyz
+        tr = b.node("GeometryNodeTransform", x + 200, y)
+        b.feed(tr.inputs["Geometry"], cube.outputs["Mesh"])
+        tr.inputs["Translation"].default_value = (0.0, 0.0, z)
+        return tr.outputs["Geometry"]
+
+    # floating crystals (the void)
+    ico = b.node("GeometryNodeMeshIcoSphere", 2400, -3000)
+    ico.inputs["Radius"].default_value = 1.0
+    ico.inputs["Subdivisions"].default_value = 1
+    hover = b.math("ADD", b.math("MULTIPLY_ADD", tall, b.math("MULTIPLY_ADD", r3, 1.3, 0.2, x=2000, y=-3100), floor,
+                                 x=2200, y=-3100),
+                   b.math("MULTIPLY", b.math("MULTIPLY", tall, 0.04, x=2000, y=-3300), b.math(
+                       "SINE", b.math("MULTIPLY_ADD", frame, 0.05, b.math("MULTIPLY", r1, two_pi, x=1800, y=-3450),
+                                      x=2000, y=-3450), x=2200, y=-3450), x=2400, y=-3350), x=2600, y=-3200)
+    c_size = b.math("MULTIPLY", b.math("MULTIPLY", tall, b.math("MULTIPLY_ADD", r3, 0.035, 0.0175, x=2400, y=-3600),
+                                       x=2600, y=-3600), left, x=2800, y=-3600)
+    crystals = scattered(hover, b.combine(b.math("MULTIPLY_ADD", r3, 0.8, -0.4, x=2600, y=-3800),
+                                          b.math("MULTIPLY_ADD", r2, 0.8, -0.4, x=2600, y=-3950),
+                                          b.math("MULTIPLY_ADD", frame, 0.01, b.math("MULTIPLY", r2, two_pi, x=2400,
+                                                                                     y=-4100), x=2600, y=-4100),
+                                          x=2800, y=-3900),
+                         b.combine(b.math("MULTIPLY", c_size, 0.35, x=3000, y=-3600),
+                                   b.math("MULTIPLY", c_size, 0.35, x=3000, y=-3750), c_size, x=3200, y=-3650),
+                         shaded(ico.outputs["Mesh"], "Prop Material", 2600, -3000), 3400, -3000)
+    # swords stuck in the ground, rising out of it (a blade, its guard, grip and pommel; one sword length tall)
+    sword = shaded(b.join([box((0.07, 0.018, 1.0), 0.15, 2400, -4400), box((0.3, 0.06, 0.045), 0.665, 2400, -4600),
+                           box((0.045, 0.045, 0.2), 0.78, 2400, -4800), box((0.08, 0.08, 0.05), 0.9, 2400, -5000)],
+                          x=2800, y=-4600), "Prop Material", 3000, -4600)
+    blade = b.math("MULTIPLY", tall, b.math("MULTIPLY_ADD", r3, 0.13, 0.15, x=2600, y=-5200), x=2800, y=-5200)
+    # (all of it under the floor before it rises: the hilt's top is 0.925 sword lengths up)
+    sunk = b.math("SUBTRACT", floor, b.math("MULTIPLY", b.math("MULTIPLY", b.math("SUBTRACT", 1.0, rise, x=2600,
+                                                                                    y=-5400), 0.95, x=2800,
+                                                               y=-5400), blade, x=3000, y=-5350), x=3200, y=-5300)
+    there_s = b.math("MULTIPLY", b.math("MINIMUM", b.math("MULTIPLY", rise, 10.0, x=3000, y=-6050), 1.0, x=3200,
+                                        y=-6050), b.math("SUBTRACT", 1.0, closed, x=3200, y=-5950), x=3400, y=-6000)
+    swords = scattered(sunk, b.combine(b.math("MULTIPLY_ADD", r1, 0.5, -0.25, x=3000, y=-5600),
+                                       b.math("MULTIPLY_ADD", r2, 0.5, -0.25, x=3000, y=-5750),
+                                       b.math("MULTIPLY", r3, two_pi, x=3000, y=-5900), x=3200, y=-5700),
+                       b.math("MULTIPLY", blade, there_s, x=3600, y=-5900), sword, 3600, -4600)
+    # flowers opening on the ground (a five-petalled star and its heart)
+    star = _star(b, 5, 0.42, 1.0, 2400, -6400)
+    filled = b.node("GeometryNodeFillCurve", 2600, -6400)
+    b.feed(filled.inputs["Curve"], star)
+    heart = b.node("GeometryNodeMeshCircle", 2400, -6700, fill_type="NGON")
+    heart.inputs["Vertices"].default_value = 12
+    heart.inputs["Radius"].default_value = 0.28
+    lifted = b.node("GeometryNodeTransform", 2600, -6700)
+    b.feed(lifted.inputs["Geometry"], heart.outputs["Mesh"])
+    lifted.inputs["Translation"].default_value = (0.0, 0.0, 0.02)
+    flower = shaded(b.join([filled.outputs["Mesh"], lifted.outputs["Geometry"]], x=2800, y=-6500), "Prop Material",
+                    3000, -6500)
+    bloom = b.math("MULTIPLY", b.math("MULTIPLY", tall, b.math("MULTIPLY_ADD", r3, 0.05, 0.05, x=2800, y=-6900),
+                                      x=3000, y=-6900), left, x=3200, y=-6900)
+    facing_camera = b.math("SUBTRACT", back_angle, math.pi / 2, x=3000, y=-7300)  # (the flower's face turned to the camera)
+    flowers = scattered(b.math("MULTIPLY_ADD", bloom, 0.6, floor, x=3200, y=-7100),
+                        b.combine(b.math("MULTIPLY_ADD", r1, 0.4, 0.9, x=3200, y=-7450), 0.0,
+                                  b.math("ADD", facing_camera, b.math("MULTIPLY_ADD", r3, 0.8, -0.4, x=3200, y=-7600),
+                                         x=3400, y=-7500), x=3600, y=-7400),
+                        bloom, flower, 3600, -6500)
+    # white feathers drifting down (the particle feather), each falling over and over through the sky's height
+    fall = b.math("MULTIPLY", tall, 1.8, x=2400, y=-7900)
+    drop = b.math("MODULO", b.math("MULTIPLY_ADD", b.math("MULTIPLY", frame, b.math(
+        "MULTIPLY", tall, b.math("MULTIPLY_ADD", r1, 0.0024, 0.0028, x=2200, y=-8100), x=2400, y=-8100), x=2600,
+                                                          y=-8100), 1.0, b.math("MULTIPLY", r3, fall, x=2600, y=-8250),
+                                    x=2800, y=-8150), fall, x=3000, y=-8100)
+    feather_z = b.math("SUBTRACT", b.math("ADD", floor, fall, x=3000, y=-7900), drop, x=3200, y=-8000)
+    feather_obj = b.node("GeometryNodeObjectInfo", 2800, -7600, transform_space="ORIGINAL")
+    b.feed(feather_obj.inputs["Object"], gi.outputs["Prop Object"])
+    sway = b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.05, b.math("MULTIPLY", r1, two_pi, x=2800, y=-8500), x=3000,
+                                 y=-8500), x=3200, y=-8500)
+    feathers = scattered(feather_z, b.combine(b.math("MULTIPLY", sway, 0.5, x=3400, y=-8500),
+                                              b.math("MULTIPLY_ADD", r2, 1.0, -0.5, x=3400, y=-8650),
+                                              b.math("MULTIPLY_ADD", frame, 0.02, b.math("MULTIPLY", r2, two_pi, x=3200,
+                                                                                         y=-8800), x=3400, y=-8800),
+                                              x=3600, y=-8650),
+                         b.math("MULTIPLY", b.math("MULTIPLY", tall, b.math("MULTIPLY_ADD", r2, 0.025, 0.03, x=3400,
+                                                                            y=-9000), x=3600, y=-9000), left, x=3800,
+                                y=-9000),
+                         feather_obj.outputs["Geometry"], 3800, -7600)
+    # beams of light round the stage, leaning in and sweeping (a cone standing on its tip)
+    beam_pts = b.node("GeometryNodePoints", 2400, -9600)
+    beam_pts.inputs["Count"].default_value = 10
+    j = b.node("GeometryNodeInputIndex", 2000, -9800).outputs[0]
+    angle = b.math("ADD", back_angle, b.math("MULTIPLY_ADD", j, 1.8 / 9.0, -0.9, x=2000, y=-9650), x=2200, y=-9800)
+    ring_r = b.math("MULTIPLY", reach, 0.16, x=2200, y=-9950)
+    bx = b.math("MULTIPLY_ADD", b.math("COSINE", angle, x=2400, y=-9800), ring_r, cx, x=2600, y=-9800)
+    by = b.math("MULTIPLY_ADD", b.math("SINE", angle, x=2400, y=-9950), ring_r, cy, x=2600, y=-9950)
+    beam_pts_at = b.set_position(beam_pts.outputs["Geometry"], position=b.combine(bx, by, floor, x=2800, y=-9850),
+                                 x=3000, y=-9600)
+    lean = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.04, j, x=2800, y=-10200), x=3000,
+                                         y=-10200), 0.25, 0.45, x=3200, y=-10200)
+    inward_dir = b.combine(b.math("MULTIPLY", b.math("COSINE", angle, x=3000, y=-10400), -1.0, x=3200, y=-10400),
+                           b.math("MULTIPLY", b.math("SINE", angle, x=3000, y=-10550), -1.0, x=3200, y=-10550), 0.0,
+                           x=3400, y=-10450)
+    aim = b.vmath("ADD", b.vmath("SCALE", inward_dir, scale=b.math("SINE", lean, x=3400, y=-10250), x=3600, y=-10350),
+                  b.combine(0.0, 0.0, b.math("COSINE", lean, x=3400, y=-10650), x=3600, y=-10650), x=3800, y=-10450)
+    align = b.node("FunctionNodeAlignEulerToVector", 4000, -10450, axis="Z")
+    b.feed(align.inputs["Vector"], aim)
+    cone = b.node("GeometryNodeMeshCone", 2400, -9300, fill_type="NONE")
+    cone.inputs["Vertices"].default_value = 48
+    cone.inputs["Radius Top"].default_value = 1.0
+    cone.inputs["Radius Bottom"].default_value = 0.03
+    cone.inputs["Depth"].default_value = 1.0
+    smooth = b.node("GeometryNodeSetShadeSmooth", 2500, -9450)  # (its light varies with the facing: no facets)
+    b.feed(smooth.inputs[0], cone.outputs["Mesh"])
+    stood = b.node("GeometryNodeTransform", 2600, -9300)
+    b.feed(stood.inputs["Geometry"], smooth.outputs[0])
+    stood.inputs["Translation"].default_value = (0.0, 0.0, 0.5)
+    lit = b.map_range(b.math("SUBTRACT", ground_r, ring_r, x=3400, y=-10900), 0.0,
+                      b.math("MULTIPLY", reach, 0.05, x=3400, y=-11050), x=3600, y=-10900, smooth=True)
+    lit = b.math("MULTIPLY", lit, b.math("SUBTRACT", 1.0, closed, x=3600, y=-11100), x=3800, y=-11000)
+    beams = b.node("GeometryNodeInstanceOnPoints", 4200, -9600)
+    b.feed(beams.inputs["Points"], beam_pts_at)
+    b.feed(beams.inputs["Instance"], shaded(stood.outputs["Geometry"], "Prop Material", 2800, -9300))
+    b.feed(beams.inputs["Rotation"], align.outputs[0])
+    b.feed(beams.inputs["Scale"], b.vmath("SCALE", b.combine(b.math("MULTIPLY", tall, 0.3, x=4000, y=-11200),
+                                                             b.math("MULTIPLY", tall, 0.3, x=4000, y=-11350),
+                                                             b.math("MULTIPLY", tall, 3.0, x=4000, y=-11500),
+                                                             x=4200, y=-11350), scale=lit, x=4400, y=-11200))
+    # ... and a spotlight from high above onto the dancer (the cone upside down: brightest at its narrow end, the lamp)
+    spot_pt = b.node("GeometryNodePoints", 4000, -11800)
+    spot_pt.inputs["Count"].default_value = 1
+    b.feed(spot_pt.inputs["Position"], b.combine(cx, cy, b.math("MULTIPLY_ADD", tall, 3.2, floor, x=3800, y=-12000),
+                                                 x=4000, y=-12000))
+    spotlight = b.node("GeometryNodeInstanceOnPoints", 4200, -11800)
+    b.feed(spotlight.inputs["Points"], spot_pt.outputs["Geometry"])
+    b.feed(spotlight.inputs["Instance"], shaded(stood.outputs["Geometry"], "Prop Material", 3800, -12200))
+    spotlight.inputs["Rotation"].default_value = (math.pi, 0.0, 0.0)
+    b.feed(spotlight.inputs["Scale"], b.vmath("SCALE", b.combine(b.math("MULTIPLY", tall, 0.28, x=3800, y=-12400),
+                                                                 b.math("MULTIPLY", tall, 0.28, x=3800, y=-12550),
+                                                                 b.math("MULTIPLY", tall, 3.2, x=3800, y=-12700),
+                                                                 x=4000, y=-12550), scale=lit, x=4200, y=-12400))
+
+    def is_style(k_, y):
+        return b.compare("EQUAL", gi.outputs["Style"], float(k_), x=4600, y=y)
+
+    props = b.switch("GEOMETRY", is_style(1, -3200), crystals, swords, x=4800, y=-3000)
+    props = b.switch("GEOMETRY", is_style(2, -3400), props, b.join([flowers, feathers], x=4800, y=-3400), x=5000,
+                     y=-3000)
+    props = b.switch("GEOMETRY", is_style(3, -3600), props, feathers, x=5200, y=-3000)
+    # (the material lights the spotlight on its far wall only, so it does not veil the dancer: ATTR_EDGE 1 on it)
+    spot_lit = b.store(spotlight.outputs["Instances"], ATTR_EDGE, 1.0, domain="INSTANCE", x=4400, y=-11800)
+    beams_lit = b.store(beams.outputs["Instances"], ATTR_EDGE, 0.0, domain="INSTANCE", x=4400, y=-9600)
+    props = b.switch("GEOMETRY", is_style(4, -3800), props, b.join([beams_lit, spot_lit], x=5200, y=-3600),
+                     x=5400, y=-3000)
+
+    there = b.boolean("AND", b.compare("GREATER_THAN", opened, 0.0, x=5600, y=400),
+                      b.compare("LESS_THAN", closed, 1.0, x=5600, y=250), x=5800, y=300)
+    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", there, None, b.join([sky, rim, ground, props], x=5800, y=0),
+                                           x=6000, y=0))
+    return ng
+
+
+def ensure_domain_group():
+    if not _is_current(DOMAIN_GROUP):
+        build_domain_group()
+    return bpy.data.node_groups[DOMAIN_GROUP]
 
 
 def build_probe_group(field_group):

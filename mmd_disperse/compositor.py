@@ -254,6 +254,56 @@ def update_impact(scene, first, frames):
         driver.expression = impact_expression(first, frames, invert)
 
 
+CAMERA_BLUR = "MMD Disperse Camera Blur"
+
+
+def add_camera_blur(scene):
+    """Directional Blur before the output for the camera moves (shots.py): smeared sideways in a whip pan, round the
+    middle in a roll, outwards in a zoom punch; update_camera_blur() drives it."""
+    def setup(node):
+        if hasattr(node, "iterations"):  # options are properties before Blender 5.0 ...
+            node.iterations = 16
+        else:  # ... and sockets afterwards
+            _set_socket(node, "Samples", 16)
+
+    return _insert_before_output(scene, CAMERA_BLUR, "CompositorNodeDBlur", setup)
+
+
+def _blur_target(node, kind):
+    """(owner, data path, offset) driving `kind` of the camera blur: shift (sideways, a share of the picture), turn
+    (radians round the centre) or zoom (a share outwards); Blender 5.0+ takes a scale (1 = none) for the zoom."""
+    if hasattr(node, "distance"):
+        return {"shift": (node, "distance", 0.0), "turn": (node, "spin", 0.0), "zoom": (node, "zoom", 0.0)}[kind]
+    name = {"shift": "Amount", "turn": "Rotation", "zoom": "Scale"}[kind]
+    return node.inputs[name], "default_value", 1.0 if kind == "zoom" else 0.0
+
+
+def update_camera_blur(scene, expressions, center=(0.5, 0.5)):
+    """Drive the camera blur (when the scene has it) with driver expressions on the frame: {"shift" | "turn" | "zoom":
+    expression}; what is missing is off. `center` (0 .. 1 across the picture) is where the turn and the zoom go round."""
+    tree = _existing_tree(scene)
+    node = tree.nodes.get(CAMERA_BLUR) if tree is not None else None
+    if node is None:
+        return None
+    for kind in ("shift", "turn", "zoom"):
+        owner, path, offset = _blur_target(node, kind)
+        owner.driver_remove(path)
+        expression = expressions.get(kind)
+        if not expression:
+            setattr(owner, path, offset)
+            continue
+        driver = owner.driver_add(path).driver
+        driver.type = "SCRIPTED"
+        driver.expression = ("1 + " if offset else "") + expression
+    if hasattr(node, "center_x"):
+        node.center_x, node.center_y = center
+    else:
+        sock = node.inputs.get("Center")
+        if sock is not None:
+            sock.default_value = tuple(center) + (0.0,) * (len(sock.default_value) - 2)
+    return node
+
+
 def update_white_flash(scene, mask, wave, rise, fall, amount, strike=None):
     """Drive the white flash from the radius of `mask` (see flash_expression); without a mask it is switched
     off. Nothing happens when the scene has no white flash node."""
@@ -275,4 +325,201 @@ def update_white_flash(scene, mask, wave, rise, fall, amount, strike=None):
     var.targets[0].transform_type = "SCALE_AVG"
     var.targets[0].transform_space = "WORLD_SPACE"
     driver.expression = flash_expression(wave, rise, fall, amount, strike)
+    return node
+
+
+LOOK = "MMD Disperse Look"  # the Mix node that blends the look in; the look's other nodes are named LOOK + " ..."
+LOOK_STYLES = ("NONE", "SILHOUETTE", "ACCENT", "SONG")
+P_LOOK = "mmd_disperse_look"  # on the Mix node: what its nodes were made for
+INK = (0.07, 0.05, 0.04, 1.0)
+PAPER = (0.86, 0.76, 0.56, 1.0)  # the old painting's silk, yellowed ...
+MARGIN = (0.93, 0.88, 0.74, 1.0)  # ... and its mounting
+SEAL = (0.72, 0.06, 0.03, 1.0)
+
+
+class _Look:
+    """Builds the nodes of a look, each named after LOOK and placed in a column."""
+
+    def __init__(self, tree, x, y):
+        self.tree, self.x, self.y, self.count = tree, x, y, 0
+
+    def node(self, idname):
+        self.count += 1
+        n = self.tree.nodes.new(idname)
+        n.name = n.label = "%s %d" % (LOOK, self.count)
+        n.location = (self.x - 200 * (self.count % 6), self.y - 220 * (self.count // 6))
+        return n
+
+    def feed(self, socket, value):
+        if isinstance(value, bpy.types.NodeSocket):
+            self.tree.links.new(value, socket)
+        elif value is not None:
+            socket.default_value = value
+
+    def mix(self, blend, fac, a, b):
+        if hasattr(bpy.types, "CompositorNodeMixRGB"):
+            n = self.node("CompositorNodeMixRGB")
+            n.use_clamp = True
+            sockets = n.inputs[0], n.inputs[1], n.inputs[2], n.outputs[0]
+        else:  # Blender 5.0+
+            n = self.node("ShaderNodeMix")
+            n.data_type = "RGBA"
+            n.clamp_result = True
+            sockets = (next(s for s in n.inputs if s.identifier == "Factor_Float"),
+                       next(s for s in n.inputs if s.identifier == "A_Color"),
+                       next(s for s in n.inputs if s.identifier == "B_Color"),
+                       next(s for s in n.outputs if s.identifier == "Result_Color"))
+        n.blend_type = blend
+        for sock, value in zip(sockets[:3], (fac, a, b)):
+            self.feed(sock, value)
+        return sockets[3]
+
+    def grey(self, image):
+        n = self.node("CompositorNodeRGBToBW")
+        self.feed(n.inputs[0], image)
+        return n.outputs[0]
+
+    def edges(self, image):
+        """How strongly the picture changes there (a Sobel filter), as a grey value."""
+        n = self.node("CompositorNodeFilter")
+        if hasattr(n, "filter_type"):
+            n.filter_type = "SOBEL"
+        else:  # Blender 5.0+: a menu socket
+            _set_socket(n, "Type", "Sobel")
+        self.feed(n.inputs["Image"], image)
+        return self.grey(n.outputs["Image"])
+
+    def box(self, x, y, width, height):
+        """1 inside a rectangle centred at (x, y), 0 outside; both sizes a share of the picture's width (as Blender's
+        Box Mask has them)."""
+        n = self.node("CompositorNodeBoxMask")
+        if hasattr(n, "mask_width"):  # Blender 4.x (its own width and height are the node's)
+            n.mask_type = "ADD"
+            n.x, n.y, n.mask_width, n.mask_height = x, y, width, height
+        elif hasattr(n, "mask_type"):  # Blender 3.x: its width and height hide the node's
+            n.mask_type = "ADD"
+            n.x, n.y, n.width, n.height = x, y, width, height
+        else:  # Blender 5.0+: sockets
+            _set_socket(n, "Operation", "Add")
+            n.inputs["Position"].default_value = (x, y)
+            n.inputs["Size"].default_value = (width, height)
+        n.inputs["Value"].default_value = 1.0
+        return n.outputs["Mask"]
+
+    def dilated(self, matte, step):
+        """`matte` grown by `step` pixels (shrunk when it is negative)."""
+        n = self.node("CompositorNodeDilateErode")
+        if hasattr(n, "mode"):
+            n.mode = "STEP"
+            n.distance = step
+        else:  # Blender 5.0+: sockets
+            _set_socket(n, "Type", "Steps")
+            n.inputs["Size"].default_value = step
+        self.feed(n.inputs["Mask"], matte)
+        return n.outputs["Mask"]
+
+    def closed(self, matte, pixels):
+        """`matte` with the holes up to about `pixels` across filled (grown, then shrunk back)."""
+        return self.dilated(self.dilated(matte, pixels), -pixels)
+
+    def matte(self, scene, objects):
+        """The coverage of `objects` in the picture (Cryptomatte, turned on for the view layer)."""
+        layer = next((vl for vl in scene.view_layers if vl.use), scene.view_layers[0])
+        layer.use_pass_cryptomatte_object = True
+        n = self.node("CompositorNodeCryptomatteV2")
+        n.source = "RENDER"
+        n.scene = scene
+        try:
+            n.layer_name = layer.name + ".CryptoObject"
+        except TypeError:
+            pass
+        n.matte_id = ",".join(ob.name for ob in objects)
+        # (see-through parts can add up to more than full coverage in EEVEE Next: kept to 0 .. 1)
+        return self.mix("MIX", 1.0, (0.0, 0.0, 0.0, 1.0), n.outputs["Matte"])
+
+
+def _look_nodes(tree):
+    return [n for n in tree.nodes if n.name.startswith(LOOK)]
+
+
+def remove_look(scene):
+    """Take the look out of the compositor, joining up what it was spliced between."""
+    tree = _existing_tree(scene)
+    node = tree.nodes.get(LOOK) if tree is not None else None
+    if node is None:
+        return
+    image_in, image_out = _sockets(node)
+    source = image_in.links[0].from_socket if image_in.links else None
+    targets = [link.to_socket for link in image_out.links]
+    for n in _look_nodes(tree):
+        tree.nodes.remove(n)
+    if source is not None:
+        for target in targets:
+            tree.links.new(source, target)
+
+
+def look_expression(first, last):
+    """Driver expression on the frame: the look is on from frame `first` up to `last` (a cut in and a cut out)."""
+    return "(frame >= {f}) * (frame < {l})".format(f=int(first), l=int(last))
+
+
+def update_look(scene, style, first, last, dancer=(), color=(1.0, 0.08, 0.03)):
+    """Splice the look `style` into the compositor (or take it out with NONE), on from frame `first` to `last`:
+    SILHOUETTE the `dancer` objects black with a white rim on a flat `color`; ACCENT the picture black and white but
+    for the `dancer` objects; SONG an old Chinese painting: the `dancer` objects painted in ink on yellowed silk, ink
+    lines round them, a mounting and a red seal."""
+    if style == "NONE" or first is None:
+        remove_look(scene)
+        return None
+    render = scene.render
+    key = "%s:%s:%s:%dx%d" % (style, ",".join(sorted(ob.name for ob in dancer)), ",".join("%.3f" % c for c in color),
+                              render.resolution_x, render.resolution_y)
+    tree = _existing_tree(scene)
+    node = tree.nodes.get(LOOK) if tree is not None else None
+    if node is not None and node.get(P_LOOK) != key:
+        remove_look(scene)
+        node = None
+    if node is None:
+        idname = "CompositorNodeMixRGB" if hasattr(bpy.types, "CompositorNodeMixRGB") else "ShaderNodeMix"
+
+        def setup(n):
+            if n.bl_idname == "ShaderNodeMix":
+                n.data_type = "RGBA"
+            n.blend_type = "MIX"
+            _flash_factor(n).default_value = 0.0
+
+        node = _insert_before_output(scene, LOOK, idname, setup)
+        node[P_LOOK] = key
+        tree = node.id_data
+        image_in = _sockets(node)[0]
+        source = image_in.links[0].from_socket
+        b = _Look(tree, node.location.x - 300, node.location.y - 300)
+        if style == "SILHOUETTE":
+            matte = b.closed(b.matte(scene, dancer), max(2, int(round(0.004 * scene.render.resolution_x))))
+            shape = b.mix("MIX", matte, tuple(color) + (1.0,), (0.0, 0.0, 0.0, 1.0))
+            look = b.mix("ADD", b.edges(matte), shape, (1.0, 0.95, 0.85, 1.0))
+        elif style == "ACCENT":
+            look = b.mix("MIX", b.matte(scene, dancer), b.grey(source), source)
+        else:  # SONG: the dancer painted in ink on blank silk, ink lines round her
+            pixels = max(2, int(round(0.004 * scene.render.resolution_x)))
+            matte = b.closed(b.matte(scene, dancer), pixels)
+            value = b.grey(source)
+            light = b.mix("SCREEN", 1.0, value, value)
+            light = b.mix("SCREEN", 1.0, light, light)  # (1 - (1 - v)^4: skin near the silk, dark cloth in ink)
+            figure = b.mix("MIX", light, INK, PAPER)
+            ground = b.mix("MIX", 0.12, PAPER, b.mix("MULTIPLY", 1.0, PAPER, value))  # the scene a faint shadow
+            aged = b.mix("MIX", matte, ground, figure)
+            lines = b.mix("MULTIPLY", 1.0, b.edges(source), b.dilated(matte, 3 * pixels))
+            inked = b.mix("MIX", lines, aged, INK)
+            render = scene.render
+            tall = render.resolution_y / max(render.resolution_x, 1)  # the picture's height in widths
+            mounted = b.mix("MIX", b.box(0.5, 0.5, 0.88, 0.88 * tall + 0.02), MARGIN, inked)
+            seal = min(0.06, 0.06 * tall)
+            look = b.mix("MIX", b.box(0.94 - seal, 0.1, seal, seal), mounted, SEAL)
+        tree.links.new(look, next(s for s in node.inputs if s.identifier in ("B_Color", "Image_001")))
+    socket = _flash_factor(node)
+    socket.driver_remove("default_value")
+    driver = socket.driver_add("default_value").driver
+    driver.type = "SCRIPTED"
+    driver.expression = look_expression(first, last)
     return node

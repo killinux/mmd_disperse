@@ -59,6 +59,8 @@ def parse_args():
     p.add_argument("--res", type=int, default=1920)
     p.add_argument("--samples", type=int, default=64)
     p.add_argument("--orbit", type=float, default=12.0, help="camera orbit half-angle in degrees")
+    p.add_argument("--lens", type=float, default=85.0, help="camera focal length in mm (wider shows more world)")
+    p.add_argument("--view", type=float, default=1.1, help="picture height in model heights (the split self needs ~2)")
     p.add_argument("--angle", type=float, default=0.0,
                    help="camera angle around the model in degrees (0 = from the front, 90 = from its left)")
     p.add_argument("--save", default="")
@@ -291,9 +293,9 @@ def setup_stage(scene, bounds, args):
     pivot.location = (center.x, center.y, lo.z)
     scene.collection.objects.link(pivot)
     cam = bpy.data.objects.new("HD Camera", bpy.data.cameras.new("HD Camera"))
-    cam.data.lens = 85
+    cam.data.lens = args.lens
     cam.data.sensor_fit = "VERTICAL"
-    view_h = height * 1.1
+    view_h = height * args.view
     dist = view_h / (cam.data.sensor_height / cam.data.lens)
     aim = Vector((0.0, 0.0, height * 0.5))
     cam.location = Vector((0.0, -dist, height * 0.52))

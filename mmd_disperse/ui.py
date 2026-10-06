@@ -160,7 +160,7 @@ class MMDDISPERSE_PT_ring(_Panel, bpy.types.Panel):
         col.prop(s, "ring_strength")
         if s.path in ("SPHERE", "SURFACE", "GARMENTS", "HAND"):
             layout.label(text="Only with the sweeps, Spiral Up or Split from the Waist", icon="INFO")
-        else:
+        elif s.ring_style != "WATER":
             layout.label(text="Uses the glow color of the wire layer", icon="INFO")
 
 
@@ -263,6 +263,114 @@ class MMDDISPERSE_PT_soul(_Panel, bpy.types.Panel):
         col.prop(s, "soul_count")
         col.prop(s, "soul_strength")
         layout.label(text="Yellow, purple, black and red by age", icon="INFO")
+
+
+class MMDDISPERSE_PT_domain(_Panel, bpy.types.Panel):
+    bl_label = "World Change"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "domain_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.domain_enable
+        layout.prop(s, "domain_style")
+        col = layout.column(align=True)
+        col.prop(s, "domain_open")
+        col.prop(s, "domain_hold")
+        layout.prop(s, "domain_close")
+        if s.domain_style != "STAGE":
+            layout.prop(s, "domain_props")
+        if context.scene.camera is None:
+            layout.label(text="It opens out past the scene camera", icon="INFO")
+
+
+class MMDDISPERSE_PT_camera(_Panel, bpy.types.Panel):
+    bl_label = "Camera and Time"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "shot_enable")
+        col = layout.column()
+        col.active = s.shot_enable
+        col.prop(s, "shot_style")
+        if s.shot_style in ("DOLLY", "ORBIT", "CUTS"):
+            col.prop(s, "shot_length")
+        if s.shot_style == "ORBIT":
+            col.prop(s, "shot_angle")
+        if s.shot_enable and context.scene.camera is None:
+            col.label(text="Needs a scene camera", icon="INFO")
+        layout.prop(s, "time_warp")
+        if s.time_warp != "NONE":
+            layout.prop(s, "warp_length")
+            layout.label(text="Removing the effect puts the dance back", icon="INFO")
+        layout.separator()
+        layout.prop(s, "toon_style")
+        row = layout.row(heading="Float Up")
+        row.prop(s, "float_up", text="")
+        sub = row.row()
+        sub.active = s.float_up
+        sub.prop(s, "float_height", text="")
+        if s.toon_style != "NONE" and s.entrance not in effect.AT_ONCE:
+            layout.label(text="Pair it with All at Once", icon="INFO")
+
+
+class MMDDISPERSE_PT_look(_Panel, bpy.types.Panel):
+    bl_label = "Picture Look"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "look_style")
+        col = layout.column()
+        col.active = s.look_style != "NONE"
+        col.prop(s, "look_length")
+        if s.look_style == "SILHOUETTE":
+            col.prop(s, "look_color")
+        if s.look_style != "NONE":
+            layout.label(text="Made in the compositor", icon="NODE_COMPOSITING")
+
+
+class MMDDISPERSE_PT_trails(_Panel, bpy.types.Panel):
+    bl_label = "Dance Ribbons and Steps"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "trail_enable")
+        col = layout.column()
+        col.active = s.trail_enable
+        col.prop(s, "trail_style")
+        col.prop(s, "trail_feet")
+        sub = col.column(align=True)
+        sub.prop(s, "trail_length")
+        if s.trail_style != "PETALS":
+            sub.prop(s, "trail_width")
+            sub.prop(s, "trail_strength")
+        layout.prop(s, "step_flowers")
+        col = layout.column()
+        col.active = s.step_flowers
+        col.prop(s, "step_style")
+        if s.trail_enable or s.step_flowers:
+            layout.label(text="Build again after moving the model", icon="INFO")
 
 
 class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
@@ -447,7 +555,7 @@ class MMDDISPERSE_PT_surface(_Panel, bpy.types.Panel):
 
 
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
-    bl_label = "Hologram"
+    bl_label = "Hologram / Veil"
     bl_parent_id = "MMDDISPERSE_PT_main"
     bl_options = {"DEFAULT_CLOSED"}
 
@@ -460,6 +568,7 @@ class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
         layout.active = s.holo_enable
+        layout.prop(s, "holo_style")
         col = layout.column(align=True)
         col.prop(s, "holo_width")
         col.prop(s, "holo_opacity")
@@ -605,6 +714,12 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
             col.prop(s, "frag_spin")
         elif s.exit_style == "HUSK":
             col = layout.column(align=True)
+            col.prop(s, "husk_motion")
+            if s.husk_motion == "DANCE":
+                col.prop(s, "split_side")
+                col.prop(s, "split_distance")
+                col.prop(s, "split_mirror")
+            col = layout.column(align=True)
             col.prop(s, "husk_style")
             col.prop(s, "husk_away")
             col.prop(s, "husk_hold")
@@ -615,7 +730,8 @@ class MMDDISPERSE_PT_old(_Panel, bpy.types.Panel):
                 col.prop(s, "frag_wind")
                 col.prop(s, "frag_wind_dir")
                 col.prop(s, "frag_turbulence")
-            layout.label(text="Building records where it is left behind", icon="INFO")
+            if s.husk_motion == "STILL":
+                layout.label(text="Building records where it is left behind", icon="INFO")
         else:
             col = layout.column(align=True)
             col.prop(s, "frag_size")
@@ -679,6 +795,10 @@ classes = (
     MMDDISPERSE_PT_flames,
     MMDDISPERSE_PT_impact,
     MMDDISPERSE_PT_soul,
+    MMDDISPERSE_PT_domain,
+    MMDDISPERSE_PT_camera,
+    MMDDISPERSE_PT_look,
+    MMDDISPERSE_PT_trails,
     MMDDISPERSE_PT_entrance,
     MMDDISPERSE_PT_paint,
     MMDDISPERSE_PT_undersuit,

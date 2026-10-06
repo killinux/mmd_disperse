@@ -22,8 +22,9 @@ sys.path.insert(0, REPO)
 sys.path.insert(0, os.path.join(REPO, "tests"))
 
 import mmd_disperse  # noqa: E402
-from mmd_disperse import (arrival, beats, compositor, effect, impact, launch, materials, motion,  # noqa: E402
-                          particles, presets, ribbons, rings, venom)
+from mmd_disperse import (arrival, beats, compositor, domain, effect, impact, launch, materials,  # noqa: E402
+                          motion, particles, presets, ribbons, rings, toon, trails, venom)
+from mmd_disperse import shots as camera_moves  # noqa: E402  (the checks use "shots" for their own lists)
 from mmd_disperse.arrival import limb_points  # noqa: E402
 from mmd_disperse.model import resolve, rest_points_world  # noqa: E402
 from mmd_disperse.node_groups import (ATTR_ARRIVAL, ATTR_CUT, ATTR_EDGE, ATTR_HOLO, ATTR_HUSK,  # noqa: E402
@@ -2082,6 +2083,314 @@ def run():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.10 checks")
 
+    # --- 1.11: more moves of the dance, found in made-up motions (a 20 high model, 30 frames a second)
+    def on_floor(t, h=20.0):
+        """Standing: both feet on the floor, the hips and the neck at their height."""
+        for side_, x in (("L", 0.05 * h), ("R", -0.05 * h)):
+            t.ankle[side_][:] = (x, 0.0, 0.04 * h)
+            t.toe[side_][:] = (x, -0.05 * h, 0.01 * h)
+        t.hips[:] = (0.0, 0.0, 0.55 * h)
+        t.neck[:] = (0.0, 0.0, 0.82 * h)
+        return t
+
+    squat, shallow = on_floor(made_up(80)), on_floor(made_up(80))
+    for i in range(80):
+        dip = max(0.0, 1.0 - abs(i - 40) / 10.0)
+        squat.hips[i, 2] = (0.55 - 0.15 * dip) * H
+        shallow.hips[i, 2] = (0.55 - 0.05 * dip) * H
+    found = motion.find(squat, "SQUAT", H, FPS)
+    check(found == (40, ("HIPS",)) and motion.find(shallow, "SQUAT", H, FPS) is None,
+          "made-up squat found at its bottom (frame 40: %s); a dip of a twentieth of the height is none" % (found,))
+    jump = on_floor(made_up(80))
+    for i in range(30, 41):  # both feet off the floor from 31 to 39, highest at 35
+        up_ = 0.2 * H * (1.0 - abs(i - 35) / 6.0)
+        for side_ in "LR":
+            jump.ankle[side_][i, 2] += up_
+        jump.hips[i, 2] += up_
+    found = motion.find(jump, "JUMP", H, FPS), motion.find(jump, "LAND", H, FPS)
+    check(found == ((35, ("FEET",)), (40, ("FEET",))),
+          "made-up jump: its top at frame 35, back on the floor at 40 (%s)" % (found,))
+    step = on_floor(made_up(80))
+    step.ankle["L"][20:30, 2] += 0.06 * H  # the left foot lifted from 20 to 29, put down at 30, at rest from 31
+    found = motion.find(step, "STEP", H, FPS)
+    check(found == (31, ("FOOT_L",)) and motion.find(on_floor(made_up(80)), "STEP", H, FPS) is None,
+          "made-up footfall: the left foot comes to rest at 31 (%s); feet standing from the start are no footfall"
+          % (found,))
+    reach_up = on_floor(made_up(80))
+    for i in range(50, 56):
+        reach_up.wrist["R"][i] = (-0.1 * H, 0.0, (1.12 + 0.02 * (1.0 - abs(i - 52) / 3.0)) * H)
+    found = motion.find(reach_up, "RAISE", H, FPS)
+    check(found == (52, ("R",)), "made-up hand thrown up to the sky: highest at frame 52 (%s)" % (found,))
+
+    def heart(frames, index=0.9, middle=0.3, gap=0.01):
+        """The right thumb and forefinger tips `gap` apart above the chest in `frames`, the fingers stretched so."""
+        t = made_up(80)
+        for i in frames:
+            t.wrist["R"][i] = (-0.05 * H, -0.1 * H, 0.75 * H)
+            t.index["R"][i] = (-0.05 * H, -0.12 * H, 0.82 * H)
+            t.thumb["R"][i] = t.index["R"][i] + (gap * H, 0.0, 0.0)
+            t.stretch["index"]["R"][i], t.stretch["middle"]["R"][i] = index, middle
+        return motion.find(t, "HEART", H, FPS)
+
+    found = [heart(range(40, 50)), heart(range(40, 50), index=0.4), heart(range(40, 50), index=0.5, middle=1.0),
+             heart(range(40, 44))]
+    check(found == [(40, ("R",)), None, None, None],
+          "made-up finger heart found at frame 40; a fist, an OK sign and a heart held too briefly are none (%s)"
+          % (found,))
+    both = made_up(80)
+    for i in range(40, 50):
+        for side_, x in (("L", 1.0), ("R", -1.0)):
+            both.wrist[side_][i] = (0.06 * H * x, -0.1 * H, 0.75 * H)
+            both.index[side_][i] = (0.005 * H * x, -0.12 * H, 0.8 * H)
+            both.thumb[side_][i] = (0.005 * H * x, -0.12 * H, 0.74 * H)
+    found = motion.find(both, "HEART", H, FPS)
+    check(found == (40, ("L", "R")), "made-up heart of both hands at frame 40 (%s)" % (found,))
+    winking = made_up(80)
+    winking.wink["R"][45:52] = 1.0
+    found = motion.find(winking, "WINK", H, FPS)
+    check(found == (45, ("EYE_R",)), "made-up wink of the right eye at frame 45 (%s)" % (found,))
+    pull = made_up(80)
+    pull.neck[:] = (0.0, 0.0, 0.82 * H)
+    for i in range(80):  # the left palm on the chest, snatched away to the side from frame 30 to 36
+        away = 0.3 * H * min(1.0, max(0.0, (i - 30) / 6.0))
+        pull.palm["L"][i] = (0.02 * H + away, -0.03 * H, 0.76 * H)
+    found = motion.find(pull, "PULL", H, FPS)
+    check(found is not None and found[1] == ("L",) and 20 <= found[0] <= 30,
+          "made-up cord pulled with the left hand: at the chest before it snaps away at frame 30 (%s)" % (found,))
+
+    # A wink read off the facial expressions: a wink morph of the right eye (made up here: the model has none), keyed
+    # shut from frame 40 to 44, starts the transformation there.
+    face = base.meshes[0]
+    had_keys = face.data.shape_keys is not None
+    keys_action = None
+    if had_keys and face.data.shape_keys.animation_data is not None:
+        keys_action = face.data.shape_keys.animation_data.action
+    if not had_keys:
+        face.shape_key_add(name="Basis", from_mix=False)
+    morph = face.shape_key_add(name="ウィンク右", from_mix=False)
+    keys = face.data.shape_keys
+    try:
+        for f, value in ((1, 0.0), (40, 0.0), (44, 1.0)):
+            morph.value = value
+            morph.keyframe_insert("value", frame=f)
+        s.trigger, s.entrance, s.path, s.frame_start, s.frame_end = "WINK", "GROW", "SPHERE", 1, 100
+        scene.frame_set(1)
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build to start on a wink")
+        winked = s.mask.get(effect.P_TRIGGER)
+        check(winked is not None and 41.0 <= winked <= 44.0 and s.frame_start == int(round(winked)),
+              "wink: the right eye's wink found at frame %s (keyed shut from 40 to 44), the transformation starts "
+              "there" % winked)
+    finally:
+        made = keys.animation_data.action if keys.animation_data is not None else None
+        if keys.animation_data is not None:
+            keys.animation_data.action = keys_action
+        if made is not None and made != keys_action:
+            bpy.data.actions.remove(made)
+        face.shape_key_remove(morph)
+        if not had_keys:
+            face.shape_key_clear()
+        s.trigger, s.frame_start, s.frame_end = "NONE", 1, 100
+
+    # --- 1.11: the world change, the camera and time, cartoon physics, the split self and the figurine, the dance
+    # ribbons, the picture's looks, the veils, the paper cut and the band of toon water
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "particles", "easing", "finale", "frame_start", "frame_end",
+        "trigger", "ring_enable", "ring_style", "old_surface", "holo_enable", "husk_style", "husk_away",
+        "husk_motion", "wire_enable")}
+    made_camera = None
+    if scene.camera is None:  # (the world opens out past the camera, the moves ride on it)
+        made_camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(made_camera)
+        made_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
+        made_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        scene.camera = made_camera
+    user = scene.camera
+    s.trigger, s.entrance, s.easing, s.path, s.exit_style, s.particles = "NONE", "SWAP", "LINEAR", "SPHERE", "SHRINK", \
+        "NONE"
+    s.finale, s.wire_enable, s.domain_enable = False, False, True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the world change")
+    check(not draw_panels(bpy.context), "panels draw with the world change")
+    wave, moment, big = wave_and_moment()
+    at_big = effect._big_frame(s, s.mask, wave)  # (what the camera moves, the time warps and the looks are timed on)
+    worlds = domain.world_objects(s.mask)
+    scene.frame_set(1)
+    shut = evaluated_counts(worlds[0]) if worlds else -1
+    scene.frame_set(at_big)
+    opened = evaluated_counts(worlds[0]) if worlds else -1
+    check(len(worlds) == 1 and shut == 0 and opened > 0,
+          "world change: nothing of it at the start, the world there at the big moment (%d, %d vertices)"
+          % (shut, opened))
+    s.domain_enable = False
+    check(not domain.world_objects(s.mask), "world change switched off: its object gone")
+    # (the world staying after the moment stretched the mask's timeline: without it the moment comes later)
+    at_big = effect._big_frame(s, s.mask, float(s.mask[effect.P_WAVE]))
+
+    s.shot_enable, s.shot_style = True, "WHIP"
+    marks = sorted((m.frame, m.camera.name if m.camera else None) for m in scene.timeline_markers
+                   if m.name.startswith(camera_moves.MARKER))
+    scene.frame_set(at_big)
+    moving = scene.camera
+    scene.frame_set(s.frame_end)
+    after_ = scene.camera
+    check(marks and moving != user and moving.get(camera_moves.P_SHOT) == s.mask and after_ == user,
+          "whip pan: markers switch to a camera riding on the scene camera at the moment (frame %d: %s), back to it "
+          "after (%s; markers %s)" % (at_big, moving.name if moving else None, after_.name if after_ else None, marks))
+    check(not draw_panels(bpy.context), "panels draw with a camera move")
+    s.shot_style = "CUTS"
+    roles = sorted(ob.get(camera_moves.P_ROLE) for ob in camera_moves.shot_objects(s.mask))
+    cut_marks = sorted((m.frame, m.camera.name if m.camera else None) for m in scene.timeline_markers
+                       if m.name.startswith(camera_moves.MARKER))
+    check(roles == ["EYES", "LOW", "WIDE"] and len(cut_marks) >= 4 and cut_marks[-1][1] == user.name,
+          "ultimate cuts: a low angle, the eyes and a wide shot, then back to the scene camera (%s, %s)"
+          % (roles, cut_marks))
+    s.shot_enable = False
+    scene.frame_set(at_big)
+    check(not camera_moves.shot_objects(s.mask) and scene.camera is user
+          and not any(m.name.startswith(camera_moves.MARKER) for m in scene.timeline_markers),
+          "camera move off: our camera and markers gone, the scene camera back")
+
+    swing = bpy.data.actions.new("MMDD Test Swing")
+    try:  # the left arm swings down from frame 1 to 100 (a dance)
+        arm.animation_data.action = swing
+        upper_arm.rotation_mode = "QUATERNION"
+        for f, angle in ((1, 60.0), (100, -40.0)):
+            upper_arm.rotation_quaternion = Quaternion((1.0, 0.0, 0.0), math.radians(angle))
+            upper_arm.keyframe_insert("rotation_quaternion", frame=f)
+
+        def elbow(f):
+            scene.frame_set(f)
+            return round((arm.matrix_world @ upper_arm.tail).z, 4)
+
+        s.time_warp, s.warp_length = "FREEZE", 0.6
+        frozen = [elbow(f) for f in (at_big - 2, at_big, at_big + 2)]
+        ad_ = arm.animation_data
+        check(len(set(frozen)) == 1 and not draw_panels(bpy.context),
+              "freeze: the dance stands still round the moment (frame %d: %s; action %s, tracks %s)"
+              % (at_big, frozen, ad_.action.name if ad_.action else None, [t.name for t in ad_.nla_tracks]))
+        s.time_warp = "NONE"
+        going = [elbow(f) for f in (at_big - 2, at_big, at_big + 2)]
+        check(len(set(going)) == 3 and arm.animation_data.action == swing and not arm.animation_data.nla_tracks,
+              "time as it is again: the dance moves on, its action back in place (%s)" % going)
+
+        s.trail_enable, s.trail_style = True, "LIGHT"
+        trail = next(iter(trails.objects(s.mask, "TRAIL")), None)
+        scene.frame_set(50)
+        lit = evaluated_counts(trail) if trail else -1
+        scene.frame_set(s.frame_end + 90)
+        late = evaluated_counts(trail) if trail else -1
+        check(trail is not None and len(trail.data.vertices) > 100 and lit > 0 and late == 0
+              and not draw_panels(bpy.context),
+              "dance ribbons: the hands' way recorded (%d points), a trail of light at frame 50, gone after the end"
+              % (len(trail.data.vertices) if trail else 0))
+        s.trail_style = "SASH"
+        scene.frame_set(50)
+        check(evaluated_counts(trail) > 0 and len(material_points(trail, materials.TRAIL_MATERIAL + " Sash")) > 0,
+              "dance ribbons: the red silk sash drawn in its material")
+        s.step_flowers = True
+        check(len(trails.objects(s.mask, "STEPS")) == 1, "flowers underfoot: the footfalls object there")
+        s.trail_enable = s.step_flowers = False
+        check(not trails.objects(s.mask), "ribbons and flowers off: gone")
+    finally:
+        arm.animation_data.action = pose_action
+        bpy.data.actions.remove(swing)
+        upper_arm.rotation_quaternion = (1.0, 0.0, 0.0, 0.0)
+        upper_arm.rotation_mode = modes[0]
+        s.time_warp, s.trail_enable, s.step_flowers = "NONE", False, False
+
+    s.toon_style = "SQUASH"
+    landing = effect._big_frame(s, s.mask, float(s.mask[effect.P_WAVE]))
+    scene.frame_set(int(math.ceil(effect._frame_at(s.mask, big) - 1e-6)))
+    squashed = world_vertices(new_mesh)[0]
+    tall_now = float(np.ptp(squashed[:, 2])) if len(squashed) else -1.0
+    check(len(toon.anchors(s.mask)) == 1 and 0.0 < tall_now < 0.6 * height and not draw_panels(bpy.context),
+          "squash: the body pressed flat at the moment (%.1f of %.1f tall)" % (tall_now, height))
+    s.toon_style = "NONE"
+    check(not toon.anchors(s.mask), "cartoon physics off: the anchor gone (big frame %s)" % landing)
+    rest_z = arm.matrix_world.translation.z
+    s.float_up = True
+    scene.frame_set(max(2, (s.frame_start + at_big) // 2))
+    lifted = arm.matrix_world.translation.z - rest_z
+    s.float_up = False
+    scene.frame_set(max(2, (s.frame_start + at_big) // 2))
+    check(lifted > 0.05 * height and abs(arm.matrix_world.translation.z - rest_z) < 1e-5 * height
+          and not (arm.animation_data and arm.animation_data.drivers.find("delta_location", index=2)),
+          "float up: the dancer floats up on the way to the moment (%.2f), back down when it is off" % lifted)
+
+    s.exit_style, s.husk_style, s.husk_motion, s.husk_away = "HUSK", "ASIS", "DANCE", "CRUMBLE"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the split self")
+    at_big = effect._big_frame(s, s.mask, float(s.mask[effect.P_WAVE]))
+    scene.frame_set(at_big + 15)
+    old_pts, new_pts = world_vertices(old_mesh)[0], world_vertices(new_mesh)[0]
+    apart = float(abs(old_pts[:, 0].mean() - new_pts[:, 0].mean())) if len(old_pts) and len(new_pts) else 0.0
+    check(apart > 0.2 * height and not draw_panels(bpy.context),
+          "split self: the old self dances on beside the new one (%.1f apart)" % apart)
+    s.husk_motion, s.husk_style, s.husk_away = "STILL", "PVC", "FIGURINE"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the figurine")
+    scene.frame_set(at_big + 120)
+    figure, husk_ = world_vertices(old_mesh, ATTR_HUSK)
+    figure = figure[husk_ > 0.5]  # (the dancer's head and hair are the old mesh's too)
+    small = float(np.ptp(figure[:, 2])) if len(figure) else -1.0
+    check(0.0 < small < 0.3 * height and bpy.data.materials.get(materials.STAND_MATERIAL) is not None,
+          "figurine: the old self a small figure on a stand afterwards (%.2f tall)" % small)
+    s.exit_style, s.husk_style, s.husk_away, s.husk_motion = "SHRINK", "AMBER", "CRUMBLE", "STILL"
+
+    s.look_style = "SILHOUETTE"
+    at_big = effect._big_frame(s, s.mask, float(s.mask[effect.P_WAVE]))
+    tree = compositor._existing_tree(scene)
+    look = tree.nodes.get(compositor.LOOK) if tree is not None else None
+    looks_driven = [d for d in (tree.animation_data.drivers if tree is not None and tree.animation_data else [])
+                    if compositor.LOOK in d.data_path]
+    scene.frame_set(1)
+    off_ = compositor._flash_factor(look).default_value if look else -1.0
+    scene.frame_set(at_big + 1)
+    on_ = compositor._flash_factor(look).default_value if look else -1.0
+    check(look is not None and len(looks_driven) == 1 and looks_driven[0].driver.is_simple_expression
+          and any(n.bl_idname == "CompositorNodeCryptomatteV2" for n in compositor._look_nodes(tree))
+          and off_ == 0.0 and on_ == 1.0 and not draw_panels(bpy.context),
+          "silhouette: the look spliced into the compositor, on round the moment only (%s at 1, %s at %d; %s)"
+          % (off_, on_, at_big + 1, [d.driver.expression for d in looks_driven]))
+    s.look_style = "SONG"
+    check(sum(n.name == compositor.LOOK for n in tree.nodes) == 1
+          and any(n.bl_idname == "CompositorNodeBoxMask" for n in compositor._look_nodes(tree)),
+          "old painting: the look rebuilt in its own style")
+    s.look_style = "NONE"
+    outputs = [n for n in tree.nodes if n.bl_idname in ("CompositorNodeComposite", "NodeGroupOutput")]
+    check(not compositor._look_nodes(tree) and outputs and outputs[0].inputs[0].links,
+          "look off: taken out of the compositor, the picture joined up again")
+
+    s.holo_enable = True
+    for style in ("STARS", "SHADOW", "ICE", "SCAN"):
+        s.holo_style = style
+        mats = set(effect._glow_materials(new_mesh, s))
+        check(mats and all(m.get(materials.P_HOLO) == style for m in mats), "veil: %s on the new outfit" % style)
+    s.holo_enable = False
+    check(not any(m.get(materials.P_HOLO) for m in effect._glow_materials(new_mesh, s)), "veil off: gone")
+
+    blends = {m.name: getattr(m, "blend_method", None) for m in effect._glow_materials(old_mesh, s)}
+    s.old_surface, s.particles = "PAPERCUT", "PAPER_BIRD"
+    mats = set(effect._glow_materials(old_mesh, s))
+    bird = bpy.data.objects.get(particles.PAPER_BIRD)
+    check(mats and all(m.get(materials.P_SURFACE) == "PAPERCUT" for m in mats) and bird is not None
+          and bird.data.materials[0].name == materials.PAPER_MATERIAL and not draw_panels(bpy.context),
+          "paper cut over the old outfit, red paper birds")
+    s.old_surface, s.particles = "NONE", "NONE"
+    check(all(getattr(m, "blend_method", None) == blends[m.name] and not m.get(materials.P_SURFACE)
+              for m in effect._glow_materials(old_mesh, s)), "paper cut off: the old outfit's materials as they were")
+
+    s.path, s.ring_enable, s.ring_style, s.entrance = "SPIRAL", True, "WATER", "GROW"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the spiral with the band of toon water")
+    band = rings.ring_objects(s.mask)
+    scene.frame_set(50)
+    check(len(band) == 1 and len(material_points(band[0], materials.WATER_RING_MATERIAL)) > 100,
+          "toon water: a band of water at the front of the spiral")
+    s.ring_enable = False
+    if made_camera is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.11 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature
@@ -2386,7 +2695,38 @@ def run():
             check(s.path == "GARMENTS" and s.garment_order == "DOWN", "idol preset: garment by garment from the top")
         if key == "SOUL_RINGS":
             check(s.soul_enable and s.soul_count == 7, "soul rings preset: seven soul rings")
+        if key in ("DOMAIN", "CRIMSON", "FLOWER_FIELD", "SKY_MIRROR", "CONCERT"):
+            check(s.domain_enable and len(domain.world_objects(s.mask)) == 1, "%s preset: the %s world opens"
+                  % (key, s.domain_style.lower()))
+        if key in ("BULLET_TIME", "VELOCITY"):
+            check(s.time_warp == ("FREEZE" if key == "BULLET_TIME" else "SLOW") and s.shot_enable,
+                  "%s preset: time %s, a camera move" % (key, s.time_warp.lower()))
+        if key in ("CONCERT", "SLEEVES", "NEZHA"):
+            check(s.trail_enable and len(trails.objects(s.mask, "TRAIL")) == 1, "%s preset: dance ribbons (%s)"
+                  % (key, s.trail_style.lower()))
+        if key in ("SQUISH", "PAPER_FLIP", "CARD_FLIP"):
+            check(s.toon_style != "NONE" and s.entrance in effect.AT_ONCE and len(toon.anchors(s.mask)) == 1,
+                  "%s preset: cartoon physics (%s)" % (key, s.toon_style.lower()))
+        if key in ("SPLIT", "FIGURINE"):
+            check(s.exit_style == "HUSK" and (s.husk_motion == "DANCE" if key == "SPLIT" else s.husk_away == "FIGURINE"),
+                  "%s preset: the old self left beside the dancer" % key)
+        if key in ("SILHOUETTE", "SONG_PAINTING"):
+            tree = compositor._existing_tree(scene)
+            check(tree is not None and tree.nodes.get(compositor.LOOK) is not None, "%s preset: the picture's look"
+                  % key)
+        if key == "STARRY_VEIL":
+            check(all(m.get(materials.P_HOLO) == "STARS" for m in effect._glow_materials(target.meshes[0], s)),
+                  "starry veil preset: the veil of stars on the new outfit")
+        if key == "PAPER_CUT":
+            check(s.old_surface == "PAPERCUT" and bpy.data.objects.get(particles.PAPER_BIRD) is not None,
+                  "paper cut preset: the paper cut, paper birds")
+        if key == "WATER_BREATHING":
+            check(s.ring_style == "WATER" and len(rings.ring_objects(s.mask)) == 1,
+                  "water breathing preset: the band of toon water")
     s.beat_sync = False  # (the beat drop preset turned it on; the finale checks below are not on the beat)
+    s.frame_start, s.frame_end = 1, 100
+    check(bpy.ops.mmd_disperse.apply_preset(preset="MAGICAL") == {"FINISHED"}, "magical girl preset again (the 1.11 "
+          "presets came after it)")
     check(s.path == "SURFACE" and s.seeds == "LIMBS" and s.ribbon_enable and s.particles == "STAR",
           "magical girl preset applied (and rebuilt)")
     strands = ribbons.ribbon_objects(s.mask)

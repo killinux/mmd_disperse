@@ -8,7 +8,8 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import arrival, beats, compositor, impact, launch, materials, motion, particles, ribbons, rings, venom
+from . import (arrival, beats, compositor, domain, impact, launch, materials, motion, particles, ribbons, rings, shots,
+               timewarp, toon, trails, venom)
 from . import model as mdl
 from .node_groups import BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups, input_identifiers
 
@@ -94,6 +95,8 @@ SIZE_RATIOS = {
     "flame_width": 0.1,
     "flame_height": 0.12,
     "shock_size": 0.6,
+    "split_distance": 0.4,
+    "trail_width": 0.035,
 }
 PAINT_STYLES = ("NONE", "LINEART", "INK", "CODE")
 PAINT_CELL = 0.012  # size of the hatching / washes of the drawings, fraction of the model height
@@ -117,8 +120,11 @@ SHOCK_SPAN = 0.2  # share of the wave the shockwave takes to spread
 SOUL_PEAK = 0.6  # share of the big moment by which the soul rings have risen ...
 SOUL_AFTER = 0.3  # ... and the share of the wave they stay after it
 HUSK_RISE = 0.5  # how far the husk floats up, in model heights
+SPLIT_SLIDE = 0.06  # share of the wave the old self takes to step out beside the dancer
+FIGURINE_AWAY = (0.3, 0.12)  # where the figurine lands: to the side and towards the camera, in model heights
 SHATTER_AT = 1.0  # share of the wave at which the old outfit goes all at once (exit timing): when the wave is done
 BEAT_REACH = 2.0  # seconds a moment may wait for the next beat
+WORLD_CLOSE = 0.12  # share of the wave the world change takes to shatter or close back
 NOISE_CELLS_PER_HEIGHT = 6.0
 
 
@@ -171,6 +177,11 @@ def _insert_scale_keys(mask, frames_values, interpolation):
             mask.keyframe_insert("scale", frame=frame)
     finally:
         prefs.keyframe_new_interpolation_type = old
+    # (set on the keys too: Blender 3.6 run from the command line keeps Bezier keys whatever the preference says)
+    for fc in _scale_curves(mask):
+        for key in fc.keyframe_points:
+            key.interpolation = interpolation
+        fc.update()
 
 
 def _create_mask(settings, location, armature, bone, collection, radius_max, path, root=None, axis=None, speed=0.0):
@@ -298,7 +309,17 @@ def _extra(settings, wave, has_base, has_target):
         extra = max(extra, big + SHOCK_SPAN * wave - wave)
     if settings.soul_enable:
         extra = max(extra, big + SOUL_AFTER * wave - wave)
+    if settings.domain_enable:  # 1.11: the world change stays a while, then shatters or closes back
+        extra = max(extra, _world_times(settings, wave, big)[2] - wave)
     return extra
+
+
+def _world_times(settings, wave, big):
+    """(open end, close start, close end) of the world change in mask radius: it opens over a share of the way to the
+    big moment `big`, stays for a share of the wave after it and then shatters or closes back."""
+    open_end = max(settings.domain_open * big, 1e-3 * max(wave, 1e-3))
+    close_start = big + settings.domain_hold * wave
+    return open_end, close_start, close_start + WORLD_CLOSE * wave
 
 
 def _scale_curves(ob):
@@ -492,9 +513,15 @@ def remove_effect(mask):
         if settings is not None and settings.mask == mask:
             compositor.update_white_flash(scene, None, 0.0, 0.0, 0.0, 0.0)
             compositor.update_impact(scene, None, 0)
+            compositor.remove_look(scene)
     ribbons.remove(mask)
     rings.remove(mask)
     impact.remove(mask)
+    domain.remove(mask)
+    shots.remove(mask)
+    timewarp.restore(mask)
+    toon.remove(mask)
+    trails.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
     bpy.data.objects.remove(mask)
     if action is not None and action.users == 0:
@@ -549,7 +576,7 @@ def _update_hologram(ob, settings):
     spacing = HOLO_LINE_SPACING * max(settings.size_reference, 1e-3)
     for mat in _glow_materials(ob, settings):
         if settings.holo_enable:
-            materials.add_hologram(mat)
+            materials.add_hologram(mat, settings.holo_style)
             materials.update_hologram(mat, settings.glow_color, settings.holo_strength, settings.holo_opacity,
                                       spacing)
         else:
@@ -684,6 +711,29 @@ def _update_ring(settings, mask, beat):
     rings.sync(settings, mask, layout.to_dict(), beat)
 
 
+def _update_world(settings, mask, wave, big):
+    """Create / remove the world change to match the panel and push its values: it opens round the middle of the
+    body, past wherever the camera is while it is there."""
+    current = domain.world_objects(mask)
+    meshes = [ob for ob in effect_objects(mask) if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
+    if not settings.domain_enable or wave <= 0.0 or not meshes:
+        if current:
+            domain.remove(mask)
+        return
+    if not current:
+        collection = mask.users_collection[0] if mask.users_collection else settings.id_data.collection
+        domain.create(mask, collection)
+    lo, hi = mdl.rest_bounds(meshes)
+    height = max(hi.z - lo.z, 1e-3)
+    centre = _focus(mask)
+    open_end, close_start, close_end = _world_times(settings, wave, big)
+    last = _frame_at(mask, close_end)
+    first = settings.frame_start
+    last = int(last) if last is not None else max(settings.frame_end, first + 1)
+    reach = domain.camera_reach(settings.id_data, mask, centre, first, last, height)
+    domain.sync(settings, mask, centre, lo.z, height, open_end, close_start, close_end, reach)
+
+
 def _particle_object(settings):
     """Object the old outfit's particles are made of (built-in petal / butterfly, or the user's)."""
     if settings.particles == "OBJECT":
@@ -763,13 +813,50 @@ def update_impact(settings):
     at = _frame_at(mask, _impact_start(settings, mask, wave))
     first = None if at is None else int(math.ceil(at - 1e-6))
     compositor.update_impact(scene, first, settings.impact_frames)
-    if settings.speed_lines and scene.camera is not None and first is not None:
+    camera = shots.carrier(scene, mask)
+    if settings.speed_lines and camera is not None and first is not None:
+        if any(ob.parent != camera for ob in impact.sheets(mask)):  # (a camera move came or went)
+            impact.remove(mask)
         if not impact.sheets(mask):
             collection = mask.users_collection[0] if mask.users_collection else scene.collection
-            impact.create(scene, mask, collection)
-        impact.sync(scene, mask, _focus(mask), first, settings.impact_frames)
+            impact.create(scene, mask, collection, camera)
+        impact.sync(scene, mask, _focus(mask), first, settings.impact_frames, shots.user_camera(scene, mask))
     else:
         impact.remove(mask)
+
+
+def _big_frame(settings, mask, wave):
+    """The first whole frame of the big moment (where the impact frames start: a frame after the swap or the new
+    outfit complete, or as the front sets off from a move of the dance); None without mask keys."""
+    if mask is None or wave <= 0.0:
+        return None
+    at = _frame_at(mask, _impact_start(settings, mask, wave))
+    return None if at is None else int(math.ceil(at - 1e-6))
+
+
+def _models(settings):
+    return [m for m in (mdl.resolve(settings.base) if settings.base else None,
+                        mdl.resolve(settings.target) if settings.target else None) if m]
+
+
+LOOK_BEFORE = 0.4  # share of the look's time it comes before the big moment
+
+
+def _update_look(settings, moment):
+    """The picture's look round the big moment (compositor.update_look): on from a little before it for Look Time;
+    the dancer it picks out (the silhouette, the colour that stays, the painted figure) is both outfits."""
+    scene = settings.id_data
+    if settings.look_style == "NONE" or moment is None:
+        compositor.remove_look(scene)
+        return
+    fps = scene.render.fps / scene.render.fps_base
+    span = max(int(round(settings.look_length * fps)), 1)
+    first = moment - int(round(LOOK_BEFORE * span))
+    dancer = [ob for m in _models(settings) for ob in m.meshes]
+    try:
+        compositor.update_look(scene, settings.look_style, first, first + span, dancer, tuple(settings.look_color))
+    except RuntimeError:  # (no compositor output)
+        pass
 
 
 def update_white_flash(settings):
@@ -819,7 +906,8 @@ def _record_parts(settings, role, shown=False):
     switching between flakes and chunks needs no new recording."""
     if role == "BASE":
         pieces = settings.exit_style == "CHUNKS"
-        vertices = settings.exit_style in FLAKES or settings.particles != "NONE" or settings.exit_style == "HUSK"
+        vertices = (settings.exit_style in FLAKES or settings.particles != "NONE"
+                    or (settings.exit_style == "HUSK" and settings.husk_motion == "STILL"))
         return vertices or (pieces and not shown), pieces
     stars = settings.finale and settings.finale_sparkles > 0
     # with Subdivide the fly-in pieces are cut from another mesh than the one recorded
@@ -827,8 +915,9 @@ def _record_parts(settings, role, shown=False):
 
 
 def _recording(settings, role):
-    """True when the meshes of `role` are recorded: with leave behind, or the old outfit for its husk."""
-    return settings.leave_behind or (role == "BASE" and settings.exit_style == "HUSK")
+    """True when the meshes of `role` are recorded: with leave behind, or the old outfit for its husk (one that holds
+    still: a husk dancing beside the dancer is the live old self)."""
+    return settings.leave_behind or (role == "BASE" and settings.exit_style == "HUSK" and settings.husk_motion == "STILL")
 
 
 def missing_recording(settings):
@@ -852,8 +941,17 @@ def sync(settings):
         return
     objects = effect_objects(mask)
     _retime(settings, mask, objects)
+    # 1.11: the dance frozen or slowed round the big moment (before anything below plays it), the camera move then
+    wave_big = float(mask.get(P_WAVE, 0.0))
+    big_frame = _big_frame(settings, mask, wave_big)
+    timewarp.sync(settings, mask, _models(settings), big_frame)
     update_white_flash(settings)
     update_impact(settings)
+    models = _models(settings)
+    focus = _focus(mask)
+    shots.sync(settings, mask, big_frame, focus, models[0].armature if models else None,
+               max(settings.size_reference, 1e-3))
+    _update_look(settings, big_frame)
     wire = bpy.data.materials.get(WIRE_MATERIAL)
     materials.update_wire_material(wire, settings)
     shape = _particle_object(settings)
@@ -896,6 +994,9 @@ def sync(settings):
     scene = settings.id_data
     wave_at = float(mask.get(P_WAVE, 0.0))
     big = _finale_start(settings, wave_at, mask)
+    # 1.11: the dance ribbons and the flowers underfoot (whose lotus shares the lotus entrance's material)
+    models = _models(settings)
+    trails.sync(settings, mask, next(iter(models), None), [ob for m in models for ob in m.meshes])
     lotus = settings.entrance == "LOTUS"
     if lotus:
         materials.ensure_lotus_material()
@@ -911,6 +1012,13 @@ def sync(settings):
         materials.ensure_soul_material()
     materials.update_soul_material(settings.soul_strength)
     shock_start = _impact_start(settings, mask, wave_at) if wave_at > 0.0 else 0.0
+    _update_world(settings, mask, wave_at, big)
+    # 1.11: cartoon physics at the big moment (the first frame of it: the swap, or the new outfit complete), about an
+    # anchor under the old model's hips; the float lands then
+    landing = _frame_at(mask, big) if wave_at > 0.0 else None
+    landing = None if landing is None else int(math.ceil(landing - 1e-6))
+    toon_anchor = toon.sync(settings, mask, next(iter(_models(settings)), None), settings.frame_start, landing)
+    fps = scene.render.fps / scene.render.fps_base
     common = {
         "Mask": mask,
         "Use Rest Position": settings.space == "REST",
@@ -976,6 +1084,12 @@ def sync(settings):
         "Soul Peak": SOUL_PEAK * big,
         "Soul End": big + SOUL_AFTER * wave_at,
         "Soul Material": bpy.data.materials.get(materials.SOUL_MATERIAL),
+        "Toon": toon.SHAPES.get(settings.toon_style, 0) if toon_anchor is not None and landing is not None else 0,
+        "Toon Frame": float(landing or 0),
+        "Toon Rate": 30.0 / max(fps, 1e-3),
+        "Toon Anchor": toon_anchor,
+        "Toon Gap": toon.GAP * height,
+        "Card Material": bpy.data.materials.get(materials.TOON_CARD_MATERIAL),
     }
     values = {
         TARGET_GROUP: dict(common, **{
@@ -1066,6 +1180,11 @@ def sync(settings):
             "Husk Span": settings.husk_time * wave_at,
             "Husk Float": settings.husk_away == "FLOAT",
             "Husk Rise": HUSK_RISE * height,
+            "Husk Dance": settings.husk_motion == "DANCE",
+            "Split Slide": SPLIT_SLIDE * wave_at,
+            "Split Mirror": settings.split_mirror,
+            "Husk Figurine": settings.husk_away == "FIGURINE",
+            "Stand Material": materials.ensure_stand_material() if settings.husk_away == "FIGURINE" else None,
             # the husk is the old outfit at one moment: all of it goes then, none of it a little before or after
             "Clamp Jitter": 0.0 if settings.exit_style == "HUSK" else 0.04,
         }),
@@ -1103,6 +1222,7 @@ def sync(settings):
             if launch.space(ob) is not None:
                 own["Launch Space"] = launch.space(ob)
         if role == "BASE":
+            own["Split Offset"], own["Figurine Offset"] = _beside(settings, height)
             brooch = mask.get(P_BROOCH)
             if brooch is not None:  # the rest pose is in object space
                 own["Suck Target"] = tuple(ob.matrix_world.inverted() @ Vector(brooch))
@@ -1161,6 +1281,23 @@ def sync(settings):
             _update_shadow(ob, settings)
 
 
+def _beside(settings, height):
+    """(world offsets) where the old self steps out to dance beside the dancer, and where its figurine lands: to the
+    side the panel says as the scene camera sees it (level), the figurine a little towards the camera too."""
+    camera = settings.id_data.camera
+    right, toward = Vector((1.0, 0.0, 0.0)), Vector((0.0, -1.0, 0.0))
+    if camera is not None:
+        m = camera.matrix_world.to_3x3()
+        right = Vector((m.col[0].x, m.col[0].y, 0.0))
+        toward = Vector((m.col[2].x, m.col[2].y, 0.0))
+        right = right.normalized() if right.length > 1e-6 else Vector((1.0, 0.0, 0.0))
+        toward = toward.normalized() if toward.length > 1e-6 else Vector((0.0, -1.0, 0.0))
+    side = 1.0 if settings.split_side == "RIGHT" else -1.0
+    step = right * (side * settings.split_distance)
+    figurine = (right * (side * FIGURINE_AWAY[0]) + toward * FIGURINE_AWAY[1]) * height
+    return tuple(step), tuple(figurine)
+
+
 def _seeds(settings, location, model):
     seeds = [] if settings.seeds == "LIMBS" else [location]
     if settings.seeds != "ORIGIN":
@@ -1177,6 +1314,7 @@ def _find_move(context, settings, owner, meshes, height):
     first = settings.frame_start
     frames = list(range(first, max(scene.frame_end, first + 1) + 1))
     track = motion.play(scene, owner.armature, frames, hidden=meshes)
+    motion.read_winks(track, owner.meshes)
     hit = motion.find(track, settings.trigger, height, fps)
     if hit is None:
         return None
@@ -1196,7 +1334,10 @@ def _hand_arrival(context, settings, owner, meshes, height, location):
     start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
     speed = height / float(end - start)
     sides = {"BOTH": ("L", "R"), "LEFT": ("L",), "RIGHT": ("R",)}[settings.hand_side]
-    touches = motion.hand_touches(scene, owner.armature, meshes, range(start, end + 1), sides, settings.hand_reach)
+    reach = settings.hand_reach
+    if settings.trail_enable and settings.trail_style in ("SLEEVE", "SASH"):
+        reach += settings.trail_width  # (the silk sweeps a wider way than the bare hand)
+    touches = motion.hand_touches(scene, owner.armature, meshes, range(start, end + 1), sides, reach)
     known = [np.where(np.isfinite(t), (t - start) * speed, np.inf) for t in touches]
     points = [mdl.rest_points_world(ob) for ob in meshes]
     tris = [arrival._triangles(ob) for ob in meshes]
@@ -1241,7 +1382,9 @@ def build(context, settings):
     if base.root is not None and base.root == target.root:
         raise EffectError("Old and new outfit must be different models")
 
-    # Rebuilding replaces any effect already attached to these meshes.
+    # Rebuilding replaces any effect already attached to these meshes (and the dance warped by one is put back first:
+    # the moves of the dance and the hands are looked for in it as it is).
+    timewarp.restore_models([target, base])
     for ob in target.meshes + base.meshes:
         old = ob.get(P_MASK)
         if isinstance(old, bpy.types.Object):
@@ -1339,8 +1482,9 @@ def build(context, settings):
     if speed > 0.0:  # the hand path runs at its own pace: the transformation lasts as long as that takes
         mask[P_SPEED] = speed
         settings.frame_end = int(math.ceil(settings.frame_start + radius / speed))
-    if found is not None and settings.trigger == "TURN" and path != "HAND":
-        # the swap (or the middle of the wave) as the back is turned to the camera
+    if found is not None and settings.trigger in motion.MOMENTS and path != "HAND":
+        # the swap (or the middle of the wave) as the back is turned to the camera, at the bottom of the squat, the top
+        # of the jump, as the feet land
         aim = _moment(settings, wave) if _old_at_once(settings) else 0.5 * wave
         at = _frame_at(mask, aim)
         if at is not None:

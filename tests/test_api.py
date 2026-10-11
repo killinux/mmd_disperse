@@ -2220,6 +2220,20 @@ def run():
     check(len(worlds) == 1 and shut == 0 and opened > 0,
           "world change: nothing of it at the start, the world there at the big moment (%d, %d vertices)"
           % (shut, opened))
+    # the concert's spotlight follows the dancer: an empty of ours on her centre bone (Copy Location, level), only on
+    # the stage
+    style_was = s.domain_style
+    s.domain_style = "STAGE"
+    follows = [ob for ob in bpy.data.objects if ob.get(domain.P_FOLLOW) == s.mask]
+    arm = base.armature
+    hips = next((n for n in toon.CENTER_BONES if arm is not None and n in arm.data.bones), None)
+    check(len(follows) == 1 and (hips is None or any(c.type == "COPY_LOCATION" and c.target == arm
+                                                     and c.subtarget == hips for c in follows[0].constraints)),
+          "concert stage: an empty for the spotlight to follow, on the centre bone (%s)" % hips)
+    s.domain_style = "VOID"
+    check(not [ob for ob in bpy.data.objects if ob.get(domain.P_FOLLOW) == s.mask],
+          "another world: no spotlight to follow")
+    s.domain_style = style_was
     s.domain_enable = False
     check(not domain.world_objects(s.mask), "world change switched off: its object gone")
     # (the world staying after the moment stretched the mask's timeline: without it the moment comes later)
@@ -2243,6 +2257,22 @@ def run():
     check(roles == ["EYES", "LOW", "WIDE"] and len(cut_marks) >= 4 and cut_marks[-1][1] == user.name,
           "ultimate cuts: a low angle, the eyes and a wide shot, then back to the scene camera (%s, %s)"
           % (roles, cut_marks))
+    # (the low angle follows the hips across the floor only: a squat must not take it under the floor)
+    low = next((ob for ob in camera_moves.shot_objects(s.mask) if ob.get(camera_moves.P_ROLE) == "LOW"), None)
+    hips_bone = next((arm.pose.bones[n] for n in camera_moves.CENTER_BONES if n in arm.pose.bones), None)
+    if low is not None and hips_bone is not None:
+        bpy.context.view_layer.update()
+        stood = low.matrix_world.translation.copy()
+        rest_matrix = hips_bone.matrix.copy()
+        shift = Vector((0.3 * height, 0.0, -0.3 * height))  # (in the world: aside and down)
+        hips_bone.matrix = arm.matrix_world.inverted() @ Matrix.Translation(shift) @ arm.matrix_world @ rest_matrix
+        bpy.context.view_layer.update()
+        squat = low.matrix_world.translation.copy()
+        hips_bone.matrix = rest_matrix
+        bpy.context.view_layer.update()
+        check(abs(squat.z - stood.z) < 1e-3 * height and abs(squat.x - stood.x - shift.x) < 0.02 * height,
+              "ultimate cuts: the low angle follows the hips across the floor, not down into a squat (moved %s)"
+              % (tuple(round(v, 3) for v in squat - stood),))
     s.shot_enable = False
     scene.frame_set(at_big)
     check(not camera_moves.shot_objects(s.mask) and scene.camera is user

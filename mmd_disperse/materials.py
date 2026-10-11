@@ -5,8 +5,8 @@ lotus, the soul rings and the shockwave."""
 
 import bpy
 
-from .node_groups import (ATTR_ACROSS, ATTR_AHEAD, ATTR_BAND, ATTR_BEAM, ATTR_CARD, ATTR_CUT, ATTR_DIR, ATTR_DOMAIN,
-                          ATTR_EDGE, ATTR_FLAME,
+from .node_groups import (ATTR_ACROSS, ATTR_AHEAD, ATTR_AXIS, ATTR_BAND, ATTR_BEAM, ATTR_CARD, ATTR_CUT, ATTR_DIR,
+                          ATTR_DOMAIN, ATTR_EDGE, ATTR_FLAME,
                           ATTR_FLAME_CARD, ATTR_FLAME_SEED, ATTR_FRAME, ATTR_GROUND, ATTR_HOLO, ATTR_HUSK, ATTR_LAYER,
                           ATTR_PAINT, ATTR_PETAL, ATTR_REST, ATTR_SCREEN, ATTR_SCREEN_STYLE, ATTR_SHADOW, ATTR_SMOKE,
                           ATTR_SOUL, ATTR_TRAIL, ATTR_WATER)
@@ -2794,11 +2794,18 @@ def _floor_shader(s, style, g, frame, opened, accent, x, y):
                                                                                                y - 1000),
                                                                                       glow, x + 2200, y - 800),
                             normal=bump.outputs["Normal"])
-    # STAGE: a glossy black stage, a pool of light where the dancer stands
-    pool = s.math("SUBTRACT", 1.0, s.smooth(rr, 0.04, 0.12, x + 600, y - 600), x=x + 800, y=y - 600)
+    # STAGE: a black stage with a sheen (rough enough that the scene's own world, a studio HDRI say, does not glare
+    # in it seen from high up), a pool of light under the spotlight, following the dancer (ATTR_AXIS: its middle from
+    # the centre and its radius, in Reach)
+    sx, sy, sr = s.split(s.attribute(ATTR_AXIS, x + 200, y - 900).outputs["Vector"], x + 400, y - 900)
+    off = s.vmath("LENGTH", s.vmath("SUBTRACT", flat, s.combine(sx, sy, 0.0, x + 600, y - 900), x=x + 800, y=y - 800),
+                  x=x + 1000, y=y - 800)
+    pool = s.math("SUBTRACT", 1.0, s.smooth(off, s.math("MULTIPLY", sr, 0.45, x=x + 600, y=y - 1100),
+                                            s.math("MULTIPLY", sr, 1.3, x=x + 600, y=y - 1250), x + 1200, y - 800),
+                  x=x + 1400, y=y - 800)
     light = s.add(glow, s.scaled((1.0, 0.85, 0.6), s.math("MULTIPLY", pool, 1.5, x=x + 1000, y=y - 700), x + 1200,
                                  y - 600), x + 1400, y - 500)
-    return s.principled(x + 2800, y, (0.006, 0.006, 0.008), 0.18, emission=light)
+    return s.principled(x + 2800, y, (0.006, 0.006, 0.008), 0.4, emission=light)
 
 
 def _prop_shader(s, style, out, x, y):
@@ -2819,8 +2826,8 @@ def _prop_shader(s, style, out, x, y):
         _cx, _cy, cz = s.split(coords.outputs["Object"], x + 200, y - 300)
         color = s.lerp(petal, (1.0, 0.85, 0.2), s.math("GREATER_THAN", cz, 0.01, x=x + 400, y=y - 300), x + 600, y)
         shader = s.principled(x + 800, y, color, 0.6, emission=color, strength=0.25)
-    else:  # STAGE: beams of light, fading up their length and to their sides; the spotlight round the dancer
-        # (ATTR_EDGE 1 on its instance) glows on its far wall only, behind the dancer, so it never veils her
+    else:  # STAGE: beams of light, fading up their length and to their sides, and the spotlight round the dancer
+        # (ATTR_EDGE 1 on its instance, a little dimmer); all of it glows only beyond the dancer, so it never veils her
         coords = s.node("ShaderNodeTexCoord", x, y)
         _gx, _gy, gz = s.split(coords.outputs["Generated"], x + 200, y)
         facing = s.node("ShaderNodeLayerWeight", x, y - 300)
@@ -2828,26 +2835,27 @@ def _prop_shader(s, style, out, x, y):
         spot = s.attribute(ATTR_EDGE, x - 200, y - 600, kind="INSTANCER").outputs["Fac"]
         side = s.math("POWER", s.math("SUBTRACT", 1.0, facing.outputs["Facing"], x=x + 400, y=y - 300), 2.0, x=x + 600,
                       y=y - 300)
-        # (far: the wall is farther from the camera, level, than the cone's axis, so it never comes between them,
-        # not even when the camera is inside the cone: a close-up riding on the head)
+        # (far: farther from the camera, level, than where the dancer is now (ATTR_AXIS, the spotlight follows her),
+        # so neither the spotlight's near wall nor a beam comes between them, not even when the camera is inside the
+        # cone: a close-up riding on the head)
         geometry = s.node("ShaderNodeNewGeometry", x - 600, y - 800)
         view = s.node("ShaderNodeCameraData", x - 600, y - 1100)
         where = geometry.outputs["Position"]
         camera = s.vmath("ADD", where, s.vmath("SCALE", geometry.outputs["Incoming"], scale=view.outputs["View Distance"],
                                                x=x - 400, y=y - 950), x=x - 200, y=y - 900)
-        axis = s.node("ShaderNodeObjectInfo", x - 600, y - 1300).outputs["Location"]
+        axis = s.attribute(ATTR_AXIS, x - 600, y - 1300, kind="INSTANCER").outputs["Vector"]
         level = (1.0, 1.0, 0.0)
         to_wall = s.vmath("LENGTH", s.vmath("MULTIPLY", s.vmath("SUBTRACT", where, camera, x=x, y=y - 850), level,
                                             x=x + 200, y=y - 850), x=x + 400, y=y - 850)
         to_axis = s.vmath("LENGTH", s.vmath("MULTIPLY", s.vmath("SUBTRACT", axis, camera, x=x, y=y - 1100), level,
                                             x=x + 200, y=y - 1100), x=x + 400, y=y - 1100)
-        far = s.math("MULTIPLY", s.smooth(to_wall, to_axis, s.math("MULTIPLY", to_axis, 1.05, x=x + 400, y=y - 1250),
-                                          x + 600, y - 950), 0.8, x=x + 800, y=y - 950)
-        profile = s.math("MULTIPLY", side, s.math("ADD", 1.0, s.math("MULTIPLY", spot, s.math(
-            "SUBTRACT", far, 1.0, x=x + 400, y=y - 800), x=x + 600, y=y - 700), x=x + 800, y=y - 650), x=x + 1000,
-                         y=y - 450)
+        far = s.smooth(to_wall, to_axis, s.math("MULTIPLY", to_axis, 1.05, x=x + 400, y=y - 1250), x + 600, y - 950)
+        profile = s.math("MULTIPLY", s.math("MULTIPLY", side, far, x=x + 800, y=y - 800),
+                         s.math("MULTIPLY_ADD", spot, -0.2, 1.0, x=x + 600, y=y - 650), x=x + 1000, y=y - 450)
+        # (fading in from its tip too: the tips of beams seen one behind the other add up to a glaring spot)
         amount = s.math("MULTIPLY", s.math("POWER", s.math("SUBTRACT", 1.0, gz, x=x + 400, y=y), 1.5, x=x + 600, y=y),
-                        profile, x=x + 800, y=y)
+                        s.math("MULTIPLY", profile, s.smooth(gz, 0.0, 0.06, x + 600, y + 200), x=x + 800, y=y + 200),
+                        x=x + 1000, y=y)
         add = s.node("ShaderNodeAddShader", x + 1200, y)
         s.feed(add.inputs[0], s.emission((0.75, 0.85, 1.0), s.math("MULTIPLY", amount, 4.0, x=x + 1000, y=y),
                                          x + 1000, y + 200))

@@ -26,7 +26,7 @@ import math
 
 import bpy
 
-VERSION = 16
+VERSION = 17
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
@@ -84,6 +84,8 @@ ATTR_HUSK = "disperse_husk"  # the old outfit's husk left behind: 1 solid .. 0 g
 ATTR_DIR = "mmdd_dir"  # the world change's sky: the direction from its centre (a unit vector)
 ATTR_GROUND = "mmdd_ground"  # ... its floor: x, y from the centre and z the floor's radius now, all in Reach
 ATTR_DOMAIN = "mmdd_domain"  # ... all of it: x how far it has opened (0 .. 1), y how far it has closed, z the frame
+ATTR_AXIS = "mmdd_axis"  # ... the stage: on its lights' instances where the dancer is (they light up only beyond her),
+# on its floor the spotlight's pool (x, y its middle from the centre, z its radius, in Reach)
 ATTR_CARD = "mmdd_card"  # the card of the cartoon physics: x, y across it (0 .. 1)
 ATTR_T = "mmdd_t"  # the dance ribbons and the flowers underfoot (trails.py): the frame a recorded point is from
 ATTR_TRAIL = "mmdd_trail"  # ... a ribbon: x how far back along it (0 at the hand .. 1), y how far it is shown
@@ -432,6 +434,7 @@ DOMAIN_INPUTS = (
     ("Ground Material", "NodeSocketMaterial", None, None, None, None),
     ("Prop Material", "NodeSocketMaterial", None, None, None, None),
     ("Rim Material", "NodeSocketMaterial", None, None, None, None),
+    ("Follow", "NodeSocketObject", None, None, None, None),  # the stage's spotlight follows it (the dancer's hips)
 )
 
 # Inputs measured in object space: the add-on's sizes are world units, divided by the object's scale.
@@ -1627,7 +1630,8 @@ def _toon(b, gi, geometry, new, x, y):
     (Toon 1): the body squashes down to SQUASH of its height over five frames, keeping its volume, holds two and
     bounces back up, wobbling. Paper (2, 3): it presses into a sheet facing the camera, turns over about the up (the
     old outfit on one side, edge-on at the moment, the new one on the other: `new` turns half a turn behind) and puffs
-    back out; with 3 the main mesh draws a card in the plane of the sheet, the paper a little off it on either side."""
+    back out (on paper the old outfit, all but its locked parts, is gone once the sheet is edge-on); with 3 the main
+    mesh draws a card in the plane of the sheet, the paper a little off it on either side."""
     me = _self_info(b, x, y)
     anchor = b.node("GeometryNodeObjectInfo", x, y - 200, transform_space="RELATIVE")
     b.feed(anchor.inputs["Object"], gi.outputs["Toon Anchor"])
@@ -1681,18 +1685,26 @@ def _toon(b, gi, geometry, new, x, y):
     turn = b.math("MULTIPLY", b.map_range(tau, -TURN / 2, TURN / 2, x=x + 1400, y=y - 2500, smooth=True), math.pi,
                   x=x + 1600, y=y - 2500)
     behind = b.math("SUBTRACT", turn, math.pi, x=x + 1800, y=y - 2500)
+    after = b.compare("GREATER_EQUAL", tau, 0.0, x=x + 1600, y=y - 2800)
     if new:
         turn_own = behind
     else:  # the old model's locked parts (head, hair) stay with the dancer: on the new outfit's side after the moment
         locked = b.named_attribute(ATTR_LOCK, "BOOLEAN", x=x + 1400, y=y - 2700)[0]
-        swapped = b.boolean("AND", locked, b.compare("GREATER_EQUAL", tau, 0.0, x=x + 1600, y=y - 2800), x=x + 1800,
-                            y=y - 2700)
+        swapped = b.boolean("AND", locked, after, x=x + 1800, y=y - 2700)
         turn_own = b.switch("FLOAT", swapped, turn, behind, x=x + 2000, y=y - 2600)
     turned = b.vmath("ADD", c, b.rotate(v_flat, (0.0, 0.0, 0.0), up, turn_own, x=x + 2200, y=y - 2000), x=x + 2400,
                      y=y - 2000)
     moved = b.switch("VECTOR", b.compare("EQUAL", gi.outputs["Toon"], 1.0, x=x + 2800, y=y - 1200), turned, squashed,
                      x=x + 3000, y=y - 1300)
     shaped = b.set_position(geometry, position=moved, x=x + 3200, y=y)
+    if not new:
+        # on paper the rest of the old outfit is gone once the sheet is edge-on: on its back what is left of it while
+        # it goes would show round the new outfit and poke through it as that puffs out (off a card it bursts away)
+        on_back = b.boolean("AND", b.boolean("AND", b.boolean("NOT", locked, x=x + 2200, y=y - 2900), after,
+                                             x=x + 2400, y=y - 2900),
+                            b.compare("EQUAL", gi.outputs["Toon"], 2.0, x=x + 2400, y=y - 3050), x=x + 2600,
+                            y=y - 2950)
+        shaped = b.delete(shaped, on_back, "POINT", x=x + 3400, y=y)
     # --- the card in the plane of the sheet (drawn once, by the main mesh): a little taller than the body and three
     # fifths as wide, coming in as the body presses flat
     _mid_x, _mid_y, _floor, tall, _half = _body_box(b, gi.outputs["Geometry"], x, y - 3000)
@@ -4084,6 +4096,10 @@ def build_domain_group():
     tall = gi.outputs["Height"]
     floor = gi.outputs["Floor"]
     position = b.node("GeometryNodeInputPosition", -3200, 100).outputs[0]
+    follow = b.node("GeometryNodeObjectInfo", -3200, 1400, transform_space="RELATIVE")  # (where the dancer is now)
+    b.feed(follow.inputs["Object"], gi.outputs["Follow"])
+    fx, fy, _fz = b.split_xyz(follow.outputs["Location"], x=-3000, y=1400)
+    spot_r = b.math("MULTIPLY", tall, 0.28, x=-3000, y=1250)  # the spotlight's radius on the floor
 
     def placed(geometry, scale, x, y):
         tr = b.node("GeometryNodeTransform", x, y)
@@ -4153,7 +4169,13 @@ def build_domain_group():
         b.math("MULTIPLY_ADD", gx, ground_r, cx, x=-200, y=-2100), b.math("MULTIPLY_ADD", gy, ground_r, cy, x=-200,
                                                                             y=-2250),
         b.math("MULTIPLY_ADD", tall, 0.0015, floor, x=-200, y=-2400), x=0, y=-2200), x=200, y=-1900)
-    ground = shaded(b.store(ground, ATTR_DOMAIN, state, "FLOAT_VECTOR", x=400, y=-1900), "Ground Material", 600, -1900)
+    # (the pool of light under the spotlight, ATTR_AXIS: its middle from the centre and its radius, in Reach)
+    pool = b.combine(b.math("DIVIDE", b.math("SUBTRACT", fx, cx, x=-200, y=-2600), reach, x=0, y=-2600),
+                     b.math("DIVIDE", b.math("SUBTRACT", fy, cy, x=-200, y=-2750), reach, x=0, y=-2750),
+                     b.math("DIVIDE", spot_r, reach, x=0, y=-2900), x=200, y=-2700)
+    ground = b.store(b.store(ground, ATTR_DOMAIN, state, "FLOAT_VECTOR", x=400, y=-1900), ATTR_AXIS, pool,
+                     "FLOAT_VECTOR", x=400, y=-2100)
+    ground = shaded(ground, "Ground Material", 600, -1900)
 
     # --- props: scattered over the floor, each coming once the floor has spread over its spot
     pts = b.node("GeometryNodePoints", 600, -3200)
@@ -4270,23 +4292,27 @@ def build_domain_group():
                                                                             y=-9000), x=3600, y=-9000), left, x=3800,
                                 y=-9000),
                          feather_obj.outputs["Geometry"], 3800, -7600)
-    # beams of light round the stage, leaning in and sweeping (a cone standing on its tip)
+    # beams of light from the back of the stage, fanning out behind the dancer and swinging from side to side (a cone
+    # standing on its tip; each leans along the arc it stands on and a little back, never in over her)
     beam_pts = b.node("GeometryNodePoints", 2400, -9600)
     beam_pts.inputs["Count"].default_value = 10
     j = b.node("GeometryNodeInputIndex", 2000, -9800).outputs[0]
     angle = b.math("ADD", back_angle, b.math("MULTIPLY_ADD", j, 1.8 / 9.0, -0.9, x=2000, y=-9650), x=2200, y=-9800)
     ring_r = b.math("MULTIPLY", reach, 0.16, x=2200, y=-9950)
-    bx = b.math("MULTIPLY_ADD", b.math("COSINE", angle, x=2400, y=-9800), ring_r, cx, x=2600, y=-9800)
-    by = b.math("MULTIPLY_ADD", b.math("SINE", angle, x=2400, y=-9950), ring_r, cy, x=2600, y=-9950)
+    cos_a = b.math("COSINE", angle, x=2400, y=-9800)
+    sin_a = b.math("SINE", angle, x=2400, y=-9950)
+    bx = b.math("MULTIPLY_ADD", cos_a, ring_r, cx, x=2600, y=-9800)
+    by = b.math("MULTIPLY_ADD", sin_a, ring_r, cy, x=2600, y=-9950)
     beam_pts_at = b.set_position(beam_pts.outputs["Geometry"], position=b.combine(bx, by, floor, x=2800, y=-9850),
                                  x=3000, y=-9600)
-    lean = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.04, j, x=2800, y=-10200), x=3000,
-                                         y=-10200), 0.25, 0.45, x=3200, y=-10200)
-    inward_dir = b.combine(b.math("MULTIPLY", b.math("COSINE", angle, x=3000, y=-10400), -1.0, x=3200, y=-10400),
-                           b.math("MULTIPLY", b.math("SINE", angle, x=3000, y=-10550), -1.0, x=3200, y=-10550), 0.0,
-                           x=3400, y=-10450)
-    aim = b.vmath("ADD", b.vmath("SCALE", inward_dir, scale=b.math("SINE", lean, x=3400, y=-10250), x=3600, y=-10350),
-                  b.combine(0.0, 0.0, b.math("COSINE", lean, x=3400, y=-10650), x=3600, y=-10650), x=3800, y=-10450)
+    swing = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.06, b.math(
+        "MULTIPLY", j, 0.9, x=2600, y=-10300), x=2800, y=-10200), x=3000, y=-10200), 0.35,
+                   b.math("MULTIPLY_ADD", j, 0.9 / 9.0, -0.45, x=3000, y=-10350), x=3200, y=-10200)
+    along = b.combine(b.math("MULTIPLY", sin_a, -1.0, x=3000, y=-10550), cos_a, 0.0, x=3200, y=-10500)
+    away = b.vmath("SCALE", b.combine(cos_a, sin_a, 0.0, x=3200, y=-10700), scale=0.15, x=3400, y=-10700)
+    aim = b.vmath("ADD", b.vmath("SCALE", along, scale=b.math("SINE", swing, x=3400, y=-10250), x=3600, y=-10350),
+                  b.vmath("ADD", away, b.combine(0.0, 0.0, b.math("COSINE", swing, x=3400, y=-10850), x=3600,
+                                                 y=-10850), x=3600, y=-10700), x=3800, y=-10450)
     align = b.node("FunctionNodeAlignEulerToVector", 4000, -10450, axis="Z")
     b.feed(align.inputs["Vector"], aim)
     cone = b.node("GeometryNodeMeshCone", 2400, -9300, fill_type="NONE")
@@ -4294,35 +4320,32 @@ def build_domain_group():
     cone.inputs["Radius Top"].default_value = 1.0
     cone.inputs["Radius Bottom"].default_value = 0.03
     cone.inputs["Depth"].default_value = 1.0
-    smooth = b.node("GeometryNodeSetShadeSmooth", 2500, -9450)  # (its light varies with the facing: no facets)
+    smooth = b.node("GeometryNodeSetShadeSmooth", 2600, -9300)  # (its light varies with the facing: no facets)
     b.feed(smooth.inputs[0], cone.outputs["Mesh"])
-    stood = b.node("GeometryNodeTransform", 2600, -9300)
-    b.feed(stood.inputs["Geometry"], smooth.outputs[0])
-    stood.inputs["Translation"].default_value = (0.0, 0.0, 0.5)
+    stood = smooth.outputs[0]  # (Geometry Nodes' cone has its base at the origin: here its tip)
     lit = b.map_range(b.math("SUBTRACT", ground_r, ring_r, x=3400, y=-10900), 0.0,
                       b.math("MULTIPLY", reach, 0.05, x=3400, y=-11050), x=3600, y=-10900, smooth=True)
     lit = b.math("MULTIPLY", lit, b.math("SUBTRACT", 1.0, closed, x=3600, y=-11100), x=3800, y=-11000)
     beams = b.node("GeometryNodeInstanceOnPoints", 4200, -9600)
     b.feed(beams.inputs["Points"], beam_pts_at)
-    b.feed(beams.inputs["Instance"], shaded(stood.outputs["Geometry"], "Prop Material", 2800, -9300))
+    b.feed(beams.inputs["Instance"], shaded(stood, "Prop Material", 2800, -9300))
     b.feed(beams.inputs["Rotation"], align.outputs[0])
-    b.feed(beams.inputs["Scale"], b.vmath("SCALE", b.combine(b.math("MULTIPLY", tall, 0.3, x=4000, y=-11200),
-                                                             b.math("MULTIPLY", tall, 0.3, x=4000, y=-11350),
+    b.feed(beams.inputs["Scale"], b.vmath("SCALE", b.combine(b.math("MULTIPLY", tall, 0.12, x=4000, y=-11200),
+                                                             b.math("MULTIPLY", tall, 0.12, x=4000, y=-11350),
                                                              b.math("MULTIPLY", tall, 3.0, x=4000, y=-11500),
                                                              x=4200, y=-11350), scale=lit, x=4400, y=-11200))
-    # ... and a spotlight from high above onto the dancer (the cone upside down: brightest at its narrow end, the lamp)
+    # ... and a spotlight from high above following the dancer (Follow; the cone upside down: brightest at its narrow
+    # end, the lamp)
     spot_pt = b.node("GeometryNodePoints", 4000, -11800)
     spot_pt.inputs["Count"].default_value = 1
-    b.feed(spot_pt.inputs["Position"], b.combine(cx, cy, b.math("MULTIPLY_ADD", tall, 3.2, floor, x=3800, y=-12000),
+    b.feed(spot_pt.inputs["Position"], b.combine(fx, fy, b.math("MULTIPLY_ADD", tall, 3.2, floor, x=3800, y=-12000),
                                                  x=4000, y=-12000))
     spotlight = b.node("GeometryNodeInstanceOnPoints", 4200, -11800)
     b.feed(spotlight.inputs["Points"], spot_pt.outputs["Geometry"])
-    b.feed(spotlight.inputs["Instance"], shaded(stood.outputs["Geometry"], "Prop Material", 3800, -12200))
+    b.feed(spotlight.inputs["Instance"], shaded(stood, "Prop Material", 3800, -12200))
     spotlight.inputs["Rotation"].default_value = (math.pi, 0.0, 0.0)
-    b.feed(spotlight.inputs["Scale"], b.vmath("SCALE", b.combine(b.math("MULTIPLY", tall, 0.28, x=3800, y=-12400),
-                                                                 b.math("MULTIPLY", tall, 0.28, x=3800, y=-12550),
-                                                                 b.math("MULTIPLY", tall, 3.2, x=3800, y=-12700),
-                                                                 x=4000, y=-12550), scale=lit, x=4200, y=-12400))
+    b.feed(spotlight.inputs["Scale"], b.vmath("SCALE", b.combine(spot_r, spot_r, b.math(
+        "MULTIPLY", tall, 3.2, x=3800, y=-12700), x=4000, y=-12550), scale=lit, x=4200, y=-12400))
 
     def is_style(k_, y):
         return b.compare("EQUAL", gi.outputs["Style"], float(k_), x=4600, y=y)
@@ -4331,11 +4354,13 @@ def build_domain_group():
     props = b.switch("GEOMETRY", is_style(2, -3400), props, b.join([flowers, feathers], x=4800, y=-3400), x=5000,
                      y=-3000)
     props = b.switch("GEOMETRY", is_style(3, -3600), props, feathers, x=5200, y=-3000)
-    # (the material lights the spotlight on its far wall only, so it does not veil the dancer: ATTR_EDGE 1 on it)
+    # (the material lights them only beyond where the dancer is now, ATTR_AXIS, so neither the spotlight's near wall
+    # nor a beam ever veils her; the spotlight, ATTR_EDGE 1, a little dimmer)
     spot_lit = b.store(spotlight.outputs["Instances"], ATTR_EDGE, 1.0, domain="INSTANCE", x=4400, y=-11800)
     beams_lit = b.store(beams.outputs["Instances"], ATTR_EDGE, 0.0, domain="INSTANCE", x=4400, y=-9600)
-    props = b.switch("GEOMETRY", is_style(4, -3800), props, b.join([beams_lit, spot_lit], x=5200, y=-3600),
-                     x=5400, y=-3000)
+    lights = b.store(b.join([beams_lit, spot_lit], x=4800, y=-3600), ATTR_AXIS, b.combine(fx, fy, cz, x=4800, y=-3800),
+                     "FLOAT_VECTOR", domain="INSTANCE", x=5000, y=-3600)
+    props = b.switch("GEOMETRY", is_style(4, -3800), props, lights, x=5400, y=-3000)
 
     there = b.boolean("AND", b.compare("GREATER_THAN", opened, 0.0, x=5600, y=400),
                       b.compare("LESS_THAN", closed, 1.0, x=5600, y=250), x=5800, y=300)

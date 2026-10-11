@@ -6,7 +6,8 @@ Swords, crystals, flowers ... rise where its floor reaches. After the big moment
 
 One mesh object with no vertices of its own and a Geometry Nodes modifier (node_groups.build_domain_group), in world
 space at the origin; the world stays where it opened while the dancer moves in it. Seen from outside, the sphere shows
-only its far inner wall: a round window onto the new world behind the body.
+only its far inner wall: a round window onto the new world behind the body. Only the concert's spotlight goes with
+the dancer: it follows an empty of ours on her hips, on the floor (Copy Location of the centre bone, its height kept).
 """
 
 import bpy
@@ -14,9 +15,12 @@ from mathutils import Vector
 
 from . import materials, particles
 from .node_groups import DOMAIN_GROUP, DOMAIN_STYLES, ensure_domain_group, input_identifiers
+from .toon import CENTER_BONES
 
 NAME = "MMD Disperse World"
+FOLLOW = "MMD Disperse Follow Spot"
 P_WORLD = "mmd_disperse_world"  # on the world object: the mask of its effect
+P_FOLLOW = "mmd_disperse_world_follow"  # on the empty the spotlight follows: the mask of its effect
 P_REACH = "mmd_disperse_world_reach"  # on the mask: how far the sphere opens (round the camera) ...
 P_REACH_KEY = "mmd_disperse_world_key"  # ... measured for this camera, these frames and this centre
 SAMPLES = 24  # camera positions looked at when the camera moves
@@ -80,11 +84,46 @@ def camera_reach(scene, mask, centre, first, last, height):
     return reach
 
 
-def sync(settings, mask, centre, floor, height, open_end, close_start, close_end, reach):
-    """Push the style, its materials, where it opens and its timing (mask radii) to the world's modifier."""
+def _follow(mask, collection, armature, centre):
+    """The empty the spotlight follows: at `centre`, on the floor plane wherever the dancer's centre bone goes (it
+    stays at `centre` without one)."""
+    ob = next((o for o in bpy.data.objects if o.get(P_FOLLOW) == mask), None)
+    if ob is None:
+        ob = bpy.data.objects.new(FOLLOW, None)
+        ob.empty_display_type = "PLAIN_AXES"
+        ob.hide_render = True
+        collection.objects.link(ob)
+        ob[P_FOLLOW] = mask
+    ob.location = centre
+    for con in list(ob.constraints):
+        ob.constraints.remove(con)
+    bone = next((name for name in CENTER_BONES if armature is not None and name in armature.data.bones), None)
+    if bone is not None:
+        con = ob.constraints.new("COPY_LOCATION")
+        con.target = armature
+        con.subtarget = bone
+        con.use_z = False
+    return ob
+
+
+def _unfollow(mask):
+    for ob in [o for o in bpy.data.objects if o.get(P_FOLLOW) == mask]:
+        bpy.data.objects.remove(ob)
+
+
+def sync(settings, mask, centre, floor, height, open_end, close_start, close_end, reach, armature=None):
+    """Push the style, its materials, where it opens and its timing (mask radii) to the world's modifier; the
+    spotlight follows the centre bone of `armature` (the dancing model's)."""
     style = settings.domain_style
     made = materials.ensure_domain_materials(style)
     scene = settings.id_data
+    worlds = world_objects(mask)
+    collection = worlds[0].users_collection[0] if worlds and worlds[0].users_collection else scene.collection
+    follow = None
+    if style == "STAGE":
+        follow = _follow(mask, collection, armature, centre)
+    else:
+        _unfollow(mask)
     camera = scene.camera
     back = Vector((0.0, 1.0, 0.0))  # level, from the camera through the centre: what is behind the dancer
     if camera is not None:
@@ -113,8 +152,9 @@ def sync(settings, mask, centre, floor, height, open_end, close_start, close_end
         "Ground Material": made["floor"],
         "Prop Material": made["props"],
         "Rim Material": made["rim"],
+        "Follow": follow,
     }
-    for ob in world_objects(mask):
+    for ob in worlds:
         for mod in ob.modifiers:
             if mod.type == "NODES" and mod.node_group and mod.node_group.name == DOMAIN_GROUP:
                 ids = input_identifiers(mod.node_group)
@@ -130,6 +170,7 @@ def remove(mask):
         bpy.data.objects.remove(ob)
         if me is not None and me.users == 0:
             bpy.data.meshes.remove(me)
+    _unfollow(mask)
     for key in (P_REACH, P_REACH_KEY):
         if mask is not None and key in mask:
             del mask[key]

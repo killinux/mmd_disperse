@@ -731,7 +731,9 @@ def _update_world(settings, mask, wave, big):
     first = settings.frame_start
     last = int(last) if last is not None else max(settings.frame_end, first + 1)
     reach = domain.camera_reach(settings.id_data, mask, centre, first, last, height)
-    domain.sync(settings, mask, centre, lo.z, height, open_end, close_start, close_end, reach)
+    models = _models(settings)
+    domain.sync(settings, mask, centre, lo.z, height, open_end, close_start, close_end, reach,
+                models[0].armature if models else None)
 
 
 def _particle_object(settings):

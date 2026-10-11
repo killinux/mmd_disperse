@@ -228,9 +228,10 @@ def _bone(armature, names):
     return next((bones[n] for n in names if n in bones), None)
 
 
-def _follow(cam, armature, names, location_only):
-    """Let `cam`, placed for the armature's rest pose, follow the bone of `names` from there (only its position with
-    `location_only`): Child Of with the bone's rest matrix as the inverse. False without such a bone."""
+def _follow(cam, armature, names, level_only):
+    """Let `cam`, placed for the armature's rest pose, follow the bone of `names` from there (with `level_only` only
+    across the floor: a squat must not take a low camera under it): Child Of with the bone's rest matrix as the
+    inverse. False without such a bone."""
     bone = _bone(armature, names)
     for con in [c for c in cam.constraints if c.name == "MMD Disperse Follow"]:
         cam.constraints.remove(con)
@@ -241,10 +242,11 @@ def _follow(cam, armature, names, location_only):
     con.target = armature
     con.subtarget = bone.name
     rest = armature.matrix_world @ bone.bone.matrix_local
-    if location_only:
+    if level_only:
+        con.use_location_z = False
         con.use_rotation_x = con.use_rotation_y = con.use_rotation_z = False
         con.use_scale_x = con.use_scale_y = con.use_scale_z = False
-        rest = Matrix.Translation(rest.translation)
+        rest = Matrix.Translation((rest.translation.x, rest.translation.y, 0.0))
     con.inverse_matrix = rest.inverted()
     return True
 
@@ -256,7 +258,7 @@ def _aim(cam, spot, at):
 
 def _cuts(scene, mask, user, collection, armature, frame, length, focus, height):
     """The three cameras of the cuts placed round the dancer as the scene camera sees it at the moment, following the
-    hips (the low and the wide shot) and the head (the eyes): (start frame, camera) of each."""
+    hips across the floor (the low and the wide shot) and the head (the eyes): (start frame, camera) of each."""
     fps = scene.render.fps / scene.render.fps_base
     current = scene.frame_current
     scene.frame_set(int(frame))

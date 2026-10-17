@@ -22,11 +22,14 @@ can pulse on the beats of the music. Arcs of lightning can crackle along the edg
 point, and a transporter beam can shimmer one outfit away and the other in inside a column of light.
 """
 
+import hashlib
 import math
+import os
 
 import bpy
 
-VERSION = 17
+VERSION = 18
+CACHE_PREFIX = "mmd_disperse_node_groups_"  # the main groups, once built, are kept in the user's config folder
 
 FIELD_GROUP = "MMDDisperse Field"
 TARGET_GROUP = "MMDDisperse Target"
@@ -38,6 +41,10 @@ RING_GROUP = "MMDDisperse Ring"
 DOMAIN_GROUP = "MMDDisperse Domain"
 TRAIL_GROUP = "MMDDisperse Trail"
 STEPS_GROUP = "MMDDisperse Steps"
+SHELL_GROUP = "MMDDisperse Shell"
+MIST_GROUP = "MMDDisperse Mist"
+TITLE_GROUP = "MMDDisperse Finish Title"
+TITLE_TEXT = "MMDD Title Text"  # its String to Curves node (finish.py sets its font)
 
 ATTR_EDGE = "disperse_edge"
 ATTR_LOCK = "disperse_lock"
@@ -90,6 +97,11 @@ ATTR_CARD = "mmdd_card"  # the card of the cartoon physics: x, y across it (0 ..
 ATTR_T = "mmdd_t"  # the dance ribbons and the flowers underfoot (trails.py): the frame a recorded point is from
 ATTR_TRAIL = "mmdd_trail"  # ... a ribbon: x how far back along it (0 at the hand .. 1), y how far it is shown
 ATTR_ACROSS = "mmdd_across"  # ... across the silk (0 .. 1)
+ATTR_LIMB = "mmdd_limb"  # 1.12, spirit.py: how much a vertex belongs to the left arm (x), the right (y), the head (z)
+ATTR_SPIRIT = "mmdd_spirit"  # ... the spirit self: x how solid, y the glowing line it forms behind, z the flash
+ATTR_SHELL = "mmdd_shell"  # 1.12, shell.py: x how much of the shell shows, y the line where it forms, z the frame
+ATTR_SHELL_DIR = "mmdd_shell_dir"  # ... the direction from its centre (its patterns)
+ATTR_WAY = "mmdd_way"  # 1.12, mist.py: the way a speck of the spray flies (world units a frame)
 STEP_GLOW = 0.7  # how bright the seal underfoot is
 _ARC_DIR = "mmdd_arc_dir"  # scratch: the way the distance grows over the surface, where the arcs crackle
 _ARC_ATTRS = ("mmdd_arc_normal", "mmdd_arc_side", "mmdd_arc_len", "mmdd_arc_rnd")  # scratch: each arc's own values
@@ -200,6 +212,23 @@ EXTRA_INPUTS = (
     ("Card Material", "NodeSocketMaterial", None, None, None, None),
 )
 
+# 1.12: the dancer's spirit self (spirit.py, node groups' _spirit): 1 the Dharma form, 2 three heads and six arms
+SPIRIT_INPUTS = (
+    ("Spirit", "NodeSocketInt", 0, 0, 2, None),
+    ("Spirit Scale", "NodeSocketFloat", 2.5, 0.1, 100.0, None),
+    ("Spirit Offset", "NodeSocketVector", (0.0, 10.0, 0.0), None, None, "TRANSLATION"),
+    ("Spirit Height", "NodeSocketFloat", 20.0, 0.0, 1e9, "DISTANCE"),
+    ("Spirit Pairs", "NodeSocketInt", 2, 1, 8, None),
+    ("Spirit Spread", "NodeSocketFloat", 0.55, 0.0, 3.2, "ANGLE"),
+    ("Spirit Heads", "NodeSocketBool", True, None, None, None),
+    ("Spirit Anchor", "NodeSocketObject", None, None, None, None),
+    ("Shoulder L", "NodeSocketObject", None, None, None, None),
+    ("Shoulder R", "NodeSocketObject", None, None, None, None),
+    ("Neck Object", "NodeSocketObject", None, None, None, None),
+    ("Hips Object", "NodeSocketObject", None, None, None, None),
+    ("Spirit Material", "NodeSocketMaterial", None, None, None, None),
+)
+
 # Scales (Mystique): both outfits break into scales that turn over where the edge passes.
 SCALE_INPUTS = (
     ("Scales", "NodeSocketBool", False, None, None, None),
@@ -267,7 +296,7 @@ TARGET_INPUTS = FIELD_INPUTS + (
     ("Smoke Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
     ("Smoke Size", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
     ("Smoke Material", "NodeSocketMaterial", None, None, None, None),
-) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS
+) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS + SPIRIT_INPUTS
 
 BASE_INPUTS = FIELD_INPUTS + (
     ("Shrink", "NodeSocketFloat", 0.08, -10000.0, 10000.0, "DISTANCE"),
@@ -331,7 +360,7 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Figurine Offset", "NodeSocketVector", (4.0, -2.0, 0.0), None, None, "TRANSLATION"),
     ("Stand Material", "NodeSocketMaterial", None, None, None, None),
     ("Clamp Jitter", "NodeSocketFloat", 0.04, 0.0, 1.0, None),
-) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS
+) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS + SPIRIT_INPUTS
 
 # The probe takes these from the modifier it stands in for (the new outfit's finale and fly-in settings are
 # missing on the old outfit's, which does not use them).
@@ -435,6 +464,38 @@ DOMAIN_INPUTS = (
     ("Prop Material", "NodeSocketMaterial", None, None, None, None),
     ("Rim Material", "NodeSocketMaterial", None, None, None, None),
     ("Follow", "NodeSocketObject", None, None, None, None),  # the stage's spotlight follows it (the dancer's hips)
+)
+
+SHELL_STYLES = ("DOME", "BUBBLE", "SHIELD", "CANDY", "WATER")
+# The shell round the dancer (shell.py), in world units: the shell object stands at the origin, unscaled. Form End,
+# Moment and Go End are mask radii.
+SHELL_INPUTS = (
+    ("Mask", "NodeSocketObject", None, None, None, None),
+    ("Follow", "NodeSocketObject", None, None, None, None),
+    ("Style", "NodeSocketInt", 0, 0, len(SHELL_STYLES) - 1, None),
+    ("Height", "NodeSocketFloat", 20.0, 0.0, 1e9, None),
+    ("Floor", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Size", "NodeSocketFloat", 1.0, 0.1, 10.0, None),
+    ("Form End", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Moment", "NodeSocketFloat", 2.0, 0.0, 1e9, None),
+    ("Go End", "NodeSocketFloat", 3.0, 0.0, 1e9, None),
+    ("Material", "NodeSocketMaterial", None, None, None, None),
+)
+# The spray's mist (mist.py), in world units: Size the radius of a speck as it leaves the nozzle, Life the frames it
+# flies.
+MIST_INPUTS = (
+    ("Size", "NodeSocketFloat", 0.01, 0.0, 1e9, None),
+    ("Life", "NodeSocketFloat", 18.0, 1.0, 1e9, None),
+    ("Material", "NodeSocketMaterial", None, None, None, None),
+)
+# The finishing pose's name and stars (finish.py), in the object's own space.
+TITLE_INPUTS = (
+    ("Text", "NodeSocketString", "", None, None, None),
+    ("Size", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Stars", "NodeSocketInt", 5, 0, 12, None),
+    ("Star Size", "NodeSocketFloat", 0.6, 0.0, 1e9, None),
+    ("Reveal", "NodeSocketFloat", 0.0, 0.0, 1.0, None),
+    ("Material", "NodeSocketMaterial", None, None, None, None),
 )
 
 # Inputs measured in object space: the add-on's sizes are world units, divided by the object's scale.
@@ -1615,7 +1676,10 @@ def build_target_group(field_group, venom_group):
     join = b.node("GeometryNodeJoinGeometry", 2000, 250)
     for part in (wire, suit, sparkles, venom, frames, smoke, column, arcs, strike, lotus, flames, shock, soul):
         b.feed(join.inputs["Geometry"], part)
-    b.feed(go.inputs["Geometry"], _toon(b, gi, join.outputs["Geometry"], True, 2200, 4000))
+    # 1.12: the spirit self (the Dharma form, three heads and six arms) of what the new outfit shows
+    spirit = _spirit(b, gi, geo, me, radius, 4000, 56000)
+    b.feed(go.inputs["Geometry"], b.join([_toon(b, gi, join.outputs["Geometry"], True, 2200, 4000), spirit],
+                                         x=2400, y=250))
     return ng
 
 
@@ -1741,6 +1805,145 @@ def _toon(b, gi, geometry, new, x, y):
                                       y=y - 2900)], x=x + 3800, y=y)
     return b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Toon"], 0.0, x=x + 3800, y=y + 200), geometry,
                     shaped, x=x + 4000, y=y)
+
+
+SPIRIT_FORM = 0.25  # share of the time to the moment the giant takes to form, from the floor up ...
+SPIRIT_DIVE = 0.28  # ... and the share before the moment over which it shrinks and dives into the dancer
+SPIRIT_PAIRS = 8  # the most pairs of arms
+ARM_OPEN = (0.08, 0.6, 0.22)  # the arms open one pair after another: the first at, the last at (p), each over
+ARM_FOLD = (1.04, 1.24)  # ... and fold back together after the moment (p)
+HEAD_TURN = math.radians(70.0)  # the heads on either side are turned this far ...
+HEAD_SHIFT = 0.075  # ... and moved out this far (a share of the model height)
+
+
+def _spirit(b, gi, geometry, me, radius, x, y):
+    """The dancer's spirit self (spirit.py), made of `geometry` (what this outfit gives of the new self: the new one
+    what it shows, the old one its locked parts), timed by p (the mask radius over Clamp Distance, 1 at the moment):
+
+    * Spirit 1, the Dharma form (法相): a copy Spirit Scale times her size stands Spirit Offset behind her (a world
+      vector), about the floor under her hips (Spirit Anchor), dancing along. It forms from the floor up, a glowing
+      line rising through it, and over the last SPIRIT_DIVE before the moment shrinks and dives into her;
+    * Spirit 2, three heads and six arms (三头六臂·千手开屏): copies of her arms (ATTR_LIMB: x the left, y the right) open
+      out about the shoulders in her frontal plane, Spirit Pairs pairs one after another, Spirit Spread apart (up and
+      down in turn), a little behind her; with Spirit Heads a copy of her head (ATTR_LIMB z) turns out to either side.
+      They fold back together after the moment.
+
+    ATTR_SPIRIT tells the material how solid each part is (x), the forming line (y) and the flash at the moment (z);
+    ATTR_FRAME the frame (it flows)."""
+    p = b.math("DIVIDE", radius, b.math("MAXIMUM", gi.outputs["Clamp Distance"], 1e-4, x=x, y=y + 300), x=x + 200,
+               y=y + 300)
+    tall = b.math("MAXIMUM", gi.outputs["Spirit Height"], 1e-4, x=x, y=y + 450)
+    mode = gi.outputs["Spirit"]
+
+    def info(name, yy):
+        n = b.node("GeometryNodeObjectInfo", x, yy, transform_space="RELATIVE")
+        b.feed(n.inputs["Object"], gi.outputs[name])
+        return n.outputs["Location"]
+
+    pos = b.node("GeometryNodeInputPosition", x, y).outputs[0]
+    up = b.vmath("NORMALIZE", _unrotate(b, me, (0.0, 0.0, 1.0), x, y - 200), x=x + 200, y=y - 200)
+    # --- the Dharma form
+    anchor = info("Spirit Anchor", y - 400)
+    form = b.map_range(p, 0.0, SPIRIT_FORM, x=x + 200, y=y - 600, smooth=True)
+    dive = b.map_range(p, 1.0 - SPIRIT_DIVE, 1.0, x=x + 200, y=y - 800, smooth=True)
+    d2 = b.math("MULTIPLY", dive, dive, x=x + 400, y=y - 800)
+    size = b.math("MULTIPLY_ADD", b.math("SUBTRACT", 1.0, gi.outputs["Spirit Scale"], x=x + 400, y=y - 1000), d2,
+                  gi.outputs["Spirit Scale"], x=x + 600, y=y - 900)
+    away = b.vmath("DIVIDE", _unrotate(b, me, gi.outputs["Spirit Offset"], x + 200, y - 1200), me.outputs["Scale"],
+                   x=x + 400, y=y - 1200)
+    away = b.vmath("SCALE", away, scale=b.math("SUBTRACT", 1.0, d2, x=x + 600, y=y - 1300), x=x + 800, y=y - 1200)
+    rel = b.vmath("SUBTRACT", pos, anchor, x=x + 400, y=y - 400)
+    big = b.vmath("ADD", b.vmath("ADD", anchor, b.vmath("SCALE", rel, scale=size, x=x + 800, y=y - 500), x=x + 1000,
+                                 y=y - 450), away, x=x + 1200, y=y - 600)
+    h = b.math("DIVIDE", b.vmath("DOT_PRODUCT", rel, up, x=x + 600, y=y - 1500), tall, x=x + 800, y=y - 1500)
+    line = b.math("MULTIPLY", form, 1.12, x=x + 600, y=y - 1700)
+    giant = b.delete(geometry, b.compare("GREATER_THAN", h, line, x=x + 1000, y=y - 1600), "POINT", x=x + 1200, y=y)
+    giant = b.set_position(giant, position=big, x=x + 1400, y=y)
+    rising = b.math("SUBTRACT", 1.0, b.map_range(b.math("ABSOLUTE", b.math("SUBTRACT", h, line, x=x + 1000,
+                                                                             y=y - 1800), x=x + 1200, y=y - 1800),
+                                                   0.0, 0.05, x=x + 1400, y=y - 1800), x=x + 1600, y=y - 1800)
+    rising = b.math("MULTIPLY", rising, b.math("SUBTRACT", 1.0, form, x=x + 1400, y=y - 2000), x=x + 1800, y=y - 1900)
+    giant = b.store(giant, ATTR_SPIRIT, b.combine(b.math("MULTIPLY_ADD", d2, 0.4, 0.55, x=x + 1600, y=y - 2100),
+                                                  rising, b.math("MULTIPLY", d2, d2, x=x + 1600, y=y - 2300),
+                                                  x=x + 1800, y=y - 2100), "FLOAT_VECTOR", x=x + 1600, y=y)
+    giant_on = b.boolean("AND", b.compare("EQUAL", mode, 1.0, x=x + 1600, y=y + 300),
+                         b.boolean("AND", b.compare("GREATER_THAN", p, 0.0, x=x + 1600, y=y + 450),
+                                   b.compare("LESS_THAN", p, 1.0, x=x + 1600, y=y + 600), x=x + 1800, y=y + 500),
+                         x=x + 2000, y=y + 400)
+    giant = b.switch("GEOMETRY", giant_on, None, giant, x=x + 2200, y=y)
+    # --- three heads and six arms
+    limb, _has_limb = b.named_attribute(ATTR_LIMB, "FLOAT_VECTOR", x=x, y=y - 2600)
+    left, right, head_w = b.split_xyz(limb, x=x + 200, y=y - 2600)
+    left_s, right_s = info("Shoulder L", y - 3000), info("Shoulder R", y - 3200)
+    neck, hips = info("Neck Object", y - 3400), info("Hips Object", y - 3600)
+    body_up = b.vmath("NORMALIZE", b.vmath("SUBTRACT", neck, hips, x=x + 200, y=y - 3500), x=x + 400, y=y - 3500)
+    across = b.vmath("SUBTRACT", left_s, right_s, x=x + 200, y=y - 3100)
+    forward = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", across, body_up, x=x + 600, y=y - 3200), x=x + 800,
+                      y=y - 3200)
+    pairs = gi.outputs["Spirit Pairs"]
+    fold = b.map_range(p, ARM_FOLD[0], ARM_FOLD[1], x=x + 400, y=y - 3800, smooth=True)
+    unfold = b.math("SUBTRACT", 1.0, fold, x=x + 600, y=y - 3800)
+    flash = b.math("SUBTRACT", 1.0, b.map_range(b.math("ABSOLUTE", b.math("SUBTRACT", p, 1.0, x=x + 400, y=y - 4000),
+                                                         x=x + 600, y=y - 4000), 0.0, 0.06, x=x + 800, y=y - 4000),
+                   x=x + 1000, y=y - 4000)
+    last = b.math("MAXIMUM", b.math("SUBTRACT", pairs, 1.0, x=x + 400, y=y - 4200), 1.0, x=x + 600, y=y - 4200)
+    behind = b.vmath("SCALE", forward, scale=b.math("MULTIPLY", tall, -0.012, x=x + 800, y=y - 4400), x=x + 1000,
+                     y=y - 4400)
+    copies = []
+    for k, (weight, pivot, sign) in enumerate(((left, left_s, 1.0), (right, right_s, -1.0))):
+        yy = y - 4800 - 2600 * k
+        arm = b.delete(geometry, b.compare("LESS_THAN", b.on_domain(weight, "FACE", x=x + 1000, y=yy), 0.5,
+                                           x=x + 1200, y=yy), "FACE", x=x + 1400, y=yy)
+        for i in range(SPIRIT_PAIRS):
+            yi = yy - 300 * i
+            step, up_down = i // 2 + 1, (1.0 if i % 2 == 0 else -1.0)
+            start = b.math("MULTIPLY_ADD", b.math("DIVIDE", float(i), last, x=x + 1600, y=yi),
+                           ARM_OPEN[1] - ARM_OPEN[0], ARM_OPEN[0], x=x + 1800, y=yi)
+            opened = b.map_range(p, start, b.math("ADD", start, ARM_OPEN[2], x=x + 2000, y=yi - 100), x=x + 2200,
+                                 y=yi, smooth=True)
+            amount = b.math("MULTIPLY", opened, unfold, x=x + 2400, y=yi)
+            angle = b.math("MULTIPLY", gi.outputs["Spirit Spread"], b.math("MULTIPLY", amount, sign * up_down * step,
+                                                                            x=x + 2600, y=yi - 100),
+                           x=x + 2800, y=yi)
+            turned = b.vmath("ADD", b.rotate(pos, pivot, forward, angle, x=x + 3000, y=yi),
+                             b.vmath("SCALE", behind, scale=b.math("MULTIPLY", amount, float(step), x=x + 3000,
+                                                                     y=yi - 150), x=x + 3200, y=yi - 150),
+                             x=x + 3400, y=yi)
+            copy = b.set_position(arm, position=turned, x=x + 3600, y=yi)
+            copy = b.store(copy, ATTR_SPIRIT, b.combine(b.math("MULTIPLY", amount, 0.7, x=x + 3600, y=yi - 150), 0.0,
+                                                        flash, x=x + 3800, y=yi - 150), "FLOAT_VECTOR", x=x + 3800,
+                           y=yi)
+            used = b.compare("LESS_THAN", float(i), pairs, x=x + 3800, y=yi + 150)
+            copies.append(b.switch("GEOMETRY", used, None, copy, x=x + 4000, y=yi))
+    head = b.delete(geometry, b.compare("LESS_THAN", b.on_domain(head_w, "FACE", x=x + 1000, y=y - 10200), 0.5,
+                                        x=x + 1200, y=y - 10200), "FACE", x=x + 1400, y=y - 10200)
+    head_open = b.math("MULTIPLY", b.map_range(p, 0.05, 0.3, x=x + 1400, y=y - 10400, smooth=True), unfold,
+                       x=x + 1600, y=y - 10400)
+    out = b.vmath("SCALE", b.vmath("NORMALIZE", across, x=x + 1400, y=y - 10600),
+                  scale=b.math("MULTIPLY", b.math("MULTIPLY", tall, HEAD_SHIFT, x=x + 1400, y=y - 10800), head_open,
+                               x=x + 1600, y=y - 10800), x=x + 1800, y=y - 10700)
+    for k, sign in enumerate((1.0, -1.0)):
+        yh = y - 10200 - 400 * k
+        turned = b.vmath("ADD", b.rotate(pos, neck, body_up, b.math("MULTIPLY", head_open, sign * HEAD_TURN,
+                                                                    x=x + 2000, y=yh - 100), x=x + 2200, y=yh),
+                         b.vmath("SCALE", out, scale=sign, x=x + 2200, y=yh - 200), x=x + 2400, y=yh)
+        copy = b.set_position(head, position=turned, x=x + 2600, y=yh)
+        copy = b.store(copy, ATTR_SPIRIT, b.combine(b.math("MULTIPLY", head_open, 0.7, x=x + 2600, y=yh - 150), 0.0,
+                                                    flash, x=x + 2800, y=yh - 150), "FLOAT_VECTOR", x=x + 2800, y=yh)
+        copies.append(b.switch("GEOMETRY", gi.outputs["Spirit Heads"], None, copy, x=x + 3000, y=yh))
+    arms_on = b.boolean("AND", b.compare("EQUAL", mode, 2.0, x=x + 4000, y=y + 300),
+                        b.boolean("AND", b.compare("GREATER_THAN", p, 0.0, x=x + 4000, y=y + 450),
+                                  b.compare("LESS_THAN", p, ARM_FOLD[1], x=x + 4000, y=y + 600), x=x + 4200, y=y + 500),
+                        x=x + 4400, y=y + 400)
+    arms = b.switch("GEOMETRY", arms_on, None, b.join(copies, x=x + 4200, y=y - 4800), x=x + 4600, y=y - 4800)
+    spirit = b.join([giant, arms], x=x + 4800, y=y)
+    spirit = b.store(spirit, ATTR_FRAME, b.node("GeometryNodeInputSceneTime", x + 4800, y - 300).outputs["Frame"],
+                     x=x + 5000, y=y)
+    shaded = b.node("GeometryNodeSetMaterial", x + 5200, y)
+    b.feed(shaded.inputs["Geometry"], spirit)
+    b.feed(shaded.inputs["Material"], gi.outputs["Spirit Material"])
+    return b.switch("GEOMETRY", b.compare("GREATER_THAN", mode, 0.0, x=x + 5200, y=y + 300), None,
+                    shaded.outputs["Geometry"], x=x + 5400, y=y)
 
 
 def _evolve(b, p, x, y):
@@ -3469,7 +3672,10 @@ def build_base_group(field_group, venom_group):
     b.feed(tidy.inputs["Geometry"], b.join([old, particles, venom, crystals, brooch, column, arcs, strike, husk, flames,
                                             lotus, shock, soul], x=4400, y=-150))
     tidy.inputs["Name"].default_value = ATTR_AGE
-    b.feed(go.inputs["Geometry"], _toon(b, gi, tidy.outputs["Geometry"], False, 4800, 4000))
+    # 1.12: the spirit self's locked parts (the head and hair the dancer keeps are the old model's)
+    spirit = _spirit(b, gi, b.delete(gi.outputs["Geometry"], free, "FACE", x=3600, y=43000), me, radius, 3800, 43000)
+    b.feed(go.inputs["Geometry"], b.join([_toon(b, gi, tidy.outputs["Geometry"], False, 4800, 4000), spirit],
+                                         x=5000, y=0))
     return ng
 
 
@@ -4375,6 +4581,291 @@ def ensure_domain_group():
     return bpy.data.node_groups[DOMAIN_GROUP]
 
 
+def build_shell_group():
+    """The shell round the dancer (shell.py), in world units: the object stands at the origin, unscaled; Follow is on
+    the floor under her hips. Its timing is in mask radii: it forms up to Form End, the big moment is at Moment (the
+    swap, or the new outfit complete) and it is gone by Go End.
+
+    * DOME, the barrier (结界, KPop Demon Hunters' Honmoon): a dome rises over her from the floor, a glowing line at its
+      rim; at the moment it shatters, its pieces flying out and falling;
+    * BUBBLE (Glinda's): a soap bubble swells round her from her chest, wobbling; at the moment it pops into droplets;
+    * SHIELD: a sphere of hexagons forms round her and, just before the moment, shrinks into her body;
+    * CANDY, the wrapper: cellophane twisted shut above her head and under her feet; at the moment it untwists and
+      falls open in two halves;
+    * WATER, the water shell: a ball of rippling water round her that bursts into drops at the moment.
+
+    ATTR_SHELL: x how much of it shows (0 .. 1), y the glowing line where it forms, z the frame; ATTR_SHELL_DIR: the
+    direction from its centre (its patterns)."""
+    ng = _new_group(SHELL_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in SHELL_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -3200, 0)
+    go = b.node("NodeGroupOutput", 5200, 0)
+    info = b.node("GeometryNodeObjectInfo", -3000, 600, transform_space="RELATIVE")
+    b.feed(info.inputs["Object"], gi.outputs["Mask"])
+    radius = b.vmath("DOT_PRODUCT", info.outputs["Scale"], (1 / 3, 1 / 3, 1 / 3), x=-2800, y=600)
+    follow = b.node("GeometryNodeObjectInfo", -3000, 300, transform_space="RELATIVE")
+    b.feed(follow.inputs["Object"], gi.outputs["Follow"])
+    fx, fy, _fz = b.split_xyz(follow.outputs["Location"], x=-2800, y=300)
+    tall, style = gi.outputs["Height"], gi.outputs["Style"]
+    floor = gi.outputs["Floor"]
+    frame = b.node("GeometryNodeInputSceneTime", -3000, 0).outputs["Frame"]
+    form = b.map_range(radius, 0.0, b.math("MAXIMUM", gi.outputs["Form End"], 1e-4, x=-2800, y=-200), x=-2600,
+                       y=-150)
+    gone = b.map_range(radius, gi.outputs["Moment"], b.math("MAXIMUM", gi.outputs["Go End"], b.math(
+        "ADD", gi.outputs["Moment"], 1e-4, x=-3000, y=-500), x=-2800, y=-450), x=-2600, y=-400)
+    size = gi.outputs["Size"]
+    waist = b.math("MULTIPLY_ADD", tall, 0.52, floor, x=-2600, y=-650)
+    middle = b.combine(fx, fy, waist, x=-2400, y=-650)
+    ground = b.combine(fx, fy, floor, x=-2400, y=-800)
+    sphere = b.node("GeometryNodeMeshUVSphere", -2600, -1000)
+    sphere.inputs["Segments"].default_value = 64
+    sphere.inputs["Rings"].default_value = 32
+    sphere.inputs["Radius"].default_value = 1.0
+    unit = b.store(sphere.outputs["Mesh"], ATTR_SHELL_DIR, b.node("GeometryNodeInputPosition", -2600, -1200).outputs[0],
+                   "FLOAT_VECTOR", x=-2400, y=-1000)
+    pos = b.node("GeometryNodeInputPosition", -2400, -1400).outputs[0]
+    ux, uy, uz = b.split_xyz(pos, x=-2200, y=-1400)
+
+    def shown_line(geometry, shown, line, x, y):
+        return b.store(geometry, ATTR_SHELL, b.combine(shown, line, frame, x=x, y=y - 150), "FLOAT_VECTOR", x=x, y=y)
+
+    # --- the barrier dome: rising from the floor, shattering; taller than wide, so it closes over her head
+    r_wide = b.math("MULTIPLY", b.math("MULTIPLY", tall, 0.75, x=-2000, y=-1600), size, x=-1800, y=-1600)
+    r_tall = b.math("MULTIPLY", b.math("MULTIPLY", tall, 1.18, x=-2000, y=-1700), size, x=-1800, y=-1700)
+    dome = b.delete(unit, b.compare("LESS_THAN", uz, -0.02, x=-2000, y=-1800), "POINT", x=-1800, y=-1800)
+    level = b.math("MULTIPLY", form, 1.04, x=-1800, y=-2000)
+    dome = b.delete(dome, b.compare("GREATER_THAN", uz, level, x=-1600, y=-2000), "POINT", x=-1600, y=-1800)
+    split = b.node("GeometryNodeSplitEdges", -1400, -1800)
+    b.feed(split.inputs["Mesh"], dome)
+    face_c = b.on_domain(pos, "FACE", "FLOAT_VECTOR", x=-1400, y=-2100)
+    burst = b.math("MULTIPLY", gone, gone, x=-1400, y=-2300)
+    flung = b.vmath("ADD", b.vmath("SCALE", face_c, scale=b.math("MULTIPLY", gone, 0.55, x=-1200, y=-2300),
+                                   x=-1000, y=-2200),
+                    b.combine(0.0, 0.0, b.math("MULTIPLY", burst, -0.9, x=-1200, y=-2450), x=-1000, y=-2400),
+                    x=-800, y=-2300)
+    shrunk = b.node("GeometryNodeScaleElements", -1200, -1800, domain="FACE")
+    b.feed(shrunk.inputs["Geometry"], split.outputs["Mesh"])
+    b.feed(shrunk.inputs["Scale"], b.math("SUBTRACT", 1.0, b.math("MULTIPLY", gone, 0.7, x=-1400, y=-2600),
+                                          x=-1200, y=-2600))
+    dome = b.set_position(shrunk.outputs["Geometry"], flung, x=-1000, y=-1800)
+    dome = b.set_position(dome, position=b.vmath("ADD", ground, b.vmath("MULTIPLY", b.node(
+        "GeometryNodeInputPosition", -1000, -2000).outputs[0], b.combine(r_wide, r_wide, r_tall, x=-1000, y=-2150),
+        x=-800, y=-2000), x=-600, y=-1900), x=-800, y=-1800)
+    dz = b.split_xyz(b.named_attribute(ATTR_SHELL_DIR, "FLOAT_VECTOR", x=-2200, y=-2700)[0], x=-2000, y=-2700)[2]
+    rim = b.math("SUBTRACT", 1.0, b.map_range(b.math("ABSOLUTE", b.math("SUBTRACT", dz, level, x=-1800, y=-2700),
+                                                       x=-1600, y=-2700), 0.0, 0.05, x=-1400, y=-2700), x=-1200,
+                 y=-2700)
+    rim = b.math("MULTIPLY", rim, b.math("SUBTRACT", 1.0, form, x=-1400, y=-2900), x=-1000, y=-2800)
+    dome = shown_line(dome, b.math("SUBTRACT", 1.0, gone, x=-800, y=-2600), rim, -600, -1800)
+
+    # --- round her: the bubble, the shield, the water (and the candy wrapper's start)
+    r_round = b.math("MULTIPLY", b.math("MULTIPLY", tall, 0.62, x=-2000, y=-3200), size, x=-1800, y=-3200)
+    swell = b.math("POWER", form, 0.5, x=-1800, y=-3400)
+    wobble = b.math("MULTIPLY_ADD", b.math("MULTIPLY", b.math("SINE", b.math("ADD", b.math(
+        "MULTIPLY", frame, 0.45, x=-2000, y=-3600), b.math("MULTIPLY", uz, 5.0, x=-2000, y=-3750), x=-1800, y=-3650),
+        x=-1600, y=-3650), b.math("SUBTRACT", 1.0, form, x=-1600, y=-3800), x=-1400, y=-3700), 0.05, 1.0,
+                       x=-1200, y=-3700)
+    # the water ripples all the time
+    ripple = b.node("ShaderNodeTexNoise", -2000, -4000, noise_dimensions="4D")
+    b.feed(ripple.inputs["Vector"], pos)
+    b.feed(ripple.inputs["W"], b.math("MULTIPLY", frame, 0.06, x=-2200, y=-4100))
+    ripple.inputs["Scale"].default_value = 2.5
+    ripple.inputs["Detail"].default_value = 2.0
+    is_water = b.compare("EQUAL", style, 4.0, x=-1800, y=-4200)
+    ripples = b.switch("FLOAT", is_water, 1.0, b.math("MULTIPLY_ADD", ripple.outputs[0], 0.08, 0.96, x=-1600,
+                                                      y=-4000), x=-1400, y=-4050)
+    # the shield shrinks into her just before the moment
+    into = b.map_range(radius, b.math("MULTIPLY", gi.outputs["Moment"], 0.85, x=-2000, y=-4400),
+                       gi.outputs["Moment"], x=-1800, y=-4400, smooth=True)
+    is_shield = b.compare("EQUAL", style, 2.0, x=-1800, y=-4600)
+    contract = b.switch("FLOAT", is_shield, 1.0, b.math("SUBTRACT", 1.0, b.math("MULTIPLY", b.math(
+        "MULTIPLY", into, into, x=-1600, y=-4500), 0.78, x=-1400, y=-4500), x=-1200, y=-4500), x=-1000, y=-4550)
+    scale = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", r_round, swell, x=-1000, y=-3300), wobble,
+                                      x=-800, y=-3400), b.math("MULTIPLY", ripples, contract, x=-800, y=-4200),
+                   x=-600, y=-3600)
+    round_ = b.set_position(unit, position=b.vmath("ADD", middle, b.vmath("SCALE", pos, scale=scale, x=-400,
+                                                                            y=-3500), x=-200, y=-3500), x=-200,
+                            y=-3200)
+    # the bubble and the water burst at the moment: gone at once, drops flying out
+    popped = b.boolean("AND", b.compare("GREATER_THAN", gone, 0.0, x=-200, y=-3800),
+                       b.boolean("OR", is_water, b.compare("EQUAL", style, 1.0, x=-200, y=-4000), x=0, y=-3900),
+                       x=200, y=-3850)
+    after_shield = b.boolean("AND", is_shield, b.compare("GREATER_EQUAL", radius, gi.outputs["Moment"], x=0,
+                                                         y=-4300), x=200, y=-4300)
+    round_ = b.switch("GEOMETRY", b.boolean("OR", popped, after_shield, x=400, y=-3900), round_, None, x=600, y=-3200)
+    round_ = shown_line(round_, b.math("SUBTRACT", 1.0, b.math("MULTIPLY", into, b.switch(
+        "FLOAT", is_shield, 0.0, 0.5, x=600, y=-4500), x=800, y=-4400), x=1000, y=-4400), 0.0, 1200, -3200)
+    drops_at = b.node("GeometryNodeDistributePointsOnFaces", -200, -5000, distribute_method="RANDOM")
+    b.feed(drops_at.inputs["Mesh"], unit)
+    b.feed(drops_at.inputs["Density"], b.switch("FLOAT", is_water, 40.0, 90.0, x=-400, y=-5200))
+    drop_dir = b.node("GeometryNodeInputPosition", -200, -5300).outputs[0]
+    drop_rnd = b.white_noise(b.vmath("SCALE", drop_dir, scale=7.3, x=0, y=-5400), x=200, y=-5400)[0]
+    flight = b.math("MULTIPLY", gone, b.math("MULTIPLY_ADD", drop_rnd, 0.8, 0.6, x=400, y=-5400), x=600, y=-5350)
+    fly_out = b.vmath("SCALE", drop_dir, scale=b.math("MULTIPLY", r_round, b.math("ADD", 1.0, b.math(
+        "MULTIPLY", flight, 1.1, x=600, y=-5550), x=800, y=-5550), x=1000, y=-5500), x=1200, y=-5400)
+    fall = b.combine(0.0, 0.0, b.math("MULTIPLY", b.math("MULTIPLY", gone, gone, x=800, y=-5800), b.math(
+        "MULTIPLY", tall, b.switch("FLOAT", is_water, -0.25, -0.7, x=800, y=-6000), x=1000, y=-5950), x=1200,
+        y=-5850), x=1400, y=-5850)
+    drops = b.set_position(drops_at.outputs["Points"], position=b.vmath("ADD", b.vmath("ADD", middle, fly_out,
+                                                                                       x=1400, y=-5400),
+                                                                         fall, x=1600, y=-5500), x=1600, y=-5000)
+    bead = b.node("GeometryNodeMeshIcoSphere", 1400, -6200)
+    bead.inputs["Subdivisions"].default_value = 1
+    b.feed(bead.inputs["Radius"], b.math("MULTIPLY", tall, b.switch("FLOAT", is_water, 0.004, 0.008, x=1200,
+                                                                    y=-6400), x=1400, y=-6400))
+    beads = b.node("GeometryNodeInstanceOnPoints", 1800, -5000)
+    b.feed(beads.inputs["Points"], drops)
+    b.feed(beads.inputs["Instance"], b.store(bead.outputs["Mesh"], ATTR_SHELL_DIR, (0.0, 0.0, 1.0), "FLOAT_VECTOR",
+                                             x=1600, y=-6200))
+    b.feed(beads.inputs["Scale"], b.math("SUBTRACT", 1.0, gone, x=1600, y=-5200))
+    real = b.node("GeometryNodeRealizeInstances", 2000, -5000)
+    b.feed(real.inputs["Geometry"], beads.outputs["Instances"])
+    drops = shown_line(real.outputs["Geometry"], b.math("SUBTRACT", 1.0, gone, x=2000, y=-5300), 0.0, 2200, -5000)
+    drops = b.switch("GEOMETRY", b.boolean("AND", popped, b.compare("LESS_THAN", gone, 1.0, x=2000, y=-4700),
+                                           x=2200, y=-4700), None, drops, x=2400, y=-5000)
+    # the shield's hexagons: the edges of a ball of hexagons, as glowing tubes, over the see-through ball
+    hexes = b.node("GeometryNodeMeshIcoSphere", -200, -6600)
+    hexes.inputs["Radius"].default_value = 1.0
+    hexes.inputs["Subdivisions"].default_value = 3
+    dual = b.node("GeometryNodeDualMesh", 0, -6600)
+    b.feed(dual.inputs["Mesh"], hexes.outputs["Mesh"])
+    ball = b.set_position(dual.outputs["Dual Mesh"], position=b.vmath("ADD", middle, b.vmath(
+        "SCALE", b.vmath("NORMALIZE", b.node("GeometryNodeInputPosition", 0, -6800).outputs[0], x=200, y=-6800),
+        scale=b.math("MULTIPLY", scale, 1.003, x=200, y=-7000), x=400, y=-6900), x=600, y=-6900), x=600, y=-6600)
+    lines = b.node("GeometryNodeMeshToCurve", 800, -6600)
+    b.feed(lines.inputs["Mesh"], ball)
+    thick = b.node("GeometryNodeSetCurveRadius", 1000, -6600)
+    b.feed(thick.inputs["Curve"], lines.outputs["Curve"])
+    b.feed(thick.inputs["Radius"], b.math("MULTIPLY", tall, 0.0018, x=800, y=-6800))
+    profile = b.node("GeometryNodeCurvePrimitiveCircle", 1000, -6900, mode="RADIUS")
+    profile.inputs["Resolution"].default_value = 4
+    profile.inputs["Radius"].default_value = 1.0
+    tubes = b.curve_to_mesh(thick.outputs["Curve"], profile.outputs["Curve"], x=1200, y=-6600)
+    tubes = shown_line(b.store(tubes, ATTR_SHELL_DIR, (0.0, 0.0, 0.0), "FLOAT_VECTOR", x=1400, y=-6600), 1.0, 1.0,
+                       1600, -6600)
+    shield = b.switch("GEOMETRY", b.boolean("AND", is_shield, b.compare("LESS_THAN", radius, gi.outputs["Moment"],
+                                                                        x=1600, y=-6400), x=1800, y=-6400),
+                      None, tubes, x=2000, y=-6600)
+
+    # --- the candy wrapper: twisted shut at both ends, crinkled; untwists and falls open in two halves
+    rx = b.math("MULTIPLY", b.math("MULTIPLY", tall, 0.42, x=-2000, y=-7600), size, x=-1800, y=-7600)
+    rz = b.math("MULTIPLY", b.math("MULTIPLY", tall, 0.62, x=-2000, y=-7750), size, x=-1800, y=-7750)
+    end = b.map_range(b.math("ABSOLUTE", uz, x=-2000, y=-7900), 0.55, 0.98, x=-1800, y=-7900, smooth=True)
+    pinch = b.math("SUBTRACT", 1.0, b.math("MULTIPLY", end, 0.9, x=-1600, y=-8000), x=-1400, y=-8000)
+    sign_z = b.math("SIGN", uz, x=-1800, y=-8100)
+    unwound = b.math("SUBTRACT", 1.0, gone, x=-1600, y=-8200)
+    twist = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", end, sign_z, x=-1600, y=-8300), 2.6,
+                                      x=-1400, y=-8300), unwound, x=-1200, y=-8300)
+    turned = b.rotate(b.combine(b.math("MULTIPLY", ux, pinch, x=-1200, y=-7900), b.math(
+        "MULTIPLY", uy, pinch, x=-1200, y=-8050), 0.0, x=-1000, y=-8000), (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), twist,
+        x=-800, y=-8000)
+    tx, ty, _tz = b.split_xyz(turned, x=-600, y=-8000)
+    stretch = b.math("MULTIPLY", uz, b.math("ADD", 1.0, b.math("MULTIPLY", end, 0.4, x=-1000, y=-8450), x=-800,
+                                            y=-8450), x=-600, y=-8400)
+    crinkle = b.node("ShaderNodeTexNoise", -1200, -8700, noise_dimensions="3D")
+    b.feed(crinkle.inputs["Vector"], pos)
+    crinkle.inputs["Scale"].default_value = 9.0
+    crinkle.inputs["Detail"].default_value = 3.0
+    crinkly = b.math("MULTIPLY_ADD", crinkle.outputs[0], 0.06, 0.97, x=-1000, y=-8700)
+    # wrapped up from loose round her: the wrap closes in
+    loose = b.math("ADD", 1.0, b.math("MULTIPLY", b.math("SUBTRACT", 1.0, form, x=-1000, y=-8900), 0.35, x=-800,
+                                      y=-8900), x=-600, y=-8900)
+    side = b.math("SIGN", ux, x=-600, y=-9100)
+    apart = b.math("MULTIPLY", b.math("MULTIPLY", gone, rx, x=-400, y=-9100), 1.6, x=-200, y=-9100)
+    candy_pos = b.combine(b.math("ADD", b.math("MULTIPLY", b.math("MULTIPLY", tx, rx, x=-400, y=-8000), b.math(
+        "MULTIPLY", crinkly, loose, x=-400, y=-8800), x=-200, y=-8000), b.math("MULTIPLY", side, apart, x=0, y=-9100),
+        x=200, y=-8000),
+                          b.math("MULTIPLY", b.math("MULTIPLY", ty, rx, x=-400, y=-8150), b.math(
+                              "MULTIPLY", crinkly, loose, x=-400, y=-8950), x=-200, y=-8150),
+                          b.math("MULTIPLY", stretch, rz, x=-400, y=-8400), x=400, y=-8100)
+    candy = b.set_position(unit, position=b.vmath("ADD", middle, candy_pos, x=600, y=-8000), x=800, y=-7800)
+    candy = shown_line(candy, b.math("MULTIPLY", form, b.math("SUBTRACT", 1.0, gone, x=800, y=-8200), x=1000,
+                                     y=-8150), 0.0, 1200, -7800)
+
+    def is_style(k, yy):
+        return b.compare("EQUAL", style, float(k), x=2600, y=yy)
+
+    shell = b.switch("GEOMETRY", is_style(0, 600), None, dome, x=2800, y=600)
+    shell = b.join([shell, b.switch("GEOMETRY", b.boolean("OR", b.boolean("OR", is_style(1, 300), is_style(2, 150),
+                                                                         x=2800, y=200), is_style(4, 0), x=3000,
+                                                          y=150), None, b.join([round_, drops, shield], x=2800,
+                                                                                y=-3200), x=3200, y=-3200),
+                    b.switch("GEOMETRY", is_style(3, -300), None, candy, x=3200, y=-7800)], x=3400, y=0)
+    shaded = b.node("GeometryNodeSetMaterial", 3600, 0)
+    b.feed(shaded.inputs["Geometry"], shell)
+    b.feed(shaded.inputs["Material"], gi.outputs["Material"])
+    smooth = b.node("GeometryNodeSetShadeSmooth", 3800, 0)
+    b.feed(smooth.inputs[0], shaded.outputs["Geometry"])
+    on = b.boolean("AND", b.compare("GREATER_THAN", radius, 0.0, x=3800, y=300),
+                   b.compare("LESS_THAN", radius, gi.outputs["Go End"], x=3800, y=450), x=4000, y=350)
+    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", on, None, smooth.outputs[0], x=4200, y=0))
+    return ng
+
+
+def ensure_shell_group():
+    if not _is_current(SHELL_GROUP):
+        build_shell_group()
+    return bpy.data.node_groups[SHELL_GROUP]
+
+
+def build_mist_group():
+    """The spray's mist (mist.py), in world units (the mist object stands at the origin, unscaled): each point is a
+    speck sprayed from a nozzle at its frame (ATTR_T) along ATTR_WAY (world units a frame); at every frame those of the
+    last Life frames fly on, slowing and spreading, a soft ball each growing as it goes; ATTR_EDGE how fresh it is."""
+    ng = _new_group(MIST_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in MIST_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -1600, 0)
+    go = b.node("NodeGroupOutput", 2000, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -1600, -300).outputs["Frame"]
+    born = b.named_attribute(ATTR_T, "FLOAT", x=-1600, y=-450)[0]
+    way = b.named_attribute(ATTR_WAY, "FLOAT_VECTOR", x=-1600, y=-600)[0]
+    life = b.math("MAXIMUM", gi.outputs["Life"], 1.0, x=-1400, y=-750)
+    age = b.math("SUBTRACT", frame, born, x=-1400, y=-300)
+    gone = b.boolean("OR", b.compare("LESS_THAN", age, 0.0, x=-1200, y=-300),
+                     b.compare("GREATER_THAN", age, life, x=-1200, y=-450), x=-1000, y=-350)
+    alive = b.delete(gi.outputs["Geometry"], gone, "POINT", x=-1000, y=0)
+    t = b.math("DIVIDE", age, life, x=-1200, y=-900, clamp=True)
+    # it slows as it goes (the distance flown eases off), drifting down a little
+    flown = b.math("MULTIPLY", life, b.math("MULTIPLY", t, b.math("SUBTRACT", 1.0, b.math("MULTIPLY", t, 0.5,
+                                                                                          x=-1000, y=-1100),
+                                                                  x=-800, y=-1100), x=-600, y=-1000), x=-400,
+                   y=-1000)
+    drift = b.combine(0.0, 0.0, b.math("MULTIPLY", b.math("MULTIPLY", t, t, x=-600, y=-1300),
+                                       b.math("MULTIPLY", gi.outputs["Size"], -6.0, x=-600, y=-1450), x=-400,
+                                       y=-1350), x=-200, y=-1300)
+    moved = b.set_position(alive, b.vmath("ADD", b.vmath("SCALE", way, scale=flown, x=-200, y=-1000), drift,
+                                          x=0, y=-1100), x=0, y=0)
+    moved = b.store(moved, ATTR_EDGE, b.math("SUBTRACT", 1.0, t, x=0, y=-300), x=200, y=0)
+    ball = b.node("GeometryNodeMeshIcoSphere", 200, -500)
+    ball.inputs["Subdivisions"].default_value = 1
+    b.feed(ball.inputs["Radius"], gi.outputs["Size"])
+    specks = b.node("GeometryNodeInstanceOnPoints", 400, 0)
+    b.feed(specks.inputs["Points"], moved)
+    b.feed(specks.inputs["Instance"], ball.outputs["Mesh"])
+    b.feed(specks.inputs["Scale"], b.math("MULTIPLY_ADD", t, 1.6, 0.6, x=200, y=-300))
+    real = b.node("GeometryNodeRealizeInstances", 600, 0)
+    b.feed(real.inputs["Geometry"], specks.outputs["Instances"])
+    shaded = b.node("GeometryNodeSetMaterial", 800, 0)
+    b.feed(shaded.inputs["Geometry"], real.outputs["Geometry"])
+    b.feed(shaded.inputs["Material"], gi.outputs["Material"])
+    b.feed(go.inputs["Geometry"], shaded.outputs["Geometry"])
+    return ng
+
+
+def ensure_mist_group():
+    if not _is_current(MIST_GROUP):
+        build_mist_group()
+    return bpy.data.node_groups[MIST_GROUP]
+
+
 def build_probe_group(field_group):
     """Modifier used while the launch positions are recorded (leave behind): stores on every vertex the ages
     whose sign change is the moment to record, so Python can tell when it comes. On the old outfit both are the age
@@ -4434,13 +4925,90 @@ def _is_current(name):
     return ng is not None and ng.get("mmd_disperse_version") == VERSION
 
 
+MAIN_GROUPS = (FIELD_GROUP, VENOM_GROUP, TARGET_GROUP, BASE_GROUP)
+
+
+def _cache_file():
+    """Where the main groups built by this very code in this Blender are kept for the next file (the user's config
+    folder, the extension's own user folder in Blender 4.2+, or MMD_DISPERSE_CACHE's; None without one). Building them
+    takes a minute or two: every node and link added makes Blender update all of a tree that has thousands."""
+    try:
+        folder = os.environ.get("MMD_DISPERSE_CACHE")
+        if not folder:
+            try:  # Blender 4.2+, installed as an extension: its own folder for user data
+                folder = bpy.utils.extension_path_user(__package__, create=True)
+            except Exception:  # (an add-on, or before 4.2)
+                folder = bpy.utils.user_resource("CONFIG", path="mmd_disperse", create=True)
+        os.makedirs(folder, exist_ok=True)
+        with open(__file__, "rb") as f:
+            digest = hashlib.md5(f.read()).hexdigest()[:12]
+    except (OSError, TypeError, ValueError):
+        return None
+    if not folder:
+        return None
+    version = bpy.app.version_string.split()[0]
+    return os.path.join(folder, "%s%d_%s_%s.blend" % (CACHE_PREFIX, VERSION, version, digest))
+
+
+def _load_cached(path):
+    """Append the main groups from the cache file `path` in the place of any outdated ones (their users moved over to
+    them). False when there is no such file or it lacks them."""
+    if path is None or not os.path.exists(path):
+        return False
+    try:
+        with bpy.data.libraries.load(path, link=False) as (data_from, data_to):
+            if not all(name in data_from.node_groups for name in MAIN_GROUPS):
+                return False
+            data_to.node_groups = list(MAIN_GROUPS)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    loaded = list(data_to.node_groups)
+    if len(loaded) != len(MAIN_GROUPS) or any(ng is None for ng in loaded):
+        for ng in loaded:
+            if ng is not None and ng.users == 0:
+                bpy.data.node_groups.remove(ng)
+        return False
+    for name, ng in zip(MAIN_GROUPS, loaded):
+        old = bpy.data.node_groups.get(name)
+        if old is not None and old != ng:
+            old.user_remap(ng)
+            bpy.data.node_groups.remove(old)
+        ng.name = name
+        ng.use_fake_user = False
+    return all(_is_current(name) for name in MAIN_GROUPS)
+
+
+def _save_cache(path):
+    """Keep the main groups in the cache file `path` (removing the ones other code left there for this Blender)."""
+    if path is None:
+        return
+    try:
+        bpy.data.libraries.write(path, {bpy.data.node_groups[name] for name in MAIN_GROUPS}, fake_user=True,
+                                 compress=True)
+    except (OSError, RuntimeError, TypeError, KeyError):
+        return
+    folder = os.path.dirname(path)
+    mine = "%s%d_%s_" % (CACHE_PREFIX, VERSION, bpy.app.version_string.split()[0])
+    for name in os.listdir(folder):
+        if name.startswith(CACHE_PREFIX) and os.path.join(folder, name) != path and (
+                name.startswith(mine) or not name.startswith("%s%d_" % (CACHE_PREFIX, VERSION))):
+            try:
+                os.remove(os.path.join(folder, name))
+            except OSError:
+                pass
+
+
 def ensure_node_groups():
-    """Return (target_group, base_group), (re)building them if missing or outdated."""
-    if not all(_is_current(name) for name in (FIELD_GROUP, VENOM_GROUP, TARGET_GROUP, BASE_GROUP)):
-        field = build_field_group()
-        venom = build_venom_group()
-        build_target_group(field, venom)
-        build_base_group(field, venom)
+    """Return (target_group, base_group), (re)building them if missing or outdated (or appending them from the cache
+    file, when this code built them before in this Blender)."""
+    if not all(_is_current(name) for name in MAIN_GROUPS):
+        path = _cache_file()
+        if not _load_cached(path):
+            field = build_field_group()
+            venom = build_venom_group()
+            build_target_group(field, venom)
+            build_base_group(field, venom)
+            _save_cache(path)
     return bpy.data.node_groups[TARGET_GROUP], bpy.data.node_groups[BASE_GROUP]
 
 
@@ -4453,3 +5021,84 @@ def input_identifiers(ng):
         for item in ng.interface.items_tree
         if getattr(item, "item_type", "SOCKET") == "SOCKET" and item.in_out == "INPUT"
     }
+
+
+def build_title_group():
+    """The finishing pose's name and stars (finish.py), in the object's own space (it hangs in front of the camera):
+    the Text in letters Size high, centred, a letter more of it shown as Reveal goes from 0 to 0.6; under it Stars
+    stars (Star Size round) popping in one after another from 0.5 on. The letters carry mmdd_white 1 (the material draws
+    them white), the stars 0 (they glow in the object's colour)."""
+    ng = _new_group(TITLE_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in TITLE_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -1800, 0)
+    go = b.node("NodeGroupOutput", 1800, 0)
+    reveal = gi.outputs["Reveal"]
+    size, star_size = gi.outputs["Size"], gi.outputs["Star Size"]
+    # the letters, one more at a time
+    text = b.node("GeometryNodeStringToCurves", -1400, 400)
+    text.name = TITLE_TEXT
+    for prop, value, socket, item in (("align_x", "CENTER", "Align X", "Center"),
+                                      ("align_y", "MIDDLE", "Align Y", "Middle")):
+        if hasattr(text, prop):  # (properties before Blender 5.0, menu sockets after)
+            setattr(text, prop, value)
+        elif text.inputs.get(socket) is not None:
+            text.inputs[socket].default_value = item
+    b.feed(text.inputs["String"], gi.outputs["Text"])
+    b.feed(text.inputs["Size"], size)
+    length = b.node("FunctionNodeStringLength", -1400, 700)
+    b.feed(length.inputs["String"], gi.outputs["Text"])
+    shown = b.math("CEIL", b.math("MULTIPLY", b.math("DIVIDE", reveal, 0.6, x=-1200, y=700, clamp=True),
+                                  length.outputs["Length"], x=-1000, y=700), x=-800, y=700)
+    index = b.node("GeometryNodeInputIndex", -1000, 550).outputs[0]
+    letters = b.delete(text.outputs["Curve Instances"], b.compare("GREATER_EQUAL", index, shown, x=-600, y=550),
+                       "INSTANCE", x=-400, y=400)
+    real = b.node("GeometryNodeRealizeInstances", -200, 400)
+    b.feed(real.inputs["Geometry"], letters)
+    fill = b.node("GeometryNodeFillCurve", 0, 400)
+    b.feed(fill.inputs["Curve"], real.outputs["Geometry"])
+    words = b.store(fill.outputs["Mesh"], "mmdd_white", 1.0, x=200, y=400)
+    # the stars, popping in one by one
+    star = b.node("GeometryNodeCurveStar", -1400, -300)
+    star.inputs["Points"].default_value = 5
+    star.inputs["Inner Radius"].default_value = 0.42
+    star.inputs["Outer Radius"].default_value = 1.0
+    star_fill = b.node("GeometryNodeFillCurve", -1200, -300)
+    b.feed(star_fill.inputs["Curve"], star.outputs["Curve"])
+    count = gi.outputs["Stars"]
+    spacing = b.math("MULTIPLY", star_size, 2.4, x=-1400, y=-700)
+    line = b.node("GeometryNodeMeshLine", -1000, -600)
+    b.feed(line.inputs["Count"], count)
+    first = b.math("MULTIPLY", b.math("MULTIPLY", b.math("SUBTRACT", count, 1.0, x=-1400, y=-850), -0.5, x=-1200,
+                                      y=-850), spacing, x=-1100, y=-850)
+    b.feed(line.inputs["Start Location"], b.combine(first, b.math("MULTIPLY", size, -1.3, x=-1200, y=-1000), 0.0,
+                                                    x=-1000, y=-900))
+    b.feed(line.inputs["Offset"], b.combine(spacing, 0.0, 0.0, x=-1200, y=-700))
+    at = b.node("GeometryNodeInputIndex", -1000, -1100).outputs[0]
+    start = b.math("MULTIPLY_ADD", at, 0.09, 0.5, x=-800, y=-1100)
+    pop = b.map_range(reveal, start, b.math("ADD", start, 0.05, x=-600, y=-1200), x=-400, y=-1100, smooth=True)
+    swell = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY", pop, math.pi, x=-400, y=-1300), x=-200,
+                                          y=-1300), 0.35, 1.0, x=0, y=-1300)
+    stars = b.node("GeometryNodeInstanceOnPoints", -200, -600)
+    b.feed(stars.inputs["Points"], line.outputs["Mesh"])
+    b.feed(stars.inputs["Instance"], star_fill.outputs["Mesh"])
+    b.feed(stars.inputs["Scale"], b.math("MULTIPLY", b.math("MULTIPLY", pop, swell, x=0, y=-1100), star_size, x=200,
+                                         y=-1100))
+    star_real = b.node("GeometryNodeRealizeInstances", 200, -600)
+    b.feed(star_real.inputs["Geometry"], stars.outputs["Instances"])
+    lit = b.store(star_real.outputs["Geometry"], "mmdd_white", 0.0, x=400, y=-600)
+    both = b.join([words, lit], x=800, y=0)
+    shaded = b.node("GeometryNodeSetMaterial", 1200, 0)
+    b.feed(shaded.inputs["Geometry"], both)
+    b.feed(shaded.inputs["Material"], gi.outputs["Material"])
+    b.feed(go.inputs["Geometry"], shaded.outputs["Geometry"])
+    return ng
+
+
+def ensure_title_group():
+    if not _is_current(TITLE_GROUP):
+        build_title_group()
+    return bpy.data.node_groups[TITLE_GROUP]

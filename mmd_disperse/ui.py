@@ -46,11 +46,29 @@ class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
             col.prop(s, "space")
         if s.path == "SPIRAL":
             col.prop(s, "spiral_pitch")
-        elif s.path == "GARMENTS":
+        elif s.path in ("GARMENTS", "SLICES"):
             col.prop(s, "garment_order")
         elif s.path == "HAND":
             col.prop(s, "hand_side")
             col.prop(s, "hand_reach")
+        elif s.path == "PICTURE":
+            col.prop(s, "picture_front")
+            if s.picture_front in ("WIPE", "FAN", "BRUSH"):
+                col.prop(s, "picture_angle")
+            elif s.picture_front in ("IRIS", "BURN", "CLOCK", "TAIJI"):
+                col.prop(s, "picture_follow")
+            else:
+                col.prop(s, "hand_side")
+                col.prop(s, "picture_brush")
+            if context.scene.camera is None:
+                col.label(text="Needs a scene camera", icon="ERROR")
+        elif s.path == "SPOTLIGHT":
+            col.prop(s, "spot_side")
+        elif s.path == "SPRAY":
+            col.prop(s, "hand_side")
+            col.prop(s, "spray_reach")
+        elif s.path == "MOTION":
+            col.prop(s, "motion_amount")
         col.prop(s, "trigger")
         if s.trigger != "NONE" and s.mask is not None and "mmd_disperse_trigger" in s.mask:
             found = float(s.mask["mmd_disperse_trigger"])
@@ -158,9 +176,44 @@ class MMDDISPERSE_PT_ring(_Panel, bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(s, "ring_size")
         col.prop(s, "ring_strength")
-        if s.path in ("SPHERE", "SURFACE", "GARMENTS", "HAND"):
+        if s.path in ("SPHERE", "SURFACE", "GARMENTS", "HAND", "PICTURE", "SPOTLIGHT", "SPRAY", "MOTION", "SLICES"):
             layout.label(text="Only with the sweeps, Spiral Up or Split from the Waist", icon="INFO")
         elif s.ring_style != "WATER":
+            layout.label(text="Uses the glow color of the wire layer", icon="INFO")
+
+
+class MMDDISPERSE_PT_picture(_Panel, bpy.types.Panel):
+    bl_label = "Picture Front"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.mmd_disperse.path == "PICTURE"
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "picture_show", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.picture_show
+        front = s.picture_front
+        if front != "SMEAR" and front != "BRUSH":
+            layout.prop(s, "picture_glow")
+        if front == "FAN":
+            layout.prop(s, "paper_color")
+        elif front == "BRUSH":
+            layout.prop(s, "ink_color")
+        elif front == "SMEAR":
+            layout.prop(s, "paint_auto")
+            col = layout.column()
+            col.active = not s.paint_auto
+            col.prop(s, "paint_color_a")
+            col.prop(s, "paint_color_b")
+        if front in ("WIPE", "IRIS", "FAN", "CLOCK", "TAIJI"):
             layout.label(text="Uses the glow color of the wire layer", icon="INFO")
 
 
@@ -288,6 +341,98 @@ class MMDDISPERSE_PT_domain(_Panel, bpy.types.Panel):
             layout.prop(s, "domain_props")
         if context.scene.camera is None:
             layout.label(text="It opens out past the scene camera", icon="INFO")
+
+
+class MMDDISPERSE_PT_shell(_Panel, bpy.types.Panel):
+    bl_label = "Shell"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "shell_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.shell_enable
+        layout.prop(s, "shell_style")
+        col = layout.column(align=True)
+        col.prop(s, "shell_size")
+        col.prop(s, "shell_form")
+        col = layout.column(align=True)
+        col.prop(s, "shell_color")
+        col.prop(s, "shell_glow")
+
+
+class MMDDISPERSE_PT_lit(_Panel, bpy.types.Panel):
+    bl_label = "Follow Spot and Spray"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.mmd_disperse.path in ("SPOTLIGHT", "SPRAY")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        if s.path == "SPOTLIGHT":
+            col = layout.column(align=True)
+            col.prop(s, "spot_energy")
+            col.prop(s, "spot_beam")
+            layout.prop(s, "spot_color")
+        else:
+            layout.prop(s, "picture_show", text="Show the Mist")
+            layout.prop(s, "spray_color")
+
+
+class MMDDISPERSE_PT_lights(_Panel, bpy.types.Panel):
+    bl_label = "Lights and Flash"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "lights_out")
+        row = layout.row()
+        row.active = s.lights_out
+        row.prop(s, "lights_level")
+        layout.prop(s, "flash_enable")
+        col = layout.column(align=True)
+        col.active = s.flash_enable
+        col.prop(s, "flash_count")
+        col.prop(s, "flash_power")
+        col.prop(s, "flash_steps")
+        layout.prop(s, "streaks")
+
+
+class MMDDISPERSE_PT_finish(_Panel, bpy.types.Panel):
+    bl_label = "Finishing Pose"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "finish_style")
+        col = layout.column(align=True)
+        col.active = s.finish_style != "NONE"
+        col.prop(s, "finish_delay")
+        col.prop(s, "finish_hold")
+        if s.finish_style == "GACHA":
+            layout.prop(s, "finish_rarity")
+            layout.prop(s, "finish_title")
+        if s.finish_style != "NONE" and context.scene.camera is None:
+            layout.label(text="Needs a scene camera", icon="ERROR")
 
 
 class MMDDISPERSE_PT_camera(_Panel, bpy.types.Panel):
@@ -421,6 +566,7 @@ class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
         elif s.entrance == "EVOLVE":
             layout.label(text="Uses the glow color and the edge glow strength", icon="INFO")
         elif s.entrance == "POOF":
+            layout.prop(s, "smoke_style")
             col = layout.column(align=True)
             col.prop(s, "smoke_count")
             col.prop(s, "smoke_size")
@@ -433,6 +579,18 @@ class MMDDISPERSE_PT_entrance(_Panel, bpy.types.Panel):
             col.prop(s, "particle_size")
             layout.prop(s, "particle_color")
             layout.label(text="The column uses the glow color", icon="INFO")
+        elif s.entrance in ("GIANT", "ARMS"):
+            col = layout.column(align=True)
+            if s.entrance == "GIANT":
+                col.prop(s, "spirit_scale")
+                col.prop(s, "spirit_distance")
+            else:
+                col.prop(s, "arm_pairs")
+                col.prop(s, "arm_spread")
+                col.prop(s, "arm_heads")
+            col = layout.column(align=True)
+            col.prop(s, "spirit_color")
+            col.prop(s, "spirit_glow")
         elif s.entrance == "LOTUS":
             layout.prop(s, "lotus_petals")
             layout.prop(s, "particle_color")
@@ -791,11 +949,16 @@ classes = (
     MMDDISPERSE_PT_edge,
     MMDDISPERSE_PT_wire,
     MMDDISPERSE_PT_ring,
+    MMDDISPERSE_PT_picture,
     MMDDISPERSE_PT_lightning,
     MMDDISPERSE_PT_flames,
     MMDDISPERSE_PT_impact,
     MMDDISPERSE_PT_soul,
     MMDDISPERSE_PT_domain,
+    MMDDISPERSE_PT_shell,
+    MMDDISPERSE_PT_lit,
+    MMDDISPERSE_PT_lights,
+    MMDDISPERSE_PT_finish,
     MMDDISPERSE_PT_camera,
     MMDDISPERSE_PT_look,
     MMDDISPERSE_PT_trails,

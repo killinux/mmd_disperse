@@ -79,6 +79,12 @@ def find_armature(ob):
     return None
 
 
+# Objects of the add-on's own that may hang in a model's hierarchy (paint on the palms and the glint in the eyes ride on
+# its bones): these properties mark them, they are not the model's meshes.
+HELPERS = ("mmd_disperse_picture_front", "mmd_disperse_glint", "mmd_disperse_finish", "mmd_disperse_light",
+           "mmd_disperse_mist", "mmd_disperse_replay", "mmd_disperse_shell", "mmd_disperse_spirit")
+
+
 def resolve(ob):
     """Model for any object of a character: root empty, armature or one of its meshes."""
     if ob is None:
@@ -86,7 +92,8 @@ def resolve(ob):
     root = find_root(ob)
     meshes = []
     for child in [root] + list(root.children_recursive):
-        if child.type == "MESH" and not _is_physics(child) and not child.hide_render and child.data.polygons:
+        if (child.type == "MESH" and not _is_physics(child) and not child.hide_render and child.data.polygons
+                and not any(key in child for key in HELPERS)):
             meshes.append(child)
     return Model(root, find_armature(ob), meshes)
 
@@ -170,6 +177,26 @@ def free_area(ob):
         area = area[~lock]
     s = ob.matrix_world.to_scale()
     return float(area.sum()) * abs(s.x * s.y * s.z) ** (2.0 / 3.0)
+
+
+def material_areas(ob, patterns):
+    """(material, world area of its faces) of each of the mesh's materials not matching the lock `patterns`."""
+    me = ob.data
+    area = np.empty(len(me.polygons), dtype=np.float32)
+    me.polygons.foreach_get("area", area)
+    idx = np.zeros(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get("material_index", idx)
+    s = ob.matrix_world.to_scale()
+    scale = abs(s.x * s.y * s.z) ** (2.0 / 3.0)
+    out = []
+    for k, slot in enumerate(ob.material_slots):
+        mat = slot.material
+        if mat is None or any(fnmatch.fnmatchcase(material_key(mat), p) for p in patterns):
+            continue
+        total = float(area[idx == k].sum()) * scale
+        if total > 0.0:
+            out.append((mat, total))
+    return out
 
 
 def remove_lock_attribute(ob):

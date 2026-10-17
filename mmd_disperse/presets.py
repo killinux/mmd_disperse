@@ -11,7 +11,9 @@ _OFF = dict(
     reactor=False, plates=False, arc_enable=False, trigger="NONE", flame_enable=False, impact_enable=False,
     soul_enable=False, domain_enable=False, shot_enable=False, time_warp="NONE", toon_style="NONE", float_up=False,
     husk_motion="STILL", trail_enable=False, step_flowers=False, look_style="NONE", holo_style="SCAN",
+    shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
 )
+# (the finishing pose is not reset: it is a layer over any preset)
 
 PRESETS = (
     ("NANOTECH", "Nanotech Suit", "The tutorial: a sphere of hexagon wires sweeps the new suit on",
@@ -369,14 +371,131 @@ PRESETS = (
      dict(_OFF, path="SPIRAL", ring_enable=True, ring_style="WATER", ring_size=1.1, exit_style="FRAGMENTS",
           frag_glow=False, particles="SHARD", particle_count=300, particle_color=(0.7, 0.9, 1.0),
           particle_glow=1.0, glow_color=(0.4, 0.75, 1.0), frag_wind_dir=(0.0, 0.0, 0.5))),
+    # --- 1.12
+    ("WIPE", "Picture Wipe", "A line of light wipes across the picture and the outfit changes wherever it has passed "
+                             "over the dancer, front and back alike (the wipe of a video edit)",
+     dict(_OFF, path="PICTURE", picture_front="WIPE", picture_angle=0.0, easing="LINEAR", exit_style="FRAGMENTS",
+          frag_glow=True, particles="STAR", particle_count=300, particle_color=(0.7, 0.9, 1.0), particle_glow=3.0,
+          glow_color=(0.3, 0.8, 1.0), frag_wind_dir=(0.6, 0.0, 0.3))),
+    ("IRIS", "Iris Out", "A ring of light opens from the dancer's chest until it has filled the picture, the outfit "
+                         "changing inside it",
+     dict(_OFF, path="PICTURE", picture_front="IRIS", picture_follow=True, easing="LINEAR", finale=True,
+          finale_white=0.4, glow_color=(1.0, 0.85, 0.4))),
+    ("FOLDING_FAN", "Folding Fan", "A paper fan opens across the picture from below and the outfit changes as its "
+                                   "ribs sweep over the dancer, petals drifting (国风)",
+     dict(_OFF, path="PICTURE", picture_front="FAN", paper_color=(0.95, 0.9, 0.78), easing="LINEAR",
+          exit_style="FRAGMENTS", frag_glow=False, particles="PETAL", particle_count=300,
+          particle_color=(1.0, 0.7, 0.75), particle_glow=0.5, glow_color=(1.0, 0.7, 0.3),
+          frag_wind_dir=(0.3, 0.2, 0.5))),
+    ("BIG_BRUSH", "Big Brush", "Three strokes of a giant brush in gold ink sweep across the picture, the outfit "
+                               "changing under the ink (巨笔; black ink for a light background)",
+     dict(_OFF, path="PICTURE", picture_front="BRUSH", ink_color=(0.78, 0.47, 0.09), easing="LINEAR",
+          exit_style="FRAGMENTS", frag_glow=False, particles="INK", particle_count=300, edge_glow=False,
+          glow_color=(0.2, 0.2, 0.2), frag_wind_dir=(0.4, 0.0, 0.2))),
+    ("FILM_BURN", "Film Burn", "The film burns through from the dancer: a hole with a glowing, charred edge spreads "
+                               "over the picture with the new outfit in it",
+     dict(_OFF, path="PICTURE", picture_front="BURN", picture_follow=True, easing="LINEAR", exit_style="FRAGMENTS",
+          frag_glow=True, particles="EMBER", particle_count=400, particle_color=(1.0, 0.5, 0.15), particle_glow=4.0,
+          glow_color=(1.0, 0.45, 0.1), frag_wind_dir=(0.0, 0.2, 0.8))),
+    ("PAINT_SMEAR", "Paint Smear", "A clap mixes paint on the palms and wherever the hands then smear it across the "
+                                   "picture the outfit changes (手搓颜料; needs a dance with a clap)",
+     dict(_OFF, path="PICTURE", picture_front="SMEAR", trigger="CLAP", paint_auto=True, picture_brush=0.06,
+          easing="LINEAR", edge_glow=False, glow_color=(1.0, 1.0, 1.0))),
+    ("CLOCK_HAND", "Clock Hand", "A clock face round the dancer, its hand ticking round in twelve jumps, the outfit "
+                                 "changing wherever it has gone round (表盘跳针)",
+     dict(_OFF, path="PICTURE", picture_front="CLOCK", picture_follow=True, easing="LINEAR", finale=True,
+          finale_white=0.3, glow_color=(1.0, 0.85, 0.5))),
+    ("TAIJI", "Taiji", "A taiji turns and grows round the dancer; wherever its white fish comes over her the outfit "
+                       "changes, until it has swallowed all of her (太极阴阳)",
+     dict(_OFF, path="PICTURE", picture_front="TAIJI", picture_follow=True, easing="LINEAR", exit_style="FRAGMENTS",
+          frag_glow=True, particles="STAR", particle_count=200, particle_color=(1.0, 0.95, 0.85), particle_glow=2.0,
+          glow_color=(1.0, 0.9, 0.7), frag_wind_dir=(0.0, 0.2, 0.6))),
+    ("DHARMA", "Dharma Form", "A giant golden copy of the dancer rises behind her, dances along and dives into her "
+                              "at the moment, the outfits swapping in a flash (法相)",
+     dict(_OFF, entrance="GIANT", easing="LINEAR", spirit_scale=3.0, spirit_color=(1.0, 0.68, 0.22),
+          spirit_glow=2.0, finale=True, finale_white=0.5, glow_color=(1.0, 0.75, 0.3))),
+    ("SIX_ARMS", "Three Heads, Six Arms", "Golden arms open out about the dancer's shoulders and heads turn out to "
+                                          "either side, the outfits swap in a flash and they fold back (三头六臂, Ne "
+                                          "Zha 2)",
+     dict(_OFF, entrance="ARMS", easing="LINEAR", arm_pairs=2, arm_heads=True, spirit_color=(1.0, 0.68, 0.22),
+          spirit_glow=2.0, finale=True, finale_white=0.4, glow_color=(1.0, 0.75, 0.3))),
+    ("THOUSAND_HANDS", "Thousand Hands", "Eight pairs of golden arms fan out about the dancer like a peacock's tail, "
+                                         "the outfits swap in a flash and they fold back (千手开屏)",
+     dict(_OFF, entrance="ARMS", easing="LINEAR", arm_pairs=8, arm_spread=0.35, arm_heads=False,
+          spirit_color=(1.0, 0.72, 0.3), spirit_glow=2.0, finale=True, finale_white=0.4,
+          glow_color=(1.0, 0.8, 0.4))),
+    ("BARRIER", "Barrier Dome", "A dome of light rises over the dancer from the floor while the outfit changes inside "
+                                "it, and shatters at the moment (结界; KPop Demon Hunters' Honmoon)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", shell_enable=True, shell_style="DOME", shell_color=(1.0, 0.78, 0.35),
+          shell_glow=2.0, glow_color=(1.0, 0.8, 0.4))),
+    ("BUBBLE", "Bubble", "A soap bubble swells round the dancer, the outfit changes inside it and it pops at the "
+                         "moment (Glinda's bubble)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", shell_enable=True, shell_style="BUBBLE",
+          shell_color=(1.0, 0.85, 0.95), shell_glow=1.5, glow_color=(1.0, 0.75, 0.95))),
+    ("WATER_SHELL", "Water Shell", "A ball of rippling water forms round the dancer and bursts into drops at the "
+                                   "moment",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", shell_enable=True, shell_style="WATER",
+          shell_color=(0.35, 0.65, 1.0), shell_glow=1.5, glow_color=(0.4, 0.75, 1.0))),
+    ("TATTOO", "Glowing Tattoos", "Purple marks like tattoos spread over the old outfit ahead of the change, and "
+                                  "glitter bursts off it (KPop Demon Hunters)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", old_surface="TATTOO", surface_color=(0.55, 0.15, 1.0),
+          exit_style="FRAGMENTS", frag_glow=True, particles="GLITTER", particle_count=900,
+          particle_color=(1.0, 0.55, 0.9), particle_glow=2.0, glow_color=(0.8, 0.4, 1.0),
+          frag_wind_dir=(0.0, 0.2, 0.8))),
+    ("FOLLOW_SPOT", "Follow Spot", "The stage goes dark, a follow spot finds the dancer and the outfit changes "
+                                   "wherever its light falls, star streaks at the moment (needs a dance)",
+     dict(_OFF, path="SPOTLIGHT", easing="LINEAR", lights_out=True, lights_level=0.08, spot_energy=1.0,
+          spot_beam=0.6, spot_color=(1.0, 0.94, 0.82), streaks=True, finale=True, finale_white=0.3,
+          glow_color=(1.0, 0.9, 0.7))),
+    ("SPRAY_ON", "Spray-On Outfit", "The palms spray the new outfit onto the body in a fine mist, coat by coat "
+                                    "(Coperni's spray-on dress; needs a dance)",
+     dict(_OFF, path="SPRAY", easing="LINEAR", spray_color=(0.85, 0.93, 1.0), glow_color=(0.7, 0.9, 1.0))),
+    ("LIVING_DRESS", "Living Dress", "What moves lights up first: the dancing arms and legs change first and the "
+                                     "still parts last (Iris van Herpen's living dress; needs a dance)",
+     dict(_OFF, path="MOTION", easing="LINEAR", motion_amount=0.6, exit_style="FRAGMENTS", frag_glow=True,
+          particles="STAR", particle_count=300, particle_color=(0.6, 1.0, 0.8), particle_glow=3.0,
+          glow_color=(0.3, 1.0, 0.7), frag_wind_dir=(0.0, 0.2, 0.6))),
+    ("CAMERA_FLASH", "Camera Flashes", "Camera flashes go off and the change moves on a step with each; the last one "
+                                       "shows the new outfit complete (#闪光灯变装)",
+     dict(_OFF, path="SPHERE", easing="LINEAR", flash_enable=True, flash_count=4, flash_steps=True, flash_power=1.0,
+          glow_color=(1.0, 1.0, 1.0))),
+    ("PHOTO_POSE", "Photo Pose", "After the change the dance freezes in a polaroid's frame for a beat and then goes on "
+                                 "(写真定格)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", finish_style="PHOTO", finish_delay=0.5, finish_hold=1.2,
+          finale=True, finale_white=0.3, glow_color=(1.0, 0.95, 0.85))),
+    ("GACHA", "Gacha Pull", "A golden meteor falls onto the dancer, a pillar of light rises, and her name and five "
+                            "stars appear while she holds still (抽卡出金)",
+     dict(_OFF, entrance="SWAP", easing="LINEAR", finish_style="GACHA", finish_rarity="GOLD", finish_delay=0.6,
+          finish_hold=1.5, glow_color=(1.0, 0.8, 0.35))),
+    ("EYE_CONTACT", "Eye Contact", "The moment the dancer looks into the camera a star glints in her eyes and the "
+                                   "outfit changes from there (#对视变装; needs a dance)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", trigger="GAZE", exit_style="FRAGMENTS", frag_glow=True,
+          particles="STAR", particle_count=300, particle_color=(1.0, 0.9, 1.0), particle_glow=3.0,
+          glow_color=(1.0, 0.7, 0.9), frag_wind_dir=(0.0, 0.2, 0.8))),
+    ("TOON_BOOM", "Toon Explosion", "A cartoon explosion bursts out of the dancer and hides the swap, then burns out "
+                                    "into black smoke (卡通爆炸)",
+     dict(_OFF, entrance="POOF", smoke_style="BOOM", easing="LINEAR", glow_color=(1.0, 0.6, 0.2))),
+    ("SLICED", "Sliced", "The body is cut into bands that change one after another in a random order, the background "
+                         "showing between (切片拼装)",
+     dict(_OFF, path="SLICES", garment_order="RANDOM", easing="LINEAR", glow_color=(1.0, 1.0, 1.0))),
+    ("REWIND", "Rewind and Replay", "The suit-up happens in a flash, then the picture rewinds like a tape and plays it "
+                                    "again slowly before catching up with the music (Space Sheriff Gavan; needs a "
+                                    "dance)",
+     dict(_OFF, path="SPHERE", easing="LINEAR", time_warp="REWIND", warp_length=2.5, wire_enable=True,
+          exit_style="FRAGMENTS", frag_glow=True, particles="STAR", particle_count=300,
+          particle_color=(0.8, 0.9, 1.0), particle_glow=3.0, glow_color=(0.4, 0.8, 1.0),
+          frag_wind_dir=(0.0, 0.2, 0.6))),
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
-BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles", "spiral_pitch", "trigger", "garment_order"}
+BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles", "spiral_pitch", "trigger", "garment_order",
+              "picture_front", "picture_angle", "picture_follow", "picture_brush", "spot_side", "spray_reach",
+              "motion_amount"}
 WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPARKLE_SPIRAL", "BROOCH", "MARK50",
                "LIGHTNING", "COCOON", "CLAP", "TURN", "HAND_SWIPE", "BLUE_FLAME", "SUPER_AURA", "LOTUS", "HUSK",
                "SOUL_DEPART", "IMPACT", "IDOL", "SOUL_RINGS", "DOMAIN", "SKY_MIRROR", "CONCERT", "VELOCITY",
-               "SPLIT", "FIGURINE", "NEZHA", "HEART", "SILHOUETTE", "STARRY_VEIL"}
+               "SPLIT", "FIGURINE", "NEZHA", "HEART", "SILHOUETTE", "STARRY_VEIL", "IRIS", "CLOCK_HAND", "DHARMA",
+               "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

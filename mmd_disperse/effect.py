@@ -5,11 +5,11 @@ import math
 import time
 
 import bpy
-import numpy as np
 from mathutils import Matrix, Vector
 
-from . import (arrival, beats, compositor, domain, impact, launch, materials, motion, particles, ribbons, rings, shots,
-               timewarp, toon, trails, venom)
+from . import (arrival, beats, compositor, domain, finish, glint, impact, launch, lights, materials, mist, motion,
+               particles, picture, replay, ribbons, rings, sampling, shell, shots, spirit, timewarp, toon, trails,
+               venom)
 from . import model as mdl
 from .node_groups import BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups, input_identifiers
 
@@ -38,7 +38,19 @@ P_PITCH = "mmd_disperse_pitch"  # the spiral's pitch the arrival field was built
 P_BROOCH = "mmd_disperse_brooch"  # world rest position the old outfit is sucked into (the start bone)
 P_TRIGGER = "mmd_disperse_trigger"  # the frame the move of the dance that starts it was found on (-1: none found)
 P_SPEED = "mmd_disperse_speed"  # hand path: how far the front gets in a frame (its keys go linearly at that pace)
+P_PICTURE = "mmd_disperse_picture"  # picture path: the front and what the camera saw while it was sampled
+P_PALETTE = "mmd_disperse_palette"  # ... the paint smear's two colours, the new outfit's main ones (6 floats)
 FLAKES = ("FRAGMENTS", "SUCK")  # exit styles that break the old outfit into flakes
+P_LIT = "mmd_disperse_lit"  # 1.12, lit / sprayed / moved: what building found (the spot's aim, the palms' nozzles)
+P_STEPPED = "mmd_disperse_stepped"  # ... the interpolations of the mask's own keys while the flash steps hold them
+LIT = ("SPOTLIGHT", "SPRAY", "MOTION")  # 1.12: lit by a follow spot, sprayed on, the moving parts first
+SAMPLED = ("HAND", "PICTURE") + LIT  # paths found by playing the transformation (sampling.py), at the pace of P_SPEED
+SPOT_ABOVE = 2.2  # the follow spot hangs this many model heights above the dancer's middle ...
+SPOT_AHEAD = 0.9  # ... this far in front of her (towards the camera) ...
+SPOT_ASIDE = 0.9  # ... and this far out to the side its beam comes in from
+LIGHTS_BACK = 0.6  # seconds after the big moment the lights come back up (lights out)
+STEP_KEY = "JITTER"  # keyframe type marking the keys the camera flash's steps add to the mask
+PICTURE_NOISE = 0.3  # the picture path's edge noise is this share of the panel's, so the change keeps to the front
 
 # Sizes as a fraction of the model height (tuned on Tifa, ~20.7 MMD units tall).
 SIZE_RATIOS = {
@@ -97,6 +109,7 @@ SIZE_RATIOS = {
     "shock_size": 0.6,
     "split_distance": 0.4,
     "trail_width": 0.035,
+    "spray_reach": 0.35,
 }
 PAINT_STYLES = ("NONE", "LINEART", "INK", "CODE")
 PAINT_CELL = 0.012  # size of the hatching / washes of the drawings, fraction of the model height
@@ -113,7 +126,7 @@ CLAMP_AT = 0.8  # share of the wave at which the halves of the new outfit clamp 
 # entrances where all of the new outfit is there at that moment (the old one goes then): the halves clamp shut, the
 # ghosts meet, the evolution flash ends, the smoke puff hides the swap, the new outfit has stood up out of the shadow
 # or shimmered in in the transporter beam, it simply swaps, or the lotus bud is shut round it
-AT_ONCE = ("CLAMP", "GHOSTS", "EVOLVE", "POOF", "SHADOW", "BEAM", "SWAP", "LOTUS")
+AT_ONCE = ("CLAMP", "GHOSTS", "EVOLVE", "POOF", "SHADOW", "BEAM", "SWAP", "LOTUS", "GIANT", "ARMS")
 LOTUS_END = 1.65  # share of the moment by which the lotus has opened and sunk away
 FLAME_AFTER = 0.25  # share of the wave the flames' aura burns on after the big moment
 SHOCK_SPAN = 0.2  # share of the wave the shockwave takes to spread
@@ -125,6 +138,7 @@ FIGURINE_AWAY = (0.3, 0.12)  # where the figurine lands: to the side and towards
 SHATTER_AT = 1.0  # share of the wave at which the old outfit goes all at once (exit timing): when the wave is done
 BEAT_REACH = 2.0  # seconds a moment may wait for the next beat
 WORLD_CLOSE = 0.12  # share of the wave the world change takes to shatter or close back
+SHELL_GO = 0.12  # share of the wave the shell takes to go after the big moment
 NOISE_CELLS_PER_HEIGHT = 6.0
 
 
@@ -311,6 +325,8 @@ def _extra(settings, wave, has_base, has_target):
         extra = max(extra, big + SOUL_AFTER * wave - wave)
     if settings.domain_enable:  # 1.11: the world change stays a while, then shatters or closes back
         extra = max(extra, _world_times(settings, wave, big)[2] - wave)
+    if settings.shell_enable:  # 1.12: the shell goes after the big moment (and the mask a little past that)
+        extra = max(extra, big + (SHELL_GO + 0.01) * wave - wave)
     return extra
 
 
@@ -323,15 +339,15 @@ def _world_times(settings, wave, big):
 
 
 def _scale_curves(ob):
-    """F-curves animating the object's scale (the mask radius)."""
-    ad = ob.animation_data
-    action = ad.action if ad is not None else None
+    """F-curves animating the object's scale (the mask radius), also while a finishing pose holds it (in a strip of
+    timewarp's)."""
+    action, slot = timewarp.strip_action(ob)
     if action is None:
         return []
     curves = getattr(action, "fcurves", None)  # gone in Blender 5.0: layered actions keep them per slot
     if curves is None:
         from bpy_extras import anim_utils
-        bag = anim_utils.action_get_channelbag_for_slot(action, ad.action_slot)
+        bag = anim_utils.action_get_channelbag_for_slot(action, slot)
         curves = bag.fcurves if bag is not None else []
     return [fc for fc in curves if fc.data_path == "scale"]
 
@@ -478,6 +494,7 @@ def _cleanup_mesh(ob):
         arrival.remove(ob)
         launch.remove(ob)
         venom.remove(ob)
+        spirit.remove_limbs(ob)
     for key in (P_MASK, P_ROLE, P_REST, P_ARM):
         if key in ob:
             del ob[key]
@@ -513,15 +530,24 @@ def remove_effect(mask):
         if settings is not None and settings.mask == mask:
             compositor.update_white_flash(scene, None, 0.0, 0.0, 0.0, 0.0)
             compositor.update_impact(scene, None, 0)
+            compositor.update_streaks(scene, None, 1.0)
             compositor.remove_look(scene)
     ribbons.remove(mask)
     rings.remove(mask)
     impact.remove(mask)
+    picture.remove(mask)
+    lights.remove(mask)
+    mist.remove(mask)
+    glint.remove(mask)
+    finish.remove(mask)
+    replay.remove(mask)
     domain.remove(mask)
     shots.remove(mask)
     timewarp.restore(mask)
     toon.remove(mask)
     trails.remove(mask)
+    spirit.remove(mask)
+    shell.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
     bpy.data.objects.remove(mask)
     if action is not None and action.users == 0:
@@ -736,6 +762,125 @@ def _update_world(settings, mask, wave, big):
                 models[0].armature if models else None)
 
 
+def _unstep(mask):
+    """Take the camera flash's steps (keys of type STEP_KEY) out of the mask's keys, giving its own keys back their
+    interpolation."""
+    saved = str(mask.get(P_STEPPED, "")).split(",") if mask.get(P_STEPPED) else []
+    for fc in _scale_curves(mask):
+        points = fc.keyframe_points
+        for k in reversed([k for k in points if k.type == STEP_KEY]):
+            points.remove(k)
+        for k, how in zip(points, saved):
+            k.interpolation = how
+        fc.update()
+    if P_STEPPED in mask:
+        del mask[P_STEPPED]
+
+
+def _step(mask, frames):
+    """Hold the mask's growth between the camera flashes at `frames` (sorted), stepping on at each to where it would
+    have grown by then: constant keys of type STEP_KEY, the mask's own keys before the last flash constant too."""
+    curves = _scale_curves(mask)
+    if not curves or not frames:
+        return
+    mask[P_STEPPED] = ",".join(k.interpolation for k in curves[0].keyframe_points)
+    for fc in curves:
+        values = [fc.evaluate(f) for f in frames]
+        own = [k.co[0] for k in fc.keyframe_points]
+        for k in fc.keyframe_points:
+            if k.co[0] < frames[-1]:
+                k.interpolation = "CONSTANT"
+        for i, (f, v) in enumerate(zip(frames, values)):
+            if any(abs(f - x) < 1e-3 for x in own):  # (a key of the mask's own there: a step key would replace it,
+                continue                            # and _unstep would then take it away)
+            k = fc.keyframe_points.insert(f, v, options={"FAST"})
+            k.type = STEP_KEY
+            k.interpolation = "CONSTANT" if i < len(frames) - 1 else "LINEAR"
+        fc.update()
+
+
+def _spread_flashes(start, moment, count, beat_frames):
+    """`count` flash frames spread evenly from the start to the big moment (the last at it), each on the nearest beat
+    when there are beats (a beat no further than half the gap)."""
+    gap = (moment - start) / float(max(count, 1))
+    frames = []
+    for k in range(1, count + 1):
+        f = start + k * gap if k < count else moment
+        near = min(beat_frames, key=lambda b: abs(b - f)) if beat_frames and k < count else None
+        if near is not None and abs(near - f) <= 0.5 * gap and start < near < moment:
+            f = near
+        frames.append(float(round(f)) if k < count else float(f))
+    return sorted(set(f for f in frames if f > start))
+
+
+def _smoke_material(settings):
+    """The smoke puff's material: white smoke, or the toon explosion's fire burning out into black smoke."""
+    if settings.entrance != "POOF":
+        return None
+    if settings.smoke_style == "BOOM":
+        return materials.ensure_explosion_material()
+    return materials.ensure_smoke_material()
+
+
+def _update_lights(settings, mask, wave, big):
+    """1.12: the follow spot (Under the Spotlight) and the spray's mist (Sprayed On) from what building found, lights
+    out round the transformation, the camera flash at the big moment `big` (a mask radius: the swap, or the new outfit
+    complete), the change stepping on with its flashes, the lens streaks."""
+    scene = settings.id_data
+    fps = scene.render.fps / scene.render.fps_base
+    height = max(settings.size_reference, 1e-3)
+    rec = mask.get(P_LIT)
+    rec = rec.to_dict() if rec is not None else {}
+    kind = rec.get("kind")
+    collection = mask.users_collection[0] if mask.users_collection else scene.collection
+    lights.sync_spot(settings, mask, rec if kind == "SPOTLIGHT" else None, height, collection)
+    mist.sync(settings, mask, rec if kind == "SPRAY" else None, height, collection, sampling.SPRAY_ANGLE)
+    _unstep(mask)
+    moment = _frame_at(mask, big) if wave > 0.0 else None
+    lights.sync_dim(settings, mask, settings.frame_start, None if moment is None else moment + LIGHTS_BACK * fps)
+    frames = []
+    if moment is not None and settings.flash_enable:
+        beat_frames = beats.beat_frames() if settings.beat_sync else []
+        if settings.flash_steps and settings.direction == "GROW":
+            frames = _spread_flashes(settings.frame_start, moment, settings.flash_count, beat_frames)
+            _step(mask, frames)
+        else:
+            frames = lights.flash_frames(moment, settings.flash_count, beat_frames, fps)
+    lights.sync_flash(settings, mask, frames, height, scene.camera)
+    # the toon explosion's light, from where the outfits are, at the moment
+    boom = settings.entrance == "POOF" and settings.smoke_style == "BOOM" and moment is not None
+    models = _models(settings)
+    middle = None
+    if boom and models:
+        lo, hi = mdl.rest_bounds([ob for m in models for ob in m.meshes])
+        middle = (lo + hi) * 0.5
+    lights.sync_boom(settings, mask, settings.frame_start if boom else None, moment, middle, height, collection)
+    if settings.streaks:
+        try:
+            compositor.add_streaks(scene)
+        except RuntimeError:
+            pass
+    compositor.update_streaks(scene, moment if settings.streaks else None, fps)
+
+
+def _update_shell(settings, mask, wave, big):
+    """Create / remove the shell round the dancer to match the panel and push its timing: it forms over a share of the
+    way to the big moment `big` (a mask radius) and goes then."""
+    meshes = [ob for ob in effect_objects(mask) if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
+    if not settings.shell_enable or wave <= 0.0 or not meshes:
+        shell.remove(mask)
+        return
+    lo, hi = mdl.rest_bounds(meshes)
+    models = _models(settings)
+    spot = Vector(((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z))
+    go_end = big + SHELL_GO * wave
+    reach = float(mask.get(P_REACH, 0.0))
+    if reach > 0.0:  # (the shell shows while the mask is short of its end: the mask must get past it, on the beat too)
+        go_end = min(go_end, reach * (1.0 - 1e-4))
+    shell.sync(settings, mask, spot, lo.z, max(hi.z - lo.z, 1e-3), max(settings.shell_form * big, 1e-4), big,
+               go_end, models[0].armature if models else None)
+
+
 def _particle_object(settings):
     """Object the old outfit's particles are made of (built-in petal / butterfly, or the user's)."""
     if settings.particles == "OBJECT":
@@ -946,9 +1091,12 @@ def sync(settings):
     # 1.11: the dance frozen or slowed round the big moment (before anything below plays it), the camera move then
     wave_big = float(mask.get(P_WAVE, 0.0))
     big_frame = _big_frame(settings, mask, wave_big)
-    timewarp.sync(settings, mask, _models(settings), big_frame)
+    held = finish.hold(settings, mask, _models(settings), big_frame)  # 1.12: the finishing pose holds everything still
+    timewarp.sync(settings, mask, _models(settings), big_frame, held)
+    replay.sync(settings, mask, big_frame)  # 1.12: the tape look of Rewind and Replay
     update_white_flash(settings)
     update_impact(settings)
+    picture.sync(settings, mask, _models(settings))  # 1.12: the front on the picture
     models = _models(settings)
     focus = _focus(mask)
     shots.sync(settings, mask, big_frame, focus, models[0].armature if models else None,
@@ -1015,11 +1163,22 @@ def sync(settings):
     materials.update_soul_material(settings.soul_strength)
     shock_start = _impact_start(settings, mask, wave_at) if wave_at > 0.0 else 0.0
     _update_world(settings, mask, wave_at, big)
+    _update_shell(settings, mask, wave_at, big)
+    _update_lights(settings, mask, wave_at, big)
+    finish.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None, held)
+    glint.sync(settings, mask, next(iter(_models(settings)), None))  # 1.12: the star in the eyes (eye contact)
     # 1.11: cartoon physics at the big moment (the first frame of it: the swap, or the new outfit complete), about an
     # anchor under the old model's hips; the float lands then
     landing = _frame_at(mask, big) if wave_at > 0.0 else None
     landing = None if landing is None else int(math.ceil(landing - 1e-6))
     toon_anchor = toon.sync(settings, mask, next(iter(_models(settings)), None), settings.frame_start, landing)
+    # 1.12: the spirit self (the Dharma form, three heads and six arms), about empties following the dancer's joints
+    outfit_meshes = [ob for ob in objects if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
+    pivots = spirit.sync(settings, mask, next(iter(_models(settings)), None), outfit_meshes) or {}
+    spirit_on = bool(pivots)
+    if spirit_on:
+        materials.ensure_spirit_material()
+    materials.update_spirit_material(settings.spirit_color, settings.spirit_glow)
     fps = scene.render.fps / scene.render.fps_base
     common = {
         "Mask": mask,
@@ -1027,7 +1186,7 @@ def sync(settings):
         "Use Arrival": mask.get(P_PATH, "SPHERE") != "SPHERE",
         "Noise Scale": settings.noise_scale,
         "Noise Detail": settings.noise_detail,
-        "Noise Amount": settings.noise_amount,
+        "Noise Amount": settings.noise_amount * (PICTURE_NOISE if mask.get(P_PATH) == "PICTURE" else 1.0),
         "Glitch": settings.glitch_enable,
         "Glitch Width": settings.glitch_width,
         "Slice Height": settings.glitch_slice,
@@ -1062,7 +1221,8 @@ def sync(settings):
         "Beam Material": bpy.data.materials.get(materials.BEAM_MATERIAL),
         "Star Object": particles.ensure_asset("STAR", settings.id_data) if beam else None,
         "Star Size": settings.particle_size,
-        "Swap": settings.entrance == "SWAP",
+        # (the spirit self's entrances swap all at once at the moment too)
+        "Swap": settings.entrance in ("SWAP",) + tuple(spirit.MODES),
         "Lotus": lotus,
         "Lotus Petals": settings.lotus_petals,
         "Lotus Material": bpy.data.materials.get(materials.LOTUS_MATERIAL),
@@ -1092,7 +1252,17 @@ def sync(settings):
         "Toon Anchor": toon_anchor,
         "Toon Gap": toon.GAP * height,
         "Card Material": bpy.data.materials.get(materials.TOON_CARD_MATERIAL),
+        "Spirit": spirit.MODES.get(settings.entrance, 0) if spirit_on else 0,
+        "Spirit Scale": settings.spirit_scale,
+        "Spirit Offset": tuple(spirit.back(scene, outfit_meshes) * settings.spirit_distance * height)
+        if outfit_meshes else (0.0, 0.0, 0.0),
+        "Spirit Height": height,
+        "Spirit Pairs": settings.arm_pairs,
+        "Spirit Spread": settings.arm_spread,
+        "Spirit Heads": settings.arm_heads,
+        "Spirit Material": bpy.data.materials.get(materials.SPIRIT_MATERIAL),
     }
+    common.update(pivots)
     values = {
         TARGET_GROUP: dict(common, **{
             "Subdivide": settings.subdivide,
@@ -1142,7 +1312,7 @@ def sync(settings):
             "Outline Material": materials.ensure_outline_material() if settings.paint_style != "NONE" else None,
             "Poof": settings.entrance == "POOF",
             "Smoke Size": settings.smoke_size,
-            "Smoke Material": materials.ensure_smoke_material() if settings.entrance == "POOF" else None,
+            "Smoke Material": _smoke_material(settings),
         }),
         BASE_GROUP: dict(common, **{
             "Shrink": settings.base_shrink,
@@ -1270,10 +1440,10 @@ def sync(settings):
             _update_paint(ob, settings)
         elif role == "BASE":
             flakes = settings.exit_style in FLAKES + ("CHUNKS",) and settings.frag_glow
-            glint = settings.entrance == "SCALES" and settings.edge_glow  # the turning scales glint
+            shiny = settings.entrance == "SCALES" and settings.edge_glow  # the turning scales glint
             # it glows darkly while it slides into the shadow, or as it shimmers away in the beam
             timeline = settings.entrance in ("SHADOW", "BEAM") and settings.edge_glow
-            _update_glow(ob, settings, flakes or flashes or settings.silhouette or glint or evolve or timeline,
+            _update_glow(ob, settings, flakes or flashes or settings.silhouette or shiny or evolve or timeline,
                          settings.frag_glow_strength if (flakes or settings.silhouette) and not (evolve or timeline)
                          else settings.edge_glow_strength)
             _update_surface(ob, settings)
@@ -1332,22 +1502,78 @@ def _hand_arrival(context, settings, owner, meshes, height, location):
     """Hand path: arrival distances (one array per mesh) and the front's pace (world units a frame). A point arrives
     when a hand first sweeps over it during the transformation (a body height of the front for the whole of it), the
     rest of the body in turn from there, along it."""
-    scene = context.scene
     start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
-    speed = height / float(end - start)
     sides = {"BOTH": ("L", "R"), "LEFT": ("L",), "RIGHT": ("R",)}[settings.hand_side]
     reach = settings.hand_reach
     if settings.trail_enable and settings.trail_style in ("SLEEVE", "SASH"):
         reach += settings.trail_width  # (the silk sweeps a wider way than the bare hand)
-    touches = motion.hand_touches(scene, owner.armature, meshes, range(start, end + 1), sides, reach)
-    known = [np.where(np.isfinite(t), (t - start) * speed, np.inf) for t in touches]
-    points = [mdl.rest_points_world(ob) for ob in meshes]
-    tris = [arrival._triangles(ob) for ob in meshes]
-    if any(np.isfinite(k).any() for k in known):
-        return arrival.surface_fill(points, tris, known, height), speed
-    # the hands never came near the body: flow out from the wrists
+    # (the hands never came near the body: flow out from the wrists)
     seeds = arrival.limb_points(owner.armature)[:2] or [location]
-    return arrival.surface_distances(points, tris, seeds, height), speed
+    return sampling.arrival(context.scene, owner.armature, meshes, start, end,
+                            sampling.HandSweep(owner.armature, sides, reach), height, seeds)
+
+
+def _picture_arrival(context, settings, owner, meshes, height, location):
+    """Picture path: arrival distances, the front's pace and what the camera saw (sampling.PictureFront): a point
+    arrives when the front on the picture comes over it, a body height of the front for the whole transformation, the
+    rest of the body in turn from there."""
+    scene = context.scene
+    start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
+    if sampling.camera_at(scene, start) is None:
+        raise EffectError("The picture path needs a scene camera")
+    question = sampling.picture_question(scene, settings, owner.armature, start, end)
+    values, speed = sampling.arrival(scene, owner.armature, meshes, start, end, question, height, [location])
+    return values, speed, question
+
+
+def _lit_arrival(context, settings, owner, meshes, height, location):
+    """The paths Under the Spotlight, Sprayed On and Moving Parts First: arrival distances, the front's pace and what
+    was asked (sampling.Spotlight / Spray / Moving: their records make the follow spot and the mist)."""
+    scene = context.scene
+    start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
+    armature = owner.armature
+    if armature is None:
+        raise EffectError("This path needs a model with an armature")
+    path = settings.path
+    if path == "SPOTLIGHT":
+        lo, hi = mdl.rest_bounds(meshes)
+        middle = Vector(((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z + 0.6 * (hi.z - lo.z)))
+        camera = sampling.camera_at(scene, start)
+        toward = camera.matrix_world.translation - middle if camera is not None else Vector((0.0, -1.0, 0.0))
+        toward.z = 0.0
+        toward = toward.normalized() if toward.length > 1e-6 else Vector((0.0, -1.0, 0.0))
+        up = Vector((0.0, 0.0, 1.0))
+        right = (-toward).cross(up)  # the picture's right, seen from the camera
+        side = -right if settings.spot_side == "LEFT" else right
+        source = middle + toward * (SPOT_AHEAD * height) + up * (SPOT_ABOVE * height) + side * (SPOT_ASIDE * height)
+        question = sampling.Spotlight(armature, source, side, start, end, height)
+    else:
+        points = [mdl.rest_points_world(ob) for ob in meshes]
+        if path == "SPRAY":
+            sides = {"BOTH": ("L", "R"), "LEFT": ("L",), "RIGHT": ("R",)}[settings.hand_side]
+            needs = [0.6 + 0.8 * sampling.patches(p, height) for p in points]
+            question = sampling.Spray(armature, sides, settings.spray_reach, needs, height)
+        else:
+            needs = [settings.motion_amount * height * (0.5 + sampling.patches(p, height, 3.0)) for p in points]
+            question = sampling.Moving(armature, needs)
+    values, speed = sampling.arrival(scene, armature, meshes, start, end, question, height, [location])
+    return values, speed, question
+
+
+def _lit_record(path, question):
+    """What the lit / sprayed / moved paths found, to keep on the mask (flat lists of floats): the follow spot's source
+    and its aim every frame, the palms' nozzles every frame (frame, position, direction)."""
+    out = {"kind": path}
+    if path == "SPOTLIGHT":
+        frames = sorted(question.aims)
+        out.update({"source": [float(v) for v in question.source], "frames": [float(f) for f in frames],
+                    "aims": [float(v) for f in frames for v in question.aims[f][0]],
+                    "halves": [float(question.aims[f][1]) for f in frames]})
+    elif path == "SPRAY":
+        for side, way in question.nozzles.items():
+            frames = sorted(way)
+            out["nozzle_" + side] = [float(v) for f in frames for v in (f,) + tuple(way[f][0]) + tuple(way[f][1])]
+    return out
 
 
 def _shift_keys(mask, delta):
@@ -1367,11 +1593,12 @@ def _frame_at(mask, radius):
     if len(keys) < 2:
         return None
     frame, last = keys[0].co[0], keys[-1].co[0]
-    while frame <= last:
-        if curves[0].evaluate(frame) >= radius:
+    reach = radius - 1e-5 * max(1.0, abs(radius))  # (the radius is often the last key's own value)
+    while frame < last:
+        if curves[0].evaluate(frame) >= reach:
             return frame
         frame += 0.25
-    return None
+    return last if curves[0].evaluate(last) >= reach else None  # (a last key between the quarters)
 
 
 def build(context, settings):
@@ -1453,6 +1680,10 @@ def build(context, settings):
         frame = (owner.root or meshes[0]).matrix_world.to_3x3().normalized()
         if path == "HAND":
             values, speed = _hand_arrival(context, settings, owner, meshes, height, location)
+        elif path == "PICTURE":
+            values, speed, seen = _picture_arrival(context, settings, owner, meshes, height, location)
+        elif path in LIT:
+            values, speed, lit = _lit_arrival(context, settings, owner, meshes, height, location)
         else:
             patterns = mdl.split_patterns(settings.lock_patterns) if settings.use_lock else []
             keys = [[None if s.material is None or any(fnmatch.fnmatchcase(mdl.material_key(s.material), q)
@@ -1481,10 +1712,20 @@ def build(context, settings):
     collection = root.users_collection[0] if root.users_collection else context.scene.collection
     mask = _create_mask(settings, location, owner.armature, bone, collection, radius, path, owner.root,
                         layout["axis"] if layout else None, speed)
-    if speed > 0.0:  # the hand path runs at its own pace: the transformation lasts as long as that takes
+    if speed > 0.0:  # the hand and picture paths run at their own pace: the transformation lasts as long as that takes
         mask[P_SPEED] = speed
         settings.frame_end = int(math.ceil(settings.frame_start + radius / speed))
-    if found is not None and settings.trigger in motion.MOMENTS and path != "HAND":
+    if path == "PICTURE":  # what the camera saw, for the sheet that draws the front (picture.py)
+        mask[P_PICTURE] = picture.record(seen)
+        if settings.picture_front == "SMEAR":  # the paint: the new outfit's two main colours
+            outfit = target or base
+            patterns = mdl.split_patterns(settings.lock_patterns) if settings.use_lock else []
+            colors = picture.outfit_colors([pair for ob in outfit.meshes for pair in mdl.material_areas(ob, patterns)])
+            if len(colors) >= 2:
+                mask[P_PALETTE] = [v for c in colors[:2] for v in c]
+    if path in LIT:  # the follow spot's aim, the palms' nozzles (for the light, its beam and the mist)
+        mask[P_LIT] = _lit_record(path, lit)
+    if found is not None and settings.trigger in motion.MOMENTS and path not in SAMPLED:
         # the swap (or the middle of the wave) as the back is turned to the camera, at the bottom of the squat, the top
         # of the jump, as the feet land
         aim = _moment(settings, wave) if _old_at_once(settings) else 0.5 * wave

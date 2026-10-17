@@ -3,6 +3,8 @@ for the finale.
 
 Legacy EEVEE (before 4.2) has its own bloom; newer EEVEE and Cycles need a compositor Glare node."""
 
+import math
+
 import bpy
 
 GROUP_NAME = "MMD Disperse Compositing"
@@ -325,6 +327,75 @@ def update_white_flash(scene, mask, wave, rise, fall, amount, strike=None):
     var.targets[0].transform_type = "SCALE_AVG"
     var.targets[0].transform_space = "WORLD_SPACE"
     driver.expression = flash_expression(wave, rise, fall, amount, strike)
+    return node
+
+
+STREAKS_NAME = "MMD Disperse Lens Streaks"
+STREAKS_RISE = 0.25  # seconds the lens streaks take to come up before the big moment ...
+STREAKS_HOLD = 0.4  # ... how long they stay at full after it ...
+STREAKS_FALL = 0.8  # ... and how long they then take to fade
+
+
+def _option(node, prop, socket, value):
+    """Set a node option: a property before Blender 5.0 (some earlier), an input socket afterwards."""
+    if hasattr(node, prop):
+        setattr(node, prop, value)
+    else:
+        _set_socket(node, socket, value)
+
+
+def add_streaks(scene):
+    """Lens streaks: a Glare node of the Streaks type before the output (six-pointed stars from the brightest spots of
+    the picture); update_streaks() drives how much of it shows, nothing but round the big moment."""
+    def setup(node):
+        if hasattr(node, "glare_type"):
+            node.glare_type = "STREAKS"
+            node.quality = "MEDIUM"
+        else:  # Blender 5.0+
+            _set_socket(node, "Type", "Streaks")
+            _set_socket(node, "Quality", "Medium")
+        _option(node, "streaks", "Streaks", 6)
+        _option(node, "angle_offset", "Streaks Angle", math.radians(15.0))
+        _option(node, "fade", "Fade", 0.9)
+        _option(node, "threshold", "Threshold", 1.0)
+        owner, path, off, _on = _streak_target(node)
+        setattr(owner, path, off)
+
+    return _insert_before_output(scene, STREAKS_NAME, "CompositorNodeGlare", setup)
+
+
+def _streak_target(node):
+    """(owner, data path, value off, value at full) of how much of the streaks shows: the Strength socket in Blender
+    4.4+, the Mix property before (-1 the picture alone .. 0 the streaks added)."""
+    strength = next((s for s in node.inputs if s.name == "Strength"), None)
+    if strength is not None:
+        return strength, "default_value", 0.0, 1.0
+    return node, "mix", -1.0, 0.0
+
+
+def streaks_expression(moment, fps, off, on):
+    """Driver expression on the frame: the streaks come up over STREAKS_RISE seconds to the big moment, stay
+    STREAKS_HOLD and fade over STREAKS_FALL (from `off` to `on` and back)."""
+    rise, fall = max(STREAKS_RISE * fps, 1.0), max(STREAKS_FALL * fps, 1.0)
+    return ("{o:.3f} + {d:.3f} * clamp((frame - {a:.2f}) / {r:.2f}, 0, 1) * clamp(({b:.2f} - frame) / {f:.2f}, 0, 1)"
+            .format(o=off, d=on - off, a=moment - rise, r=rise, b=moment + (STREAKS_HOLD + STREAKS_FALL) * fps,
+                    f=fall))
+
+
+def update_streaks(scene, moment, fps):
+    """Drive the lens streaks (when the scene has them) round the big moment at frame `moment`; off when it is None."""
+    tree = _existing_tree(scene)
+    node = tree.nodes.get(STREAKS_NAME) if tree is not None else None
+    if node is None:
+        return None
+    owner, path, off, on = _streak_target(node)
+    owner.driver_remove(path)
+    if moment is None:
+        setattr(owner, path, off)
+        return node
+    driver = owner.driver_add(path).driver
+    driver.type = "SCRIPTED"
+    driver.expression = streaks_expression(moment, fps, off, on)
     return node
 
 

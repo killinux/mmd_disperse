@@ -37,7 +37,7 @@ FAILURES = []
 
 
 def check(cond, message):
-    print(("PASS " if cond else "FAIL ") + message)
+    print(("PASS " if cond else "FAIL ") + message, flush=True)  # (Blender's Python ignores PYTHONUNBUFFERED)
     if not cond:
         FAILURES.append(message)
 
@@ -2421,6 +2421,238 @@ def run():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.11 checks")
 
+    # --- 1.12: fronts on the picture, the spirit self, the shell, tattoos and glitter, lit / sprayed / moved / sliced,
+    # the lights, the finishing poses, eye contact, the toon explosion, rewind and replay, the node groups' cache
+    from mmd_disperse import (finish, lights, mist, node_groups, picture, replay, sampling, shell,  # noqa
+                              spirit, timewarp)
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "particles", "easing", "finale", "frame_start", "frame_end",
+        "trigger", "old_surface", "time_warp", "warp_length", "shell_enable", "smoke_style", "wire_enable",
+        "lights_out", "flash_enable", "flash_steps", "streaks", "finish_style", "garment_order")}
+    made_camera = None
+    if scene.camera is None:  # (the fronts are on its picture, the flash and the finishing poses by it)
+        made_camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(made_camera)
+        made_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
+        made_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        scene.camera = made_camera
+    s.trigger, s.entrance, s.easing, s.exit_style, s.particles = "NONE", "GROW", "LINEAR", "SHRINK", "NONE"
+    s.finale, s.wire_enable, s.old_surface, s.time_warp = False, False, "NONE", "NONE"
+
+    # the fronts on the picture: a sheet by the camera draws each (the smear: its strokes and the paint on the palms);
+    # every vertex gets its arrival
+    for shape in sampling.SHAPES:
+        s.path, s.picture_front = "PICTURE", shape
+        s.frame_start, s.frame_end = 1, 60
+        built = bpy.ops.mmd_disperse.build() == {"FINISHED"}
+        kinds = sorted({o.get(picture.P_KIND) for o in picture.objects(s.mask)})
+        values = arrival_values(old_mesh)
+        want = ["BLOB_L", "BLOB_R", "SMEAR"] if shape == "SMEAR" else ["SHEET"]
+        check(built and kinds == want and values is not None and np.isfinite(values).all()
+              and s.mask.get(effect.P_PICTURE) is not None,
+              "picture front %s: %s by the camera, an arrival for every vertex" % (shape, kinds))
+    check(not draw_panels(bpy.context), "panels draw with a picture front")
+    # the time field the sheet draws is the one the change follows: the clock's hand ticks, the taiji is a shape
+    tick = sampling.clock_progress(np.array([0.0, 0.5 / 12, 1.0 / 12 + 1e-4, 1.0]))
+    check(tick[0] == 0.0 and tick[1] == 0.0 and abs(tick[2] - (1.0 + sampling.CLOCK_BOUNCE) / 12) < 1e-3
+          and tick[3] == 1.0, "clock: the hand stands, then jumps a twelfth with a bounce (%s)" % tick)
+    inside = sampling.taiji_distance(np.array([0.3, -0.3]), np.array([0.0, 0.0]), sampling.TAIJI_GROW, (0.0, 0.0),
+                                     (1.0, 0.0, 0.0, 0.0))
+    check(inside[0] < 0.0 < inside[1], "taiji: the white fish on the right, the black one on the left (%s)" % inside)
+    bpy.ops.mmd_disperse.remove()
+    check(not [o for o in bpy.data.objects if o.get(picture.P_FRONT) is not None]
+          and not [m for m in bpy.data.materials if m.name.startswith(materials.PICTURE_MATERIAL)],
+          "picture fronts removed with the effect")
+
+    # the spirit self: the Dharma form and three heads and six arms show before the moment, from the new outfit
+    s.path = "SPHERE"
+    for entrance in ("GIANT", "ARMS"):
+        s.entrance = entrance
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the %s entrance" % entrance.lower())
+        wave, moment, big = wave_and_moment()
+        empties = spirit.objects(s.mask)
+        scene.frame_set(max(frame_at(0.6 * moment), 2))
+        shown = evaluated_counts(new_mesh)
+        scene.frame_set(s.frame_end)
+        after_ = evaluated_counts(new_mesh)
+        limbs = new_mesh.data.attributes.get(spirit.ATTR_LIMB) is not None
+        check(len(empties) == 5 and shown > 0 and after_ > 0 and (entrance == "GIANT" or limbs),
+              "%s: its empties (%d), the spirit before the moment (%d vertices), the outfit after (%d)%s"
+              % (entrance.lower(), len(empties), shown, after_, ", arms marked" if limbs else ""))
+    s.entrance = "GROW"
+    bpy.ops.mmd_disperse.build()
+    check(not spirit.objects(s.mask) and new_mesh.data.attributes.get(spirit.ATTR_LIMB) is None,
+          "spirit gone with another entrance")
+
+    # the shell round the dancer: there while the change runs, gone at the end
+    s.shell_enable = True
+    for style in node_groups.SHELL_STYLES:
+        s.shell_style = style
+        obs = [o for o in shell.objects(s.mask) if o.get(shell.P_KIND) == "SHELL"]
+        scene.frame_set(max(frame_at(0.5 * float(s.mask[effect.P_WAVE])), 2))
+        mid = evaluated_counts(obs[0]) if obs else -1
+        scene.frame_set(s.frame_end + 40)
+        end = evaluated_counts(obs[0]) if obs else -1
+        check(len(obs) == 1 and mid > 0 and end == 0, "shell %s: %d vertices mid-way, %d at the end"
+              % (style.lower(), mid, end))
+    s.shell_enable = False
+    check(not shell.objects(s.mask), "shell off: its objects gone")
+
+    # tattoos ahead of the edge (their light kept apart from the outfit's cut-outs), glitter
+    s.old_surface, s.particles = "TATTOO", "GLITTER"
+    mats = set(effect._glow_materials(old_mesh, s))
+    wired = []
+    for m in mats:
+        nodes = m.node_tree.nodes
+        glow_node = nodes.get(materials.SURFACE + " Tattoo Glow")
+        wired.append(glow_node is not None and glow_node.inputs["Color"].links
+                     and glow_node.inputs["Color"].links[0].from_node.name == materials.SURFACE + " Tattoo Deep")
+    check(mats and all(m.get(materials.P_SURFACE) == "TATTOO" for m in mats) and all(wired)
+          and bpy.data.objects.get(particles.GLITTER) is not None, "tattoos on the old outfit (their colour wired), "
+                                                                    "glitter")
+    s.old_surface, s.particles = "NONE", "NONE"
+
+    # lit, sprayed, moved: the change where the follow spot's light falls (the spot and its beam made from what was
+    # found), where the palms spray (the mist), what moves most; lights out dims the scene's own lights and gives
+    # them back
+    test_light = bpy.data.objects.new("MMDD Test Light", bpy.data.lights.new("MMDD Test Light", "SUN"))
+    scene.collection.objects.link(test_light)
+    test_light.data.energy = 3.0
+    s.lights_out, s.lights_level = True, 0.1
+    s.path = "SPOTLIGHT"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build under the spotlight")
+    spot, beam = lights.objects(s.mask, "SPOT"), lights.objects(s.mask, "BEAM")
+    rec = s.mask.get(effect.P_LIT)
+    scene.frame_set(s.frame_start + 10)
+    dimmed = test_light.data.energy
+    check(len(spot) == 1 and len(beam) == 1 and rec is not None and len(rec["frames"]) > 10
+          and abs(dimmed - 0.3) < 0.05, "follow spot and its beam from what was found; lights out: %.2f" % dimmed)
+    for path in ("SPRAY", "MOTION", "SLICES"):
+        s.path = path
+        built = bpy.ops.mmd_disperse.build() == {"FINISHED"}
+        values = arrival_values(old_mesh)
+        extra = len(mist.objects(s.mask)) if path == "SPRAY" else 1
+        check(built and values is not None and np.isfinite(values).all() and extra == 1,
+              "%s path: an arrival for every vertex%s" % (path.lower(), ", the mist" if path == "SPRAY" else ""))
+    new_values = arrival_values(new_mesh)
+    check(new_values.min() > arrival_values(old_mesh).min(), "sliced: the new outfit comes a while after the old goes")
+    bpy.ops.mmd_disperse.remove()
+    ad = test_light.data.animation_data
+    check(abs(test_light.data.energy - 3.0) < 1e-6 and (ad is None or not ad.drivers),
+          "lights back up after the effect is removed (%.2f)" % test_light.data.energy)
+    s.lights_out = False
+    bpy.data.objects.remove(test_light)
+
+    # the camera flash, the change stepping on with it; lens streaks
+    s.path = "SPHERE"
+    s.flash_enable, s.flash_count, s.flash_steps, s.streaks = True, 3, True, True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the camera flash")
+    curve = effect._scale_curves(s.mask)[0]
+    steps = [k for k in curve.keyframe_points if k.type == effect.STEP_KEY]
+    wave = float(s.mask[effect.P_WAVE])
+    radii = [curve.evaluate(f) for f in range(s.frame_start, s.frame_end + 6)]
+    jumps = sum(1 for a, b in zip(radii, radii[1:]) if b - a > 0.15 * wave)  # (the last flash may fall on a key of the
+    tree = compositor._existing_tree(scene)                                   # mask's own: no step key there)
+    streak = tree.nodes.get(compositor.STREAKS_NAME) if tree is not None else None
+    check(len(lights.objects(s.mask, "FLASH")) == 1 and len(steps) >= 2 and jumps == 3 and streak is not None,
+          "camera flash, the change on in three steps (%d jumps, %d step keys), lens streaks" % (jumps, len(steps)))
+    s.flash_steps = False
+    curve = effect._scale_curves(s.mask)[0]
+    check(not [k for k in curve.keyframe_points if k.type == effect.STEP_KEY]
+          and all(k.interpolation == "LINEAR" for k in curve.keyframe_points),
+          "steps off: the mask's keys as they were")
+    own = [(k.co[0], k.co[1]) for k in curve.keyframe_points]
+    effect._step(s.mask, [0.5 * (own[0][0] + own[-1][0]), own[-1][0]])
+    effect._unstep(s.mask)
+    check([(k.co[0], k.co[1]) for k in curve.keyframe_points] == own,
+          "a flash right on the mask's last key: its steps come off and the key stays (%d keys)" % len(own))
+    s.flash_enable, s.streaks = False, False
+
+    # eye contact: the face turned away, then into the camera
+    track = motion.Track(list(range(40)))
+    track.eyes[:] = (0.0, 0.0, 0.9 * height)
+    track.camera[:] = (0.0, -3.0 * height, 0.9 * height)
+    for i in range(40):
+        turn = math.radians(60.0 if 10 <= i < 25 else 5.0)
+        track.front[i] = (math.sin(turn), -math.cos(turn), 0.0)
+    track.from_rest[:] = height
+    found = motion._gaze(track, height, 30.0)
+    check(found is not None and found[0] == 25, "eye contact found as the face turns back to the camera (%s)"
+          % (found,))
+
+    # the finishing poses: everything holds still (the dance and the transformation), the pieces are there
+    s.entrance = "SWAP"
+    for style, kinds in (("PHOTO", ["CARD", "RIM", "SHUTTER"]),
+                         ("GACHA", ["CARD", "METEOR", "PILLAR", "RAYS", "RING", "TAIL", "TITLE"])):
+        s.finish_style = style
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the %s finishing pose" % style.lower())
+        wave = float(s.mask[effect.P_WAVE])
+        held = finish.hold(s, s.mask, effect._models(s), effect._big_frame(s, s.mask, wave))
+        got = sorted(o.get(finish.P_KIND) for o in finish.objects(s.mask))
+        radii = []
+        for f in (held[0] + 1, held[0] + held[1] - 1):
+            scene.frame_set(f)
+            radii.append(s.mask.scale[0])
+        check(held is not None and got == kinds and len(timewarp._warped(s.mask)) >= 1
+              and abs(radii[0] - radii[1]) < 1e-6, "%s: %s, held from frame %d for %d (radius %.3f, %.3f)"
+              % (style.lower(), got, held[0], held[1], radii[0], radii[1]))
+        if style == "PHOTO":  # (opened up again after sliding away, the frame reached back into the picture)
+            card = finish.objects(s.mask, "CARD")[0]
+            scene.frame_set(held[0] + 3)
+            shown = not card.hide_render
+            scene.frame_set(held[0] + held[1] + 10)
+            check(shown and card.hide_render and float(card["mmdd_photo"][0]) > 0.99,
+                  "photo: the frame there while held, gone once it has slid away")
+        if style == "GACHA":  # (Blender 5.x draws no letters with an empty font socket)
+            title = finish.objects(s.mask, "TITLE")[0]
+            ev = title.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            mesh = ev.to_mesh()
+            white = mesh.attributes.get("mmdd_white")
+            letters = sum(1 for d in white.data if d.value > 0.5) if white is not None else 0
+            ev.to_mesh_clear()
+            check(letters > 50, "gacha: the name written by the end of the pose (%d points)" % letters)
+    s.finish_style = "NONE"
+    check(not finish.objects(s.mask) and not timewarp._warped(s.mask), "finishing pose off: its pieces gone, time "
+                                                                      "as it was")
+
+    # rewind and replay: the transformation goes back and plays again slowly
+    s.time_warp, s.warp_length = "REWIND", 2.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with rewind and replay")
+    wave = float(s.mask[effect.P_WAVE])
+    fps = scene.render.fps / scene.render.fps_base
+    (a, b, c, d), _times = timewarp.rewind_frames(effect._big_frame(s, s.mask, wave), s.frame_start, s.warp_length,
+                                                  fps)
+    seen = []
+    for f in (a, b, (b + c) // 2, d + 2):
+        scene.frame_set(f)
+        seen.append(s.mask.scale[0])
+    check(seen[1] < 0.2 * seen[0] and seen[1] < seen[2] < seen[3] and len(replay.objects(s.mask)) == 1,
+          "rewind: the radius goes back (%.2f -> %.2f), plays again (%.2f -> %.2f), the tape look"
+          % tuple(seen))
+    s.time_warp = "NONE"
+    check(not replay.objects(s.mask) and not timewarp._warped(s.mask), "rewind off: the tape gone, time as it was")
+
+    # the toon explosion: its fire and its light at the moment
+    s.entrance, s.smoke_style = "POOF", "BOOM"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the toon explosion")
+    check(len(lights.objects(s.mask, "BOOM")) == 1
+          and bpy.data.materials.get(materials.EXPLOSION_MATERIAL) is not None, "toon explosion: fire and its light")
+    s.smoke_style = "WHITE"
+    check(not lights.objects(s.mask, "BOOM"), "white smoke: no explosion light")
+
+    # the node groups come from the cache for the next file (building them takes minutes)
+    path = node_groups._cache_file()
+    check(path is not None and os.path.exists(path), "node groups kept in the cache (%s)" % path)
+    check(s.bl_rna.properties["particles"].enum_items["OBJECT"].value == 16, "files keep their custom particles")
+
+    check(not draw_panels(bpy.context), "panels draw with the 1.12 options")
+    if made_camera is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.12 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature
@@ -2638,6 +2870,13 @@ def run():
     check(here == there, "moving the model keeps the sphere on the body (%s vs %s)" % (here, there))
 
     # --- presets; the magical girl adds light ribbons, sparkles and the glowing silhouette
+    preset_camera = None
+    if scene.camera is None:  # (the fronts on the picture and the finishing poses need one)
+        preset_camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(preset_camera)
+        preset_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
+        preset_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        scene.camera = preset_camera
     for key, _label, _desc in presets.ITEMS:
         s.frame_start, s.frame_end = 1, 100  # (a move of the dance or the hands' pace moves them)
         check(bpy.ops.mmd_disperse.apply_preset(preset=key) == {"FINISHED"}, "preset " + key)
@@ -2754,6 +2993,7 @@ def run():
             check(s.ring_style == "WATER" and len(rings.ring_objects(s.mask)) == 1,
                   "water breathing preset: the band of toon water")
     s.beat_sync = False  # (the beat drop preset turned it on; the finale checks below are not on the beat)
+    s.finish_style = "NONE"  # (a layer the presets keep: its hold would stop the mask for a while)
     s.frame_start, s.frame_end = 1, 100
     check(bpy.ops.mmd_disperse.apply_preset(preset="MAGICAL") == {"FINISHED"}, "magical girl preset again (the 1.11 "
           "presets came after it)")
@@ -2856,8 +3096,11 @@ def run():
     s.particles = "NONE"
     radius = wave * (1.0 + max(s.frag_life, s.finale_length))
     scene.frame_set(100)
+    last_key = effect._scale_curves(s.mask)[0].keyframe_points[-1].co if effect._scale_curves(s.mask) else None
     check(abs(float(s.mask[effect.P_REACH]) - radius) < 1e-4 * radius and abs(s.mask.scale[0] - radius) < 1e-3 * radius,
-          "mask keys retimed live (%.3f -> %.3f)" % (reach, s.mask.scale[0]))
+          "mask keys retimed live (%.3f -> %.3f; want %.3f, reach %.3f, frames %d..%d, last key %s, speed %s)"
+          % (reach, s.mask.scale[0], radius, float(s.mask[effect.P_REACH]), s.frame_start, s.frame_end,
+             tuple(round(v, 3) for v in last_key) if last_key is not None else None, s.mask.get(effect.P_SPEED)))
     s.particles = "STAR"
     check(abs(float(s.mask[effect.P_REACH]) - reach) < 1e-4 * reach, "and stretched again with the sparkles")
     s.ribbon_enable = False
@@ -2877,6 +3120,9 @@ def run():
     check(all(before[k] == after[k] for k in before), "models restored after flakes, sweeps and petals")
     check(not any(bpy.data.objects.get(n) for n in particles.NAMES.values()), "particle shapes removed")
     check(not any(o.name.startswith(ribbons.NAME) for o in bpy.data.objects), "ribbons removed")
+    if preset_camera is not None:
+        scene.camera = None
+        bpy.data.objects.remove(preset_camera)
     check(not any(o.name.startswith(launch.SPACE) for o in bpy.data.objects), "motion empties removed")
     check(not any(o.name.startswith(venom.SKELETON) for o in bpy.data.objects)
           and bpy.data.materials.get(materials.GOO_MATERIAL) is None, "symbiote skeletons and goo removed")

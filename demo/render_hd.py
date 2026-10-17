@@ -61,6 +61,8 @@ def parse_args():
     p.add_argument("--orbit", type=float, default=12.0, help="camera orbit half-angle in degrees")
     p.add_argument("--lens", type=float, default=85.0, help="camera focal length in mm (wider shows more world)")
     p.add_argument("--view", type=float, default=1.1, help="picture height in model heights (the split self needs ~2)")
+    p.add_argument("--aim", type=float, default=0.5,
+                   help="height the camera looks at, in model heights (a giant behind the dancer needs ~1.4)")
     p.add_argument("--angle", type=float, default=0.0,
                    help="camera angle around the model in degrees (0 = from the front, 90 = from its left)")
     p.add_argument("--save", default="")
@@ -297,8 +299,8 @@ def setup_stage(scene, bounds, args):
     cam.data.sensor_fit = "VERTICAL"
     view_h = height * args.view
     dist = view_h / (cam.data.sensor_height / cam.data.lens)
-    aim = Vector((0.0, 0.0, height * 0.5))
-    cam.location = Vector((0.0, -dist, height * 0.52))
+    aim = Vector((0.0, 0.0, height * args.aim))
+    cam.location = Vector((0.0, -dist, height * (args.aim + 0.02)))
     cam.rotation_euler = (aim - cam.location).to_track_quat("-Z", "Y").to_euler()
     cam.parent = pivot
     scene.collection.objects.link(cam)
@@ -341,15 +343,16 @@ def main():
     if args.preset:
         presets.apply(s, args.preset)
     apply_settings(s, args.set)
+    # (the stage and its camera first: the fronts on the picture, the follow spot and the finishing poses are made for
+    # the camera when the effect is built)
+    setup_stage(scene, rest_bounds(base.meshes), args)
     print("BUILD", bpy.ops.mmd_disperse.build())
     apply_settings(s, args.set)
     if args.music:
         scene.frame_start = 1
         s.beat_audio = os.path.abspath(args.music)
         print("BEATS", bpy.ops.mmd_disperse.find_beats())
-
-    setup_stage(scene, rest_bounds(base.meshes), args)
-    effect.sync(s)  # now there is a camera: the tongues of flame turn to it, the speed lines hang in front of it
+    effect.sync(s)
     compositor.add_bloom(scene)
     if args.glitch_fx:  # (on the beat when the beats were found)
         compositor.add_glitch(scene, s.frame_start, s.frame_end, s.glitch_rate,

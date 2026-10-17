@@ -1,5 +1,5 @@
-"""Petal, butterfly, star, cube, coin, ice shard, ember, music note, playing card, feather, bat, ink drop, code glyph
-and pebble shapes the old outfit can turn into, and the ice crystals that grow on it with frost.
+"""Petal, butterfly, star, cube, coin, ice shard, ember, music note, playing card, feather, bat, ink drop, code glyph,
+pebble and glitter shapes the old outfit can turn into, and the ice crystals that grow on it with frost.
 
 They are ordinary mesh objects in a hidden collection, so they can be edited (or swapped for any other
 object with the "Custom Object" option); the node tree only reads their geometry.
@@ -29,9 +29,10 @@ INK = "MMD Disperse Ink Drop"
 GLYPH = "MMD Disperse Glyphs"
 PEBBLE = "MMD Disperse Pebble"
 PAPER_BIRD = "MMD Disperse Paper Bird"
+GLITTER = "MMD Disperse Glitter"
 NAMES = {"PETAL": PETAL, "BUTTERFLY": BUTTERFLY, "STAR": STAR, "CUBE": CUBE, "COIN": COIN, "SHARD": SHARD,
          "EMBER": EMBER, "CRYSTAL": CRYSTAL, "NOTE": NOTE, "CARD": CARD, "FEATHER": FEATHER, "BAT": BAT, "INK": INK,
-         "GLYPH": GLYPH, "PEBBLE": PEBBLE, "PAPER_BIRD": PAPER_BIRD}
+         "GLYPH": GLYPH, "PEBBLE": PEBBLE, "PAPER_BIRD": PAPER_BIRD, "GLITTER": GLITTER}
 FLAPPING = ("BUTTERFLY", "BAT", "PAPER_BIRD")  # shapes with two wings in the XY plane (x > 0, x < 0) that flap
 UPRIGHT = ("NOTE", "GLYPH")  # shapes that stand facing the front (-Y) and only sway
 VARIANTS = ("GLYPH",)  # shapes made of several (ATTR_VARIANT on their faces), one shown at a time
@@ -103,6 +104,17 @@ def _star():
         verts.append((r * math.cos(angle), r * math.sin(angle), 0.0))
         uvs.append((1.0 - r * 2.0, 0.5))
     faces = [(0, 1 + i, 1 + (i + 1) % points) for i in range(points)]
+    return verts, faces, uvs
+
+
+def _sequin(sides=6):
+    """A flake of glitter: a flat hexagon 0.6 units across in the XY plane (smaller than the other shapes)."""
+    verts, uvs = [(0.0, 0.0, 0.0)], [(1.0, 0.5)]
+    for i in range(sides):
+        angle = math.pi * 2.0 * i / sides
+        verts.append((0.3 * math.cos(angle), 0.3 * math.sin(angle), 0.0))
+        uvs.append((0.6, 0.5))
+    faces = [(0, 1 + i, 1 + (i + 1) % sides) for i in range(sides)]
     return verts, faces, uvs
 
 
@@ -334,7 +346,7 @@ def _pebble():
 
 _SHAPES = {"PETAL": _petal, "BUTTERFLY": _butterfly, "STAR": _star, "CUBE": _cube, "COIN": _coin, "SHARD": _shard,
            "EMBER": _ember, "CRYSTAL": _crystal, "NOTE": _note, "CARD": _card, "FEATHER": _feather, "BAT": _bat,
-           "INK": _ink_drop, "GLYPH": _glyphs, "PEBBLE": _pebble, "PAPER_BIRD": _paper_bird}
+           "INK": _ink_drop, "GLYPH": _glyphs, "PEBBLE": _pebble, "PAPER_BIRD": _paper_bird, "GLITTER": _sequin}
 
 
 def _material(kind):
@@ -352,6 +364,8 @@ def _material(kind):
         return materials.ensure_pebble_material()
     if kind == "PAPER_BIRD":
         return materials.ensure_paper_material()
+    if kind == "GLITTER":
+        return materials.ensure_glitter_material()
     return materials.ensure_particle_material()
 
 
@@ -403,7 +417,8 @@ def remove_assets():
     for name in (materials.PARTICLE_MATERIAL, materials.COIN_MATERIAL, materials.ICE_MATERIAL, materials.CARD_MATERIAL,
                  materials.BAT_MATERIAL, materials.INK_MATERIAL, materials.SMOKE_MATERIAL, materials.DUST_MATERIAL,
                  materials.PEBBLE_MATERIAL, materials.ARC_MATERIAL, materials.BEAM_MATERIAL, materials.FLAME_MATERIAL,
-                 materials.LOTUS_MATERIAL, materials.SOUL_MATERIAL, materials.SHOCK_MATERIAL):
+                 materials.LOTUS_MATERIAL, materials.SOUL_MATERIAL, materials.SHOCK_MATERIAL,
+                 materials.GLITTER_MATERIAL):
         mat = bpy.data.materials.get(name)
         if mat is not None and mat.users == 0:
             bpy.data.materials.remove(mat)

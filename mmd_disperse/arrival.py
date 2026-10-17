@@ -14,7 +14,12 @@ computed once at build time on the rest pose and stored in the 'disperse_arrival
 * MIDDLE - two flat fronts set off from the waist, one up and one down (Danny Phantom's two rings).
 * GARMENTS - one garment (a material of the new outfit) after the other, each swept over in its own turn, like an idol
   anime's card-by-card outfit change; the old outfit goes where the new garment over it comes.
-* HAND - where the dancing hands sweep over the body (motion.py), filled in from there over the rest of it.
+* HAND - where the dancing hands sweep over the body (sampling.py), filled in from there over the rest of it.
+* PICTURE - where a front on the picture passes over the body as the camera sees it (sampling.py), likewise.
+* SPOTLIGHT, SPRAY, MOTION - where a follow spot's light falls, where the spray from the palms coats the body, which
+  parts have moved far enough (sampling.py), likewise.
+* SLICES - the body cut into bands at the neck, the waist and the knees, band by band in turn: a quick wipe across it
+  takes the old outfit away and the new one comes half a turn later, so the background shows between (切片拼装).
 """
 
 import itertools
@@ -31,13 +36,21 @@ from .node_groups import ATTR_ARRIVAL
 # camera sees their right hand on the left of the picture, at -X).
 SWEEPS = {"UP": (0.0, 0.0, 1.0), "DOWN": (0.0, 0.0, -1.0), "LEFT_RIGHT": (1.0, 0.0, 0.0),
           "RIGHT_LEFT": (-1.0, 0.0, 0.0), "FRONT_BACK": (0.0, 1.0, 0.0), "BACK_FRONT": (0.0, -1.0, 0.0)}
-PATHS = ("SPHERE", "SURFACE", "SPIRAL", "MIDDLE", "GARMENTS", "HAND") + tuple(SWEEPS)
+PATHS = ("SPHERE", "SURFACE", "SPIRAL", "MIDDLE", "GARMENTS", "HAND", "PICTURE", "SPOTLIGHT", "SPRAY",
+         "MOTION", "SLICES") + tuple(SWEEPS)
 # paths whose front has a decoration (rings.py) and a layout: the sweeps, the spiral and the two fronts from the waist
 LAID_OUT = tuple(SWEEPS) + ("SPIRAL", "MIDDLE")
 CELLS_PER_HEIGHT = 96
 WAIST_BONES = ("下半身", "LowerBody", "lower body", "Hips", "hips", "pelvis")
 WAIST_SHARE = 0.53  # height of the waist up the body when there is no lower-body bone
 GARMENT_GAP = 0.12  # pause between two garments, in garment sweeps
+NECK_BONES = ("首", "neck", "Neck", "J_Bip_C_Neck")
+KNEE_BONES = (("ひざ.L", "左ひざ", "knee.L", "Knee_L", "LeftLeg", "J_Bip_L_LowerLeg"),
+              ("ひざ.R", "右ひざ", "knee.R", "Knee_R", "RightLeg", "J_Bip_R_LowerLeg"))
+SLICE_SHARES = (0.28, WAIST_SHARE, 0.86)  # without the bones: the knees, the waist and the neck this far up the body
+SLICE_WIPE = 0.6  # a band's wipe across it takes this share of its turn ...
+SLICE_GAP = 0.5  # ... and the new outfit comes this share of a turn after the old one went
+SLICE_ORDER = (2, 0, 3, 1)  # the random order: the turn of the band under the knees, to the thighs, the body, the head
 MAX_GARMENTS = 6  # small materials (buttons, trims) go with the garment nearest to them
 MIN_GARMENT = 0.04  # ... below this share of the outfit's area
 
@@ -257,6 +270,49 @@ def waist_level(point_sets, axis, armature=None):
     return float(along.min() + WAIST_SHARE * (along.max() - along.min()))
 
 
+def _bone_level(armature, names, axis):
+    bones = armature.data.bones if armature is not None else {}
+    bone = next((bones[n] for n in names if n in bones), None)
+    if bone is None:
+        return None
+    return float(np.dot(np.asarray(armature.matrix_world @ bone.head_local), axis))
+
+
+def slice_distances(point_sets, roles, frame, armature, height, order="RANDOM"):
+    """Sliced (切片拼装): the body cut into four bands at the knees, the waist and the neck (rest pose, the bones or
+    shares of the body); band after band (in a fixed random order, from the top or from the feet) a quick wipe across
+    it, every other one the other way, takes the old outfit away, and the new one (role TARGET) comes SLICE_GAP of a
+    turn later, so the background shows between them. A band's turn is a quarter of the body height of the front's
+    way."""
+    up = np.asarray((frame @ Vector((0.0, 0.0, 1.0))).normalized(), dtype=np.float64)
+    side = np.asarray((frame @ Vector((1.0, 0.0, 0.0))).normalized(), dtype=np.float64)
+    every = np.concatenate(point_sets)
+    rise = every @ up
+    lo, hi = float(rise.min()), float(rise.max())
+    across = every @ side
+    left, right = float(across.min()), float(across.max())
+    levels = []
+    for names, share in zip((None, WAIST_BONES, NECK_BONES), SLICE_SHARES):
+        if names is None:  # (the knees: both of them)
+            found = [_bone_level(armature, n, up) for n in KNEE_BONES]
+            found = [f for f in found if f is not None]
+            level = sum(found) / len(found) if found else None
+        else:
+            level = _bone_level(armature, names, up)
+        levels.append(level if level is not None and lo < level < hi else lo + share * (hi - lo))
+    levels = sorted(levels)
+    turns = {"DOWN": (3, 2, 1, 0), "UP": (0, 1, 2, 3)}.get(order, SLICE_ORDER)
+    turn = max(height, 1e-6) / 4.0
+    out = []
+    for points, role in zip(point_sets, roles or ["BASE"] * len(point_sets)):
+        band = np.searchsorted(np.asarray(levels), points @ up)  # 0 under the knees .. 3 over the neck
+        k = np.asarray(turns)[band]
+        x = (points @ side - left) / max(right - left, 1e-6)
+        x = np.where(k % 2 == 0, x, 1.0 - x)
+        out.append(turn * (k + SLICE_WIPE * x + (SLICE_GAP if role == "TARGET" else 0.0)))
+    return out
+
+
 def middle_distances(point_sets, axis, waist):
     """Two flat fronts set off from the waist, one up the body and one down: the distance from the waist."""
     a = np.asarray(axis, dtype=np.float64)
@@ -393,6 +449,8 @@ def compute(meshes, path, seeds, height, frame=None, pitch=1.0, armature=None, r
         return middle_distances(points, axis, waist_level(points, axis, armature))
     if path == "GARMENTS":
         return garment_distances(meshes, roles, keys, np.asarray(axes(frame, "UP")[0]), height, order)
+    if path == "SLICES":
+        return slice_distances(points, roles, frame, armature, height, order)
     return surface_distances(points, [_triangles(ob) for ob in meshes], seeds, height)
 
 

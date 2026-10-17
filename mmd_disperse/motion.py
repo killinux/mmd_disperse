@@ -20,9 +20,9 @@ from . import arrival
 from .model import ORIGIN_BONES
 
 TRIGGERS = ("NONE", "CLAP", "KISS", "SALUTE", "FLIP", "TURN", "SQUAT", "JUMP", "LAND", "STEP", "RAISE", "HEART",
-            "WINK", "PULL")
+            "WINK", "PULL", "GAZE")
 # moves the front starts from (where they are made) ...
-GESTURES = ("CLAP", "KISS", "SALUTE", "FLIP", "STEP", "RAISE", "HEART", "WINK", "PULL")
+GESTURES = ("CLAP", "KISS", "SALUTE", "FLIP", "STEP", "RAISE", "HEART", "WINK", "PULL", "GAZE")
 # ... and moves the big moment (the swap, or the middle of the wave) is put on
 MOMENTS = ("TURN", "SQUAT", "JUMP", "LAND")
 ANKLES = arrival.LIMB_BONES[2:4]
@@ -81,6 +81,8 @@ PULL_NEAR = 0.07  # a palm this close to the chest or the neck ...
 PULL_AWAY = 0.18  # ... then this much further from it within PULL_TIME (a cord pulled, a pin pulled out)
 PULL_TIME = 0.3
 WINK_SHUT = 0.6  # a wink morph past this
+GAZE_ON = 15.0  # degrees: the face turned this close to the way to the camera ...
+GAZE_OFF = 30.0  # ... after it was turned further away than this: eye contact (1.12)
 
 
 def find_bone(armature, names):
@@ -577,6 +579,33 @@ def _wink(track):
     return best
 
 
+def gaze_angles(track):
+    """Per frame: the angle (degrees) between the way the face looks and the way from the eyes to the camera (nan where
+    the face is unknown). With no camera the view is taken to be from the front of the scene (-Y)."""
+    to_cam = track.camera - track.eyes
+    no_cam = ~np.isfinite(track.camera).all(axis=1)
+    to_cam[no_cam] = (0.0, -1.0, 0.0)
+    lengths = np.linalg.norm(track.front, axis=1) * np.linalg.norm(to_cam, axis=1)
+    cos = (track.front * to_cam).sum(axis=1) / np.maximum(lengths, 1e-9)
+    return np.degrees(np.arccos(np.clip(cos, -1.0, 1.0)))
+
+
+def _gaze(track, height, fps):
+    """Eye contact (对视): the face turns to look straight into the camera (within GAZE_ON degrees) after looking away
+    (further than GAZE_OFF), once the dance has started; from the eyes."""
+    angle = gaze_angles(track)
+    settled = _settled(track, height, fps)
+    away = False
+    for i, a in enumerate(angle):
+        if not np.isfinite(a):
+            continue
+        if a > GAZE_OFF:
+            away = True
+        elif away and a < GAZE_ON and settled[i]:
+            return i, ("EYE_L", "EYE_R")
+    return None
+
+
 def _pull(track, height, fps):
     """A cord pulled (Chainsaw Man): one palm at the chest or the neck, then PULL_AWAY further from it within
     PULL_TIME, the other hand not there."""
@@ -622,6 +651,8 @@ def find(track, kind, height, fps):
         return _heart(track, height, fps)
     if kind == "WINK":
         return _wink(track)
+    if kind == "GAZE":
+        return _gaze(track, height, fps)
     if kind == "PULL":
         return _pull(track, height, fps)
     if kind == "CLAP":
@@ -670,52 +701,7 @@ def snap(frame, beats, fps):
 
 def hand_touches(scene, armature, meshes, frames, sides, reach, hidden=()):
     """For every vertex of `meshes`: the frame (fractional) at which one of the hands (`sides`) first came within
-    `reach` of it while the frames played, np.inf if never. A hand is a capsule from the wrist to the fingertips; its
-    way from one frame to the next is checked in three steps, so a fast hand leaves no gaps. Only the skinning counts:
-    the modifiers after the armature (an outline's shell, a mask) are off meanwhile, and a mesh whose posed vertices
-    still do not line up with its own is left out."""
-    first = [np.full(len(ob.data.vertices), np.inf) for ob in meshes]
-    last = {}
-    steps = 3
-    paused = []
-    for ob in meshes:
-        mods = list(ob.modifiers)
-        after = max((i for i, m in enumerate(mods) if m.type == "ARMATURE"), default=-1)
-        paused += [m for m in mods[after + 1:] if m.show_viewport]
+    `reach` of it while the frames played, np.inf if never (sampling.HandSweep)."""
+    from . import sampling
 
-    def visit(i, frame, positions):
-        hands = {}
-        for side in sides:
-            wrist, finger = _hand(armature, side)
-            if wrist is None:
-                continue
-            mw = armature.matrix_world
-            w = np.array(mw @ wrist.head)
-            f = np.array(mw @ finger.head) if finger is not None else np.array(mw @ wrist.tail)
-            hands[side] = (w, w + 2.0 * (f - w))
-        for side, (a1, b1) in hands.items():
-            a0, b0 = last.get(side, (a1, b1))
-            for s in range(1, steps + 1):
-                t = s / float(steps) if side in last else 1.0
-                a, b = a0 + (a1 - a0) * t, b0 + (b1 - b0) * t
-                ab = b - a
-                length2 = max(float(ab @ ab), 1e-12)
-                when = frame - 1.0 + t if side in last else frame
-                for pts, out in zip(positions, first):
-                    if len(pts) != len(out):
-                        continue
-                    v = pts - a
-                    u = np.clip(v @ ab / length2, 0.0, 1.0)
-                    near = np.linalg.norm(v - u[:, None] * ab, axis=1) < reach
-                    hit = near & (when < out)
-                    out[hit] = when
-        last.update(hands)
-
-    for m in paused:
-        m.show_viewport = False
-    try:
-        play(scene, armature, frames, hidden, meshes, visit)
-    finally:
-        for m in paused:
-            m.show_viewport = True
-    return first
+    return sampling.touch_frames(scene, armature, meshes, frames, sampling.HandSweep(armature, sides, reach), hidden)

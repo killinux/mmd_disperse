@@ -72,8 +72,97 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("HAND", "Where the Hands Sweep",
                 "The outfit changes where the dancing hands sweep over the body, then from there over the rest of it "
                 "(the hand-swipe outfit change of short videos). Building plays the dance to find where they go; the "
-                "front keeps their pace (linear), so the end frame follows")),
+                "front keeps their pace (linear), so the end frame follows"),
+               ("PICTURE", "Across the Picture",
+                "A front moves across the picture as the scene camera sees it (a wipe, an iris, a folding fan, strokes "
+                "of a big brush, a hole burning through the film, or paint smeared by the hands) and the outfit "
+                "changes wherever it passes over the dancer, front and back alike. Building plays the dance to see "
+                "where she is on the picture every frame; the front keeps its pace (linear), so the end frame "
+                "follows. Rebuild after moving the camera"),
+               ("SPOTLIGHT", "Under the Spotlight",
+                "A follow spot finds the dancer and the outfit changes wherever its light falls, front and back "
+                "alike: the narrow beam slides onto her chest, then opens up until it takes all of her in (the idol "
+                "stage's reveal; pair it with Lights Out). Building plays the dance to see where the light falls; "
+                "the front keeps its pace (linear), so the end frame follows"),
+               ("SPRAY", "Sprayed On",
+                "The palms spray the new outfit on: wherever the spray from a hand has given the body coat enough, in "
+                "patches, the outfit changes, and a fine mist flies from the palms (Coperni's spray-on dress). "
+                "Building plays the dance to see where the hands spray; the end frame follows"),
+               ("MOTION", "Moving Parts First",
+                "What moves lights up first: each part of the body changes once it has moved far enough (the dancer's "
+                "own travel aside), in patches, so the dancing arms and legs change first and the still parts last "
+                "(Iris van Herpen's living dress). Building plays the dance; the end frame follows"),
+               ("SLICES", "Sliced",
+                "The body is cut into bands at the neck, the waist and the knees and changed band by band, in a random "
+                "order (Garment Order): a quick wipe across a band takes the old outfit away and the new one comes "
+                "half a turn later, so the background shows between them (切片拼装)")),
         default="SPHERE")
+    picture_front: EnumProperty(
+        name="Picture Front",
+        items=(("WIPE", "Wipe", "A line of light wipes across the picture (the direction below)"),
+               ("IRIS", "Iris", "A ring of light opens from the dancer's chest until it has filled the picture"),
+               ("FAN", "Folding Fan", "A paper fan opens across the picture from the bottom, its ribs sweeping over "
+                                      "the dancer (国风)"),
+               ("BRUSH", "Big Brush", "Three strokes of a giant brush in ink sweep across the picture from the top "
+                                      "down, each the other way, and dry away (巨笔)"),
+               ("BURN", "Film Burn", "The film burns through from the dancer: a hole with a glowing, charred edge "
+                                     "spreads over the picture after a warm flicker, grain and scratches over it"),
+               ("SMEAR", "Paint Smear", "Paint in the new outfit's two main colours on the palms, mixed as the change "
+                                        "starts (pair it with Start On: Clap); wherever the hands then smear it across "
+                                        "the picture the outfit changes (手搓颜料)"),
+               ("CLOCK", "Clock Hand", "A clock face round the dancer, its hand ticking round from twelve o'clock in "
+                                       "twelve jumps; the outfit changes wherever it has gone round (表盘跳针)"),
+               ("TAIJI", "Taiji", "A taiji turning and growing round the dancer: wherever its white fish comes over "
+                                  "her the outfit changes, until it has swallowed all of her (太极阴阳)")),
+        default="WIPE",
+        description="The front on the picture (building time)")
+    picture_angle: FloatProperty(name="Wipe Direction", default=0.0, min=-2.0 * 3.14159265, max=2.0 * 3.14159265,
+                                 subtype="ANGLE",
+                                 description="Which way the wipe moves across the picture (0: to the right, 90°: up); "
+                                             "pointing left the fan and the brush start from the right")
+    picture_follow: BoolProperty(name="Follow the Dancer", default=True,
+                                 description="The iris, the burn, the clock and the taiji are round the dancer's chest "
+                                             "as she moves, not round the middle of the picture")
+    picture_brush: FloatProperty(name="Brush Size", default=0.05, min=0.01, max=0.5, subtype="FACTOR",
+                                 description="How far round each hand the paint is smeared, a share of the picture's "
+                                             "height")
+    picture_show: BoolProperty(name="Show the Front", default=True, update=_sync,
+                               description="Draw the front on the picture (a sheet in front of the camera): the line, "
+                                           "the ring, the fan, the ink, the burn, the paint")
+    picture_glow: FloatProperty(name="Front Glow", default=4.0, min=0.0, soft_max=30.0, update=_sync,
+                                description="How brightly the line, the ring, the fan's rib and the burning edge shine "
+                                            "(glow color)")
+    paint_auto: BoolProperty(name="Colours of the New Outfit", default=True, update=_sync,
+                             description="The paint takes the new outfit's two main colours (found in its textures "
+                                         "when building)")
+    paint_color_a: FloatVectorProperty(name="Paint", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                       default=(0.9, 0.15, 0.3), update=_sync)
+    paint_color_b: FloatVectorProperty(name="Second Paint", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                       default=(0.1, 0.35, 0.95), update=_sync)
+    # --- 1.12: lit, sprayed, moved (the paths Under the Spotlight, Sprayed On, Moving Parts First)
+    spot_side: EnumProperty(
+        name="Spot From",
+        items=(("LEFT", "Left", "The beam slides onto the dancer from the left of the picture"),
+               ("RIGHT", "Right", "The beam slides onto the dancer from the right of the picture")),
+        default="LEFT",
+        description="Where the follow spot's beam comes from as it finds the dancer (building time)")
+    spot_energy: FloatProperty(name="Spot Brightness", default=1.0, min=0.0, soft_max=5.0, update=_sync,
+                               description="How brightly the follow spot lights the dancer (0: no light, only the "
+                                           "change)")
+    spot_color: FloatVectorProperty(name="Spot Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                    default=(1.0, 0.94, 0.82), update=_sync,
+                                    description="Colour of the follow spot's light and its beam")
+    spot_beam: FloatProperty(name="Beam Haze", default=0.6, min=0.0, soft_max=5.0, update=_sync,
+                             description="How brightly the beam shows in the air between the spot and the dancer (0: "
+                                         "no beam)")
+    spray_reach: _distance("Spray Reach", "How far the spray from a palm reaches (building time)", 7.0)
+    spray_color: FloatVectorProperty(name="Mist Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(0.85, 0.93, 1.0), update=_sync,
+                                     description="Colour of the mist flying from the palms")
+    motion_amount: FloatProperty(name="Movement Needed", default=0.6, min=0.02, soft_max=4.0,
+                                 description="How far a part of the body has to move before it lights up, in model "
+                                             "heights (about; each part needs its own share of it, so the change comes "
+                                             "in patches) (building time)")
     spiral_pitch: _distance("Spiral Pitch", "How far up the body the change climbs per turn around it", 2.0)
     garment_order: EnumProperty(
         name="Garment Order",
@@ -109,7 +198,9 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                          "together)"),
                ("WINK", "Wink", "Start from the eye that winks (read off the facial expressions of the dance)"),
                ("PULL", "Pull the Cord", "Start when a hand pulls at the chest or the neck and snaps away (Chainsaw "
-                                         "Man)")),
+                                         "Man)"),
+               ("GAZE", "Eye Contact", "Start when the dancer turns to look straight into the camera, from the eyes, "
+                                       "a star glinting in them (#对视变装)")),
         default="NONE",
         description="Start the transformation on a move of the dance: building looks for it in the old model's motion "
                     "from the start frame on and moves the transformation there (the start and end frames follow; with "
@@ -290,6 +381,83 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                               description="How many crystals, swords, flowers or feathers (the concert has its ten "
                                           "beams of light)")
 
+    # --- 1.12: a shell round the dancer for the big moment
+    shell_enable: BoolProperty(name="Shell", default=False, update=_sync,
+                               description="A shell of light forms round the dancer on the way to the big moment (the "
+                                           "swap, or the new outfit complete) and goes then: a barrier dome, a bubble, "
+                                           "a shield, a candy wrapper or a ball of water")
+    shell_style: EnumProperty(
+        name="Shell Style",
+        items=(("DOME", "Barrier Dome", "A dome of light rises over her from the floor and shatters at the moment "
+                                        "(结界; KPop Demon Hunters' Honmoon)"),
+               ("BUBBLE", "Bubble", "A soap bubble swells round her, a rainbow swirling over it, and pops at the "
+                                    "moment (Glinda's bubble)"),
+               ("SHIELD", "Shield", "A sphere of hexagons forms round her and shrinks into her body just before the "
+                                    "moment"),
+               ("CANDY", "Candy Wrapper", "Cellophane twisted shut above her head and under her feet, which untwists "
+                                          "and falls open at the moment"),
+               ("WATER", "Water Shell", "A ball of rippling water round her that bursts into drops at the moment")),
+        default="DOME", update=_sync)
+    shell_size: FloatProperty(name="Shell Size", default=1.0, min=0.3, soft_max=3.0, update=_sync,
+                              description="How big the shell is (1 fits round the dancer)")
+    shell_form: FloatProperty(name="Forms Over", default=0.45, min=0.02, max=1.0, subtype="FACTOR", update=_sync,
+                              description="How long the shell takes to form, as a share of the time to the big moment")
+    shell_color: FloatVectorProperty(name="Shell Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(1.0, 0.78, 0.35), update=_sync,
+                                     description="Colour of the shell's light (the bubble keeps its rainbow)")
+    shell_glow: FloatProperty(name="Shell Glow", default=2.0, min=0.0, soft_max=20.0, update=_sync,
+                              description="How brightly the shell shines")
+
+    # --- 1.12: the lights round the transformation
+    lights_out: BoolProperty(name="Lights Out", default=False, update=_sync,
+                             description="The scene's own lights and its world go down round the transformation and "
+                                         "come back up after the big moment (drivers on their strength, taken off "
+                                         "again when the effect is removed)")
+    lights_level: FloatProperty(name="Lights Level", default=0.08, min=0.0, max=1.0, subtype="FACTOR", update=_sync,
+                                description="How bright the scene's lights stay meanwhile (0: dark)")
+    flash_enable: BoolProperty(name="Camera Flash", default=False, update=_sync,
+                               description="A flash on the camera fires at the big moment (the swap, or the new outfit "
+                                           "complete), and on the beats before it (with beat sync), like a photo "
+                                           "shoot")
+    flash_count: IntProperty(name="Flashes", default=3, min=1, max=12, update=_sync,
+                             description="How many times the camera flashes, the last at the big moment")
+    flash_steps: BoolProperty(name="Change on the Flashes", default=False, update=_sync,
+                              description="The change only moves on with each flash: between flashes it stands still, "
+                                          "so every flash shows the next stage of it")
+    flash_power: FloatProperty(name="Flash Brightness", default=1.0, min=0.0, soft_max=5.0, update=_sync,
+                               description="How bright the camera flash is")
+    streaks: BoolProperty(name="Lens Streaks", default=False, update=_sync,
+                          description="Star-shaped streaks of light from the brightest spots of the picture round the "
+                                      "big moment (a Glare node before the compositor's output)")
+
+    # --- 1.12: the finishing pose (收尾亮相)
+    finish_style: EnumProperty(
+        name="Finishing Pose",
+        items=(("NONE", "None", "No finishing pose"),
+               ("PHOTO", "Photo Pose", "A little after the big moment, where the dancer moves least, the camera's "
+                                       "shutter flashes, everything freezes and a polaroid's white frame closes in "
+                                       "round the picture, a warm light behind her; then it slides away and the dance "
+                                       "catches up with the music (写真定格)"),
+               ("GACHA", "Gacha Pull", "A meteor in the rarity's colour falls onto her just before the big moment, a "
+                                       "ring of light runs out over the floor and a pillar of light rises; then the "
+                                       "reveal: everything freezes, rays of light behind her, her name and the stars "
+                                       "appear, and the dance catches up with the music (抽卡出金)")),
+        default="NONE", update=_sync)
+    finish_delay: FloatProperty(name="After", default=0.5, min=0.0, soft_max=4.0, update=_sync,
+                                description="Seconds after the big moment the pose comes (the photo waits for the "
+                                            "moment the dancer moves least within a second after that)")
+    finish_hold: FloatProperty(name="Hold", default=1.2, min=0.2, soft_max=5.0, update=_sync,
+                               description="Seconds everything stands still for the pose")
+    finish_rarity: EnumProperty(
+        name="Rarity",
+        items=(("BLUE", "Rare", "A blue meteor and three stars"),
+               ("PURPLE", "Epic", "A purple meteor and four stars"),
+               ("GOLD", "Legendary", "A golden meteor and five stars")),
+        default="GOLD", update=_sync)
+    finish_title: StringProperty(name="Name", default="", update=_sync,
+                                 description="The name written on the reveal (empty: the name of the new outfit's "
+                                             "model)")
+
     # --- 1.11: the camera and time at the big moment
     shot_enable: BoolProperty(name="Camera Move", default=False, update=_sync,
                               description="The camera moves at the big moment (the swap, or the new outfit complete): "
@@ -323,7 +491,12 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                     "the transformation goes on, then catches up with the music (bullet time)"),
                ("SLOW", "Slow Motion", "The dance slows to a quarter round the moment, then speeds up to catch up with "
                                        "the music (the velocity edit of short videos)"),
-               ("TWOS", "On Twos", "Round the moment every pose is held for two frames, like stop motion")),
+               ("TWOS", "On Twos", "Round the moment every pose is held for two frames, like stop motion"),
+               ("REWIND", "Rewind and Replay", "A beat after the moment the picture rewinds like a tape, the "
+                                               "transformation flying back off her, then plays it again slowly (over "
+                                               "Time Span) and fast-forwards to catch up with the music (the replay "
+                                               "of Space Sheriff Gavan's 0.05-second suit-up: a short transformation "
+                                               "suits it)")),
         default="NONE", update=_sync,
         description="Freeze or slow the dance round the big moment: its motion is put into an NLA strip whose time is "
                     "keyed (removing the effect puts it back); the rigid bodies are slowed with it")
@@ -450,8 +623,33 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("LOTUS", "Lotus Bud",
                 "No edge: big petals grow up from the floor and close into a bud round the body, the outfits swap "
                 "inside it with a flash, then it opens out and sinks away (Ne Zha 2's lotus; the petals use the "
-                "particle color, their rim the glow color)")),
+                "particle color, their rim the glow color)"),
+               ("GIANT", "Dharma Form",
+                "No edge: a giant golden copy of the dancer in the new outfit forms behind her from the floor up and "
+                "dances along; at the moment it shrinks and dives into her and the outfits swap (法相, the Investiture "
+                "of the Gods' 法天象地; frame wide enough to see it)"),
+               ("ARMS", "Three Heads, Six Arms",
+                "No edge: golden copies of the dancer's arms open out about her shoulders one pair after another like "
+                "a peacock's tail, heads turn out to either side; the outfits swap with a flash when all are open, "
+                "then they fold back (三头六臂·千手开屏, Ne Zha 2; needs an MMD skeleton)")),
         default="GROW", update=_sync)
+    spirit_scale: FloatProperty(name="Giant Size", default=2.5, min=1.0, soft_max=6.0, update=_sync,
+                                description="How many times the dancer's size the Dharma form stands")
+    spirit_distance: FloatProperty(name="Giant Distance", default=0.6, min=0.0, soft_max=3.0, subtype="FACTOR",
+                                   update=_sync,
+                                   description="How far behind the dancer it stands (away from the camera), a share of "
+                                               "her height")
+    arm_pairs: IntProperty(name="Arm Pairs", default=2, min=1, max=8, update=_sync,
+                           description="How many pairs of arms open out (2: six arms; 8: a thousand hands fanning out)")
+    arm_spread: FloatProperty(name="Arm Spread", default=0.6, min=0.05, max=1.6, subtype="ANGLE", update=_sync,
+                              description="The angle between neighbouring arms (they open up and down in turn)")
+    arm_heads: BoolProperty(name="Three Heads", default=True, update=_sync,
+                            description="A head turns out to either side of the dancer's own")
+    spirit_color: FloatVectorProperty(name="Spirit Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                      default=(1.0, 0.68, 0.22), update=_sync,
+                                      description="Colour of the spirit self (golden light)")
+    spirit_glow: FloatProperty(name="Spirit Glow", default=2.0, min=0.0, soft_max=20.0, update=_sync,
+                               description="How brightly the spirit self shines")
     lotus_petals: IntProperty(name="Petal Count", default=8, min=3, max=32, update=_sync,
                               description="How many petals in each of the lotus's two rings")
     beam_sparkles: IntProperty(name="Beam Sparkles", default=250, min=0, soft_max=2000, update=_sync,
@@ -460,6 +658,13 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                  description="Brightness of the column of light")
     smoke_count: IntProperty(name="Smoke Puffs", default=120, min=1, soft_max=2000, update=_sync,
                              description="About how many balls of smoke the puff is made of")
+    smoke_style: EnumProperty(
+        name="Smoke Style",
+        items=(("WHITE", "White Smoke", "Soft white smoke (the ninja's puff)"),
+               ("BOOM", "Toon Explosion", "A cartoon explosion: balls of fire, white-hot in the middle, yellow and "
+                                          "orange round it, which burn out into black smoke after the moment, a "
+                                          "flash of orange light from inside (卡通爆炸)")),
+        default="WHITE", update=_sync)
     smoke_size: _distance("Smoke Size", "How big the balls of smoke are", 1.8)
     shadow_dir: FloatVectorProperty(name="Light Direction", subtype="XYZ", size=3, default=(0.35, 0.55, -1.0),
                                     update=_sync,
@@ -555,7 +760,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                         "color)"),
                ("PAPERCUT", "Paper Cut", "The old outfit turns into a paper cut in patches, see-through where flowers "
                                          "are cut out of it (Chinese paper window flowers, 窗花; a red surface color "
-                                         "for the red paper; pair it with Paper Birds)")),
+                                         "for the red paper; pair it with Paper Birds)"),
+               ("TATTOO", "Glowing Tattoos", "Swirling patterns of light like tattoos spread over the old outfit in "
+                                             "patches and brighten as the edge comes (KPop Demon Hunters; the surface "
+                                             "color is their light: gold or purple)")),
         default="NONE", update=_sync)
     surface_width: _distance("Surface Reach", "How far ahead of the edge the old outfit starts to change", 3.0)
     surface_color: FloatVectorProperty(name="Surface Color", subtype="COLOR", size=3, min=0.0, max=1.0,
@@ -788,7 +996,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                         "wind blow down)"),
                ("PEBBLE", "Pebbles", "Small stones that tumble down (crumbling stone; the particle color tints them)"),
                ("PAPER_BIRD", "Paper Birds", "Red folded paper birds that flap away (with the paper cut)"),
-               ("OBJECT", "Custom Object", "Copies of any mesh object")),
+               # (numbered: files saved before keep Custom Object, which came after Paper Birds)
+               ("GLITTER", "Glitter", "Flat sequins that tumble and flash in a rainbow sheen as they turn to the "
+                                      "camera (KPop Demon Hunters' glitter)", 17),
+               ("OBJECT", "Custom Object", "Copies of any mesh object", 16)),
         default="NONE", update=_sync)
     particle_object: PointerProperty(name="Particle Object", type=bpy.types.Object, poll=_mesh_object,
                                      update=_sync, description="Mesh used for every particle")

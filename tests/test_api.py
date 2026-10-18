@@ -2900,6 +2900,134 @@ def run():
     s.beat_sync = saved["beat_sync"]
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.13 checks")
 
+    # --- 1.14: printed layer by layer (the supports, the laser heads), the dimension switch
+    from mmd_disperse import dimension, printer  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "noise_amount", "edge_glow",
+        "print_layers", "print_supports", "print_lasers", "dim_style", "dim_reverse", "dim_length", "dim_film",
+        "dim_lights", "beat_sync", "trigger", "finale")}
+    made_camera = None
+    if scene.camera is None:  # (the laser heads stand round her from it, the film sheet hangs in front of it)
+        made_camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(made_camera)
+        made_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
+        made_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        scene.camera = made_camera
+    s.trigger, s.finale, s.beat_sync = "NONE", False, False
+    s.path, s.entrance, s.exit_style, s.easing = "PRINT", "GROW", "FRAGMENTS", "LINEAR"
+    s.noise_amount, s.print_layers, s.print_supports, s.print_lasers = 0.0, 40, True, 4
+    s.frame_start, s.frame_end = 20, 80
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build printed layer by layer")
+    mask = s.mask
+    rec = printer.record(mask) or {}
+    layer, lead = float(rec.get("layer", 0.0)), float(rec.get("lead", 0.0))
+    new_mesh = target.meshes[0]
+    stored = np.empty(len(new_mesh.data.vertices), dtype=np.float32)
+    new_mesh.data.attributes[ATTR_ARRIVAL].data.foreach_get("value", stored)
+    scale = new_mesh.matrix_world.to_scale()
+    steps = (stored * (abs(scale.x) + abs(scale.y) + abs(scale.z)) / 3.0 - lead) / max(layer, 1e-9)
+    check(rec and abs(layer * 40 - float(rec["height"])) < 1e-4 * height
+          and float(np.abs(steps - np.round(steps)).max()) < 1e-3 and len(np.unique(np.round(steps))) > 20,
+          "printed layer by layer: layers of %.3f, every vertex of the new outfit on a whole layer (%d of them)"
+          % (layer, len(np.unique(np.round(steps)))))
+    twins = printer.objects(mask, "TWIN")
+    check(len(twins) == len(target.meshes) and all(t.data == m.data and t.hide_render for t, m in
+                                                   zip(sorted(twins, key=lambda t: t[printer.P_SOURCE]),
+                                                       sorted(target.meshes, key=lambda m: m.name)))
+          and len(printer.objects(mask, "LASERS")) == 1 and len(printer.objects(mask, "LIGHT")) == 1,
+          "print: a hidden twin of each mesh of the new outfit (%d), the laser heads and their light" % len(twins))
+    first = effect._frame_at(mask, lead)
+    last = effect._frame_at(mask, lead + float(rec.get("height", 0.0)))
+    lasers = printer.objects(mask, "LASERS")[0]
+    supports = printer.objects(mask, "SUPPORTS")
+    fps = scene.render.fps / scene.render.fps_base
+    scene.frame_set(int(first) - 2)
+    before = evaluated_counts(lasers)
+    mid = int(round((first + last) / 2.0))
+    scene.frame_set(mid)
+    shooting = evaluated_counts(lasers)
+    whole = evaluated_counts(twins[0])
+    light_z = printer.objects(mask, "LIGHT")[0].matrix_world.translation.z
+    standing = sum(evaluated_counts(o) for o in supports)
+    scene.frame_set(int(last) + 3)
+    after = evaluated_counts(lasers)
+    gone_at = last + (printer.SNAP + printer.SNAP_SPREAD + printer.CRUMBLE) * fps + 2.0
+    scene.frame_set(int(math.ceil(last + (printer.SNAP + 0.5 * printer.SNAP_SPREAD) * fps)))
+    crumbling = sum(evaluated_counts(o) for o in supports)
+    scene.frame_set(int(math.ceil(gone_at)))
+    left = sum(evaluated_counts(o) for o in supports)
+    check(before == 0 and shooting > 0 and after == 0 and whole == len(new_mesh.data.vertices)
+          and rec["lo"] < light_z < rec["lo"] + rec["height"],
+          "laser heads shoot only while it prints (%d, %d, %d vertices), the twin is all of her (%d), the light on "
+          "the layer (%.2f)" % (before, shooting, after, whole, light_z))
+    check(rec["supports"] == 0 or (standing > 0 and crumbling > 0 and left == 0),
+          "supports: %d found, printed (%d vertices half way), crumbling once it is done (%d), gone after (%d)"
+          % (rec["supports"], standing, crumbling, left))
+    glowing = [sl.material.name for ob in target.meshes for sl in ob.material_slots
+               if sl.material is not None and sl.material.get(materials.P_PRINT)]
+    check(glowing and not [sl.material for ob in base.meshes for sl in ob.material_slots
+                           if sl.material is not None and sl.material.get(materials.P_PRINT)],
+          "the newest layers glow on the new outfit (%d materials), not on the old one" % len(glowing))
+    check(not draw_panels(bpy.context), "panels draw printed layer by layer")
+    s.path, s.exit_style = "SPHERE", "SHRINK"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"} and not printer.objects(s.mask)
+          and not [m for m in bpy.data.materials if m.get(materials.P_PRINT)]
+          and not [o for o in bpy.data.objects if o.get(printer.P_PRINT) is not None],
+          "print off: its twins, supports, lasers and light gone, the glow out of the materials")
+
+    # the dimension switch: along the front the new outfit comes in realistic, the head turns as the front passes it
+    s.path, s.seeds, s.entrance, s.easing = "SURFACE", "ORIGIN", "GROW", "EASE"
+    s.dim_style, s.dim_reverse, s.dim_film, s.dim_lights = "FRONT", False, True, True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the dimension switch")
+    mask = s.mask
+
+    def real(mat):
+        node = mat.node_tree.nodes.get(materials.REAL + " On") if mat.node_tree else None
+        return node.outputs[0].default_value if node is not None else None
+
+    new_mats = [m for ob in target.meshes for m in dimension._materials(ob)]
+    old_free = [m for ob in base.meshes for m in dimension._materials(ob) if not dimension._locked(s, m)]
+    old_locked = [m for ob in base.meshes for m in dimension._materials(ob) if dimension._locked(s, m)]
+    film = next(iter(dimension.objects(mask, "FILM")), None)
+    lights_ = [o for o in dimension.objects(mask) if o.type == "LIGHT"]
+    kinds = sorted({m.get(materials.P_REAL) for m in new_mats + old_free + old_locked})
+    scene.frame_set(s.frame_start - 1)
+    early = ([real(m) for m in old_locked], film.get(dimension.FILM) if film else None)
+    scene.frame_set(s.frame_end + 20)
+    late = ([real(m) for m in old_locked], film.get(dimension.FILM) if film else None,
+            sum(o.data.energy for o in lights_))
+    check(film is not None and len(lights_) == 3 and all(real(m) == 1.0 for m in new_mats)
+          and all(real(m) == 0.0 for m in old_free) and old_locked and all(v == 0.0 for v in early[0])
+          and all(v == 1.0 for v in late[0]) and early[1] == 0.0 and late[1] == 1.0 and late[2] > 0.0,
+          "along the front: the new outfit realistic, the old one as it is, the head turning as the front passes it "
+          "(%s), the film look and the lights coming up (kinds %s)" % (early[0][:2] + late[0][:2], kinds))
+    s.dim_reverse = True
+    check(all(real(m) == 0.0 for m in new_mats) and all(real(m) == 1.0 for m in old_free),
+          "reversed: the new outfit as it is, the old one realistic")
+    s.dim_reverse = False
+    # on the beats: the whole of her flips, ending realistic
+    s.dim_style, s.dim_length = "BEATS", 1.5
+    wave = float(mask[effect.P_WAVE])
+    moment = effect._frame_at(mask, effect._finale_start(s, wave, mask))
+    probe = new_mats[0]
+    seen = []
+    for f in range(int(moment - 1.5 * fps) - 2, int(moment) + 4):
+        scene.frame_set(f)
+        seen.append(real(probe))
+    flips = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
+    check(flips >= 3 and seen[-1] == 1.0 and seen[0] == 0.0,
+          "on the beats: she flips %d times before the moment and stays realistic" % flips)
+    check(not draw_panels(bpy.context), "panels draw with the dimension switch")
+    s.dim_style = "NONE"
+    check(not [m for m in bpy.data.materials if m.get(materials.P_REAL)] and not dimension.objects(mask),
+          "dimension switch off: the realistic look out of the materials, the film sheet and the lights gone")
+    if made_camera is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.14 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

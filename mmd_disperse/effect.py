@@ -8,9 +8,9 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import (arrival, beats, chain, compositor, cover, domain, finish, glint, grow, impact, launch, lights, materials,
-               mist, motion, origins, particles, picture, pyro, replay, ribbons, rings, sampling, shell, shots, spirit,
-               timewarp, tint, toon, trails, venom)
+from . import (arrival, beats, chain, compositor, cover, dimension, domain, finish, glint, grow, impact, launch, lights,
+               materials, mist, motion, origins, particles, picture, printer, pyro, replay, ribbons, rings, sampling,
+               shell, shots, spirit, timewarp, tint, toon, trails, venom)
 from . import model as mdl
 from .node_groups import (ATTR_ARRIVAL, BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups,
                           input_identifiers)
@@ -485,6 +485,8 @@ def _cleanup_mesh(ob):
                 materials.remove_shadow(slot.material)
                 materials.remove_paint(slot.material)
                 materials.remove_tint(slot.material)
+                materials.remove_print(slot.material)
+                materials.remove_real(slot.material)
     saved = ob.get(P_ARM)
     if saved:
         for mod_name, arm_name in saved.to_dict().items():
@@ -556,6 +558,8 @@ def remove_effect(mask):
     pyro.remove(mask)
     tint.remove(mask)
     origins.remove(mask)
+    printer.remove(mask)
+    dimension.remove(mask)
     grow.remove(mask)
     chain.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
@@ -651,6 +655,21 @@ def _update_paint(ob, settings):
                                    settings.ink_color, PAINT_CELL * height, settings.glow_color, CODE_CELL * height)
         else:
             materials.remove_paint(mat)
+
+
+def _update_print(ob, settings, mask):
+    """1.14: the newest layers of the print glow, with the lines between the layers (printed layer by layer)."""
+    rec = printer.record(mask) if mask.get(P_PATH) == "PRINT" else None
+    scale = _object_scale(ob)
+    for mat in _glow_materials(ob, settings):
+        if rec is not None:
+            materials.add_print(mat)
+            # the layers start at the feet: rec["lo"] along the up axis, in the mesh's own space
+            foot = ob.matrix_world.inverted() @ (Vector(rec["axis"]) * rec["lo"])
+            materials.update_print(mat, settings.glow_color, settings.edge_glow_strength, rec["layer"] / scale,
+                                   foot.z)
+        else:
+            materials.remove_print(mat)
 
 
 def _update_surface(ob, settings):
@@ -1215,7 +1234,10 @@ def sync(settings):
     cover.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)
     pyro.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)
     tint.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)
+    dimension.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None,
+                   lambda radius: _frame_at(mask, radius))  # 1.14: toon to realistic
     origins.sync(settings, mask, _models(settings), lambda radius: _frame_at(mask, radius))
+    printer.sync(settings, mask, _models(settings), lambda radius: _frame_at(mask, radius))  # 1.14
     chain.sync(settings, mask, mdl.resolve(settings.base) if settings.base else None)
     glint.sync(settings, mask, next(iter(_models(settings)), None))  # 1.12: the star in the eyes (eye contact)
     # 1.11: cartoon physics at the big moment (the first frame of it: the swap, or the new outfit complete), about an
@@ -1490,6 +1512,7 @@ def sync(settings):
             _update_hologram(ob, settings)
             _update_layer(ob, settings)
             _update_paint(ob, settings)
+            _update_print(ob, settings, mask)
         elif role == "BASE":
             flakes = settings.exit_style in FLAKES + ("CHUNKS",) and settings.frag_glow
             shiny = settings.entrance == "SCALES" and settings.edge_glow  # the turning scales glint
@@ -1827,6 +1850,8 @@ def build(context, settings):
             roles = ["TARGET"] * len(target.meshes) + ["BASE"] * len(base.meshes)
             values = arrival.compute(meshes, path, seeds, height, frame, settings.spiral_pitch, owner.armature, roles,
                                      keys, settings.garment_order)
+            if path == "PRINT":  # 1.14: the sweep up in whole layers, each coming at once (printer.py)
+                values = printer.layered(values, printer.layer_height(settings, height))
         values = [v + lead for v in values]
         for ob, v in zip(meshes, values):
             arrival.write(ob, v / _object_scale(ob))
@@ -1865,6 +1890,9 @@ def build(context, settings):
     if starts is not None:  # where the fronts set off (with the lead), for what flies onto them there
         starts["delay"] = [d + lead for d in starts["delay"]]
         mask[origins.P_ORIGINS] = starts
+    if path == "PRINT":  # 1.14: the supports, picked on the rest pose, and what the laser heads aim by
+        mask[printer.P_PRINT] = printer.build_record(settings, target, meshes, frame, height,
+                                                     printer.layer_height(settings, height), lead)
     if found is not None and settings.trigger in motion.MOMENTS and path not in SAMPLED:
         # the swap (or the middle of the wave) as the back is turned to the camera, at the bottom of the squat, the top
         # of the jump, as the feet land

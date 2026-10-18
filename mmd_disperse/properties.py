@@ -112,7 +112,12 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("ORIGINS", "From Many Points",
                 "Things land on the body one after another (sparks of molten iron, blobs of paint, tokens) and the new "
                 "outfit spreads out from each where it lands, each from its own moment (多点开花). The front keeps "
-                "its pace (linear), so the end frame follows")),
+                "its pace (linear), so the end frame follows"),
+               ("PRINT", "Printed Layer by Layer",
+                "The new outfit is printed from the feet up one layer after another, the newest layers glowing hot "
+                "with the lines between them; laser heads round her shoot beams at the layer being printed, and thin "
+                "supports hold up what hangs over, snapping off and crumbling once the print is done (激光打印, "
+                "Tron: Ares)")),
         default="SPHERE")
     picture_front: EnumProperty(
         name="Picture Front",
@@ -206,6 +211,15 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     origins_object: PointerProperty(name="Token Object", type=bpy.types.Object, poll=_mesh_object, update=_sync,
                                     description="A small mesh of your own to use as the tokens, with its own material "
                                                 "(empty: a gold star of ours)")
+    print_layers: IntProperty(name="Layers", default=48, min=4, max=400,
+                              description="How many layers the body is printed in, from the feet to the top of the "
+                                          "head (building time)")
+    print_supports: BoolProperty(name="Supports", default=True,
+                                 description="Thin supports hold up what hangs over (the hem of a skirt, the chin "
+                                             "...), printed with the layers and snapping off once the print is done "
+                                             "(building time)")
+    print_lasers: IntProperty(name="Laser Heads", default=4, min=0, max=8, update=_sync,
+                              description="Laser heads round the dancer shooting at the layer being printed (0: none)")
     garment_order: EnumProperty(
         name="Garment Order",
         items=(("DOWN", "From the Top", "From the garments at the top of the body down to the shoes"),
@@ -573,6 +587,29 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     tint_color_b: FloatVectorProperty(name="Colour B", subtype="COLOR", size=3, min=0.0, max=1.0,
                                       default=(0.2, 0.45, 1.0), update=_sync,
                                       description="The other colour of the tug")
+
+    # --- 1.14: the dimension switch (dimension.py)
+    dim_style: EnumProperty(
+        name="Dimension Switch",
+        items=(("NONE", "None", "She keeps the look of her materials"),
+               ("FRONT", "Along the Front", "The new outfit comes in realistic (its own textures under realistic "
+                                            "shading: skin, hair, latex, cloth) while the old one stays as it is "
+                                            "until it goes; her head and hair turn realistic as the front passes "
+                                            "them (次元切换, naevis' \"Done\")"),
+               ("BEATS", "On the Beats", "The whole of her flips between her own look and the realistic one on every "
+                                         "beat (with Sync to Beat; else a few times a second) in the Dimension Time "
+                                         "before the big moment, and stays realistic from then on")),
+        default="NONE", update=_sync,
+        description="From the MMD look to a realistic one (EEVEE): her own textures under realistic shading")
+    dim_reverse: BoolProperty(name="Reverse", default=False, update=_sync,
+                              description="The other way: from the realistic look to her own")
+    dim_length: FloatProperty(name="Dimension Time", default=2.5, min=0.2, soft_max=10.0, update=_sync,
+                              description="Seconds before the big moment she starts flipping (On the Beats)")
+    dim_film: BoolProperty(name="Film Look", default=True, update=_sync,
+                           description="A camera's grain and a vignette over the picture as she turns realistic")
+    dim_lights: BoolProperty(name="Studio Lights", default=True, update=_sync,
+                             description="A key light and two rim lights come up as she turns realistic (turn off "
+                                         "when the scene is lit already)")
 
     # --- 1.11: the camera and time at the big moment
     shot_enable: BoolProperty(name="Camera Move", default=False, update=_sync,

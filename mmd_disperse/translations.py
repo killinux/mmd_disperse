@@ -610,6 +610,21 @@ _ZH = {
     ("Operator", "Move Outfit"): "移动服装",
     ("*", "Build again to wear the list"): "改了列表要重新生成",
     ("*", "Needs the old outfit"): "需要旧服装",
+    # 1.14
+    ("*", "Printed Layer by Layer"): "逐层打印",
+    ("*", "Layers"): "层数",
+    ("*", "Supports"): "支撑柱",
+    ("*", "Laser Heads"): "激光头",
+    ("*", "Laser Print"): "激光打印",
+    ("*", "Dimension Switch"): "次元切换",
+    ("*", "Along the Front"): "随前沿变写实",
+    ("*", "On the Beats"): "按拍闪切",
+    ("*", "Reverse"): "反向（写实→原样）",
+    ("*", "Dimension Time"): "闪切时长",
+    ("*", "Film Look"): "胶片质感",
+    ("*", "Studio Lights"): "补光",
+    ("*", "Into the Real"): "次元切换",
+    ("*", "Dimension Flicker"): "次元闪切",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

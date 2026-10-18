@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(REPO, "tests"))
 import mmd_disperse  # noqa: E402
 from mmd_disperse import beats, compositor, effect, presets  # noqa: E402
 from mmd_disperse.model import resolve, rest_bounds  # noqa: E402
-from scene_setup import add_model_args, apply_settings, load_dance, load_models  # noqa: E402
+from scene_setup import _fix_shared_toons, add_model_args, apply_settings, load_dance, load_models  # noqa: E402
 
 TIFA_LOCK = "Face*;Hair*;Eye*;*Brows*;Eyelashes*;Mouth*;*Teeth*;Inners*"
 NORMAL_NAME = re.compile(r"n(or)?m|nrm|[ _]n[ _.]|n_ao|mapn")  # CSuit_Body_norm, Arms_N, Tifa Head N_AO ...
@@ -78,6 +78,8 @@ def parse_args():
     p.add_argument("--no-base", action="store_true",
                    help="the new outfit materialises from nothing (the old model is hidden)")
     p.add_argument("--music", default="", help="find the beats of this song (from frame 1) for the effect")
+    p.add_argument("--keep-toon", action="store_true",
+                   help="keep the MMD toon materials (no PBR), e.g. for the dimension switch (--toon-dir: their toons)")
     return p.parse_args(argv)
 
 
@@ -338,8 +340,13 @@ def main():
             if ob is not None:
                 coll.objects.link(ob)
         chained.append(resolve(bpy.data.objects[root]))
-    kinds = upgrade_materials(base.meshes + target.meshes + [ob for m in chained for ob in m.meshes])
-    print("HD MATERIALS", kinds)
+    if args.keep_toon:  # the MMD look stays (the dimension switch turns it realistic itself)
+        if args.toon_dir:
+            _fix_shared_toons(args.toon_dir)
+        print("HD MATERIALS kept toon")
+    else:
+        kinds = upgrade_materials(base.meshes + target.meshes + [ob for m in chained for ob in m.meshes])
+        print("HD MATERIALS", kinds)
 
     s = scene.mmd_disperse
     s.base, s.target = base_root, target_root

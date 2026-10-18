@@ -67,9 +67,13 @@ ICE_IOR = 1.31
 TINT = "MMDD Tint"  # 1.13 (tint.py): the outfit recoloured (face change, colour tug) and the dancers of every era
 P_TINT = "mmd_disperse_tint"
 TINT_SLOTS = 8  # colours in the tint's palette
-_CHAIN = ((SURFACE + " Mix", 1), (LAYER + " Mix", 1), (PAINT + " Mix", 1), (TINT + " Mix", 1), (INNER + " Mix", 1),
-          (HOLO + " Mix", 1),
-          (HUSK + " Mix", 1), (GLOW + " Add", 0), (SHADOW + " Mix", 1))
+PRINT = "MMDD Print"  # 1.14 (printer.py): the newest layers of the print glowing hot, the lines between the layers
+P_PRINT = "mmd_disperse_print"
+REAL = "MMDD Real"  # 1.14 (dimension.py): the realistic look, a Principled BSDF made from the MMD material
+P_REAL = "mmd_disperse_real"
+_CHAIN = ((REAL + " Mix", 1), (SURFACE + " Mix", 1), (LAYER + " Mix", 1), (PAINT + " Mix", 1), (TINT + " Mix", 1),
+          (INNER + " Mix", 1), (HOLO + " Mix", 1),
+          (HUSK + " Mix", 1), (GLOW + " Add", 0), (PRINT + " Add", 0), (SHADOW + " Mix", 1))
 
 
 def _set_input(node, names, value):
@@ -5185,12 +5189,282 @@ def _cover_cut(name):
     return mat
 
 
+def _cover_print_rod(name):
+    """The supports of the print (PRINT_ROD, printer.py): pale resin, glowing in the glow colour (mmdd_color, the
+    object's) as hot as mmdd_heat says (1 just printed .. 0 cooled down), white hot at the hottest."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    heat = s.attribute("mmdd_heat", -1400, 0).outputs[2]
+    tint = s.attribute("mmdd_color", -1400, 300, "OBJECT").outputs["Color"]
+    hot = s.lerp(tint, (1.0, 0.86, 0.62), m("POWER", heat, 6.0, x=-1200, y=150), -1000, 300)
+    glow = s.emission(hot, m("MULTIPLY", m("MULTIPLY", heat, heat, x=-1200, y=-100), 9.0, x=-1000, y=-100), -700, 100)
+    resin = s.principled(-700, -300, color=(0.8, 0.78, 0.74), roughness=0.38)
+    add = s.node("ShaderNodeAddShader", -400, 0)
+    nt.links.new(resin, add.inputs[0])
+    nt.links.new(glow, add.inputs[1])
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    mat.diffuse_color = (0.8, 0.78, 0.74, 1.0)
+    return mat
+
+
+def _cover_laser(name):
+    """The laser heads, their beams and the spots where they hit (LASER, printer.py; mmdd_part 0, 1, 2): dark metal
+    heads with a lens glowing in the glow colour (mmdd_color, the object's; mmdd_lens 1 on the lens), beams of light
+    in it and spots of it nearly white; they cast no shadows."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    part = s.attribute("mmdd_part", -1400, 0).outputs[2]
+    lens = s.attribute("mmdd_lens", -1400, -200).outputs[2]
+    tint = s.attribute("mmdd_color", -1400, 300, "OBJECT").outputs["Color"]
+    metal = s.principled(-1000, -500, color=(0.05, 0.05, 0.055), roughness=0.3, metallic=0.8)
+    head = s.mix_shader(lens, metal, s.emission(tint, 8.0, -1000, -300), -700, -400)
+    beam = s.emission(tint, 18.0, -1000, 0)
+    spot = s.emission(s.lerp(tint, (1.0, 1.0, 1.0), 0.55, -1200, 300), 45.0, -1000, 200)
+    light = s.mix_shader(m("GREATER_THAN", part, 1.5, x=-1000, y=400), beam, spot, -700, 100)
+    nt.links.new(s.mix_shader(m("GREATER_THAN", part, 0.5, x=-700, y=300), head, light, -400, 0),
+                 out.inputs["Surface"])
+    _no_shadow(mat)
+    mat.diffuse_color = (1.0, 0.1, 0.05, 1.0)
+    return mat
+
+
 _COVER_MAKERS = {"MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS": _cover_glass,
                  "CLOTH": _cover_cloth, "UMBRELLA": _cover_umbrella, "FAN": _cover_fan, "EMOJI": _cover_emoji,
                  "FRAME": _cover_frame, "CANVAS": _cover_canvas, "PETALS": _cover_pieces, "PLUMES": _cover_plumes,
                  "CONFETTI": _cover_confetti, "CANNON": _cover_cannon, "BALLOON": _cover_balloon,
                  "CURTAIN": _cover_curtain, "SPARK": _cover_spark, "SPLAT": _cover_splat, "TOKEN": _cover_token,
-                 "CUT": _cover_cut}
+                 "CUT": _cover_cut, "PRINT_ROD": _cover_print_rod, "LASER": _cover_laser}
+
+
+# --------------------------------------------------------------------------- 1.14: the print (printer.py)
+
+def add_print(mat):
+    """Splice the print's glow in front of every material output (PRINT + " Add", added on top): the newest layers
+    glowing in the colour of PRINT + " Color", white hot at the very front, as disperse_edge says (1 at the front .. 0
+    Edge Width behind it), with dark lines between the layers (rest position z in object space: one every PRINT +
+    " Layer", from PRINT + " Offset"), as bright as PRINT + " Strength"; cut-out texels do not glow."""
+    nt = mat.node_tree
+    if nt is None or mat.get(P_PRINT):
+        return
+    outputs = _outputs(nt)
+    if not outputs:
+        return
+    m = _shader_math(nt, PRINT)
+    x = min(n.location.x for n in outputs) - 400
+    y = min(n.location.y for n in outputs) - 8200
+    edge = _new(nt, "ShaderNodeAttribute", PRINT + " Edge", x - 2000, y, attribute_type="GEOMETRY",
+                attribute_name=ATTR_EDGE).outputs[2]
+    rest = _new(nt, "ShaderNodeAttribute", PRINT + " Rest", x - 2000, y - 300, attribute_type="GEOMETRY",
+                attribute_name=ATTR_REST).outputs["Vector"]
+    split = _new(nt, "ShaderNodeSeparateXYZ", PRINT + " Rest Split", x - 1800, y - 300)
+    nt.links.new(rest, split.inputs[0])
+    values = {}
+    for k, (name, value) in enumerate((("Layer", 1.0), ("Offset", 0.0), ("Strength", 1.0))):
+        node = _new(nt, "ShaderNodeValue", "%s %s" % (PRINT, name), x - 2000, y - 500 - 150 * k)
+        node.outputs[0].default_value = value
+        values[name] = node.outputs[0]
+    color = _new(nt, "ShaderNodeRGB", PRINT + " Color", x - 2000, y - 1000)
+    color.outputs[0].default_value = (1.0, 0.1, 0.04, 1.0)
+    f = m("FRACT", m("DIVIDE", m("SUBTRACT", split.outputs[2], values["Offset"], x=x - 1600, y=y - 300),
+                     m("MAXIMUM", values["Layer"], 1e-6, x=x - 1600, y=y - 450), x=x - 1400, y=y - 300),
+          x=x - 1200, y=y - 300)
+    body = m("MULTIPLY", _smooth_node(nt, PRINT + " Body In", f, 0.0, 0.16, x - 1000, y - 250),
+             m("SUBTRACT", 1.0, _smooth_node(nt, PRINT + " Body Out", f, 0.84, 1.0, x - 1000, y - 450),
+               x=x - 800, y=y - 450), x=x - 600, y=y - 300)
+    lines = m("MULTIPLY_ADD", body, 0.85, 0.15, x=x - 400, y=y - 300)
+    hot = _lerp(nt, color.outputs[0], (1.0, 0.86, 0.62), m("POWER", edge, 6.0, x=x - 1200, y=y + 200), PRINT + " Hot",
+                x - 1000, y + 200)
+    amount = m("MULTIPLY", m("MULTIPLY", m("MULTIPLY", edge, edge, x=x - 800, y=y), lines, x=x - 600, y=y),
+               values["Strength"], x=x - 400, y=y)
+    alpha = _alpha_source(nt)
+    if alpha is not None:
+        amount = m("MULTIPLY", amount, alpha, x=x - 250, y=y)
+    emission = _new(nt, "ShaderNodeEmission", PRINT + " Emission", x - 50, y)
+    nt.links.new(hot, emission.inputs["Color"])
+    nt.links.new(amount, emission.inputs["Strength"])
+    for i, out in enumerate(outputs):
+        add = _new(nt, "ShaderNodeAddShader", "%s Add %d" % (PRINT, i), out.location.x - 180, out.location.y - 260)
+        nt.links.new(emission.outputs[0], add.inputs[1])
+        _splice(nt, out, add)
+    mat[P_PRINT] = 1
+
+
+def update_print(mat, color, strength, layer, offset):
+    """The print's glow colour and strength, and its layers in object space (their height, where the first starts)."""
+    nodes = mat.node_tree.nodes if mat.node_tree else {}
+    node = nodes.get(PRINT + " Color")
+    if node is not None:
+        node.outputs[0].default_value = tuple(color) + (1.0,)
+    for name, value in (("Strength", strength), ("Layer", layer), ("Offset", offset)):
+        node = nodes.get("%s %s" % (PRINT, name))
+        if node is not None:
+            node.outputs[0].default_value = value
+
+
+def remove_print(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_PRINT):
+        return
+    _unsplice(nt, PRINT + " Add")
+    for node in [n for n in nt.nodes if n.name.startswith(PRINT)]:
+        nt.nodes.remove(node)
+    del mat[P_PRINT]
+
+
+# --------------------------------------------------------------------------- 1.14: the dimension switch (dimension.py)
+
+# what a Principled BSDF looks like for each kind of material: roughness, specular, metallic, coat, sheen,
+# subsurface scattering, how much darker the colour (hair cards read grey under studio light)
+REAL_KINDS = {
+    "skin": (0.5, 0.5, 0.0, 0.0, 0.0, 0.15, 1.0),
+    "hair": (0.45, 0.3, 0.0, 0.0, 0.0, 0.0, 0.62),
+    "eye": (0.05, 0.5, 0.0, 0.8, 0.0, 0.0, 1.0),
+    "lash": (0.6, 0.1, 0.0, 0.0, 0.0, 0.0, 1.0),
+    "mouth": (0.3, 0.5, 0.0, 0.0, 0.0, 0.0, 1.0),
+    "metal": (0.25, 0.5, 0.9, 0.0, 0.0, 0.0, 1.0),
+    "leather": (0.24, 0.5, 0.0, 0.8, 0.0, 0.0, 1.0),
+    "cloth": (0.62, 0.35, 0.0, 0.0, 0.15, 0.0, 1.0),
+}
+FILM_MATERIAL = "MMD Disperse Film"
+
+
+def add_real(mat, kind, unit):
+    """Splice the realistic look in at the surface itself (REAL + " Mix", before every other node of ours, so what
+    they add stays on top): a Principled BSDF made from the material's own base texture (mmd_base_tex; else the MMD
+    shader's diffuse colour) and alpha, set for its `kind` (REAL_KINDS; skin scatters light under it, `unit` the
+    distance in object space), as much of it as REAL + " On" says (dimension.py drives it)."""
+    nt = mat.node_tree
+    if nt is None or mat.get(P_REAL):
+        return
+    outputs = _outputs(nt)
+    if not outputs:
+        return
+    m = _shader_math(nt, REAL)
+    x = min(n.location.x for n in outputs) - 400
+    y = min(n.location.y for n in outputs) - 10000
+    rough, spec, metal, coat, sheen, scatter, value = REAL_KINDS.get(kind, REAL_KINDS["cloth"])
+    on = _new(nt, "ShaderNodeValue", REAL + " On", x - 1200, y + 300)
+    on.outputs[0].default_value = 0.0
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", REAL + " BSDF", x - 600, y)
+    shader = nt.nodes.get("mmd_shader")
+    base = nt.nodes.get("mmd_base_tex")
+    if base is not None and base.bl_idname == "ShaderNodeTexImage" and base.image is not None:
+        color = base.outputs["Color"]
+    else:
+        diffuse = shader.inputs.get("Diffuse Color") if shader is not None else None
+        rgb = _new(nt, "ShaderNodeRGB", REAL + " Color", x - 1200, y)
+        rgb.outputs[0].default_value = tuple(diffuse.default_value) if diffuse is not None and \
+            not diffuse.is_linked else tuple(mat.diffuse_color)
+        color = rgb.outputs[0]
+    if value < 1.0:
+        color = _new(nt, "ShaderNodeVectorMath", REAL + " Darker", x - 900, y, operation="SCALE")
+        nt.links.new(base.outputs["Color"] if base is not None and base.image is not None else rgb.outputs[0],
+                     color.inputs[0])
+        color.inputs[3].default_value = value
+        color = color.outputs[0]
+    nt.links.new(color, bsdf.inputs["Base Color"])
+    alpha = _alpha_source(nt)
+    own = shader.inputs.get("Alpha") if shader is not None else None
+    if own is not None and own.is_linked:
+        alpha = m("MULTIPLY", alpha, own.links[0].from_socket, x=x - 900, y=y - 300) if alpha is not None else \
+            own.links[0].from_socket
+    elif own is not None and own.default_value < 1.0:
+        alpha = m("MULTIPLY", alpha if alpha is not None else 1.0, own.default_value, x=x - 900, y=y - 300)
+    if alpha is not None:
+        nt.links.new(alpha, bsdf.inputs["Alpha"])
+    _set_input(bsdf, ("Roughness",), rough)
+    _set_input(bsdf, ("Specular IOR Level", "Specular"), spec)
+    _set_input(bsdf, ("Metallic",), metal)
+    _set_input(bsdf, ("Coat Weight", "Clearcoat"), coat)
+    _set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.05)
+    _set_input(bsdf, ("Sheen Weight", "Sheen"), sheen)
+    if scatter > 0.0:
+        _set_input(bsdf, ("Subsurface Weight", "Subsurface"), scatter)
+        if bsdf.inputs.get("Subsurface Scale") is not None:  # 4.0+: the radius is scaled
+            bsdf.inputs["Subsurface Radius"].default_value = (1.0, 0.35, 0.2)
+            bsdf.inputs["Subsurface Scale"].default_value = unit
+        else:
+            bsdf.inputs["Subsurface Radius"].default_value = (unit, 0.35 * unit, 0.2 * unit)
+            if bsdf.inputs.get("Subsurface Color") is not None:
+                nt.links.new(color, bsdf.inputs["Subsurface Color"])
+    for i, out in enumerate(outputs):
+        mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (REAL, i), out.location.x - 180, out.location.y + 1200)
+        _splice(nt, out, mix)
+        nt.links.new(on.outputs[0], mix.inputs[0])
+        nt.links.new(bsdf.outputs[0], mix.inputs[2])
+    mat[P_REAL] = kind
+
+
+def update_real(mat, expression):
+    """How much of the realistic look shows: a driver expression on the frame (or a number)."""
+    node = mat.node_tree.nodes.get(REAL + " On") if mat.node_tree else None
+    if node is None:
+        return
+    sock = node.outputs[0]
+    sock.driver_remove("default_value")
+    if isinstance(expression, str) and expression not in ("0", "1"):
+        driver = sock.driver_add("default_value").driver
+        driver.type = "SCRIPTED"
+        driver.expression = expression
+    else:
+        sock.default_value = float(expression)
+
+
+def remove_real(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_REAL):
+        return
+    node = nt.nodes.get(REAL + " On")
+    if node is not None:
+        node.outputs[0].driver_remove("default_value")
+    _unsplice(nt, REAL + " Mix")
+    for node in [n for n in nt.nodes if n.name.startswith(REAL)]:
+        nt.nodes.remove(node)
+    del mat[P_REAL]
+
+
+def ensure_film_material():
+    """The film look of the dimension switch (dimension.py): a camera's grain (fine specks, lighter and darker, new
+    every frame) and a vignette darkening the corners of the picture, as much as the sheet's mmdd_film says."""
+    mat, nt, out = _fresh(FILM_MATERIAL)
+    if mat is None:
+        return bpy.data.materials[FILM_MATERIAL]
+    s = _Nodes(nt)
+    m = s.math
+    px, py, aspect = _picture_xy(s, -2400, 0)
+    film = s.attribute("mmdd_film", -2400, -400, "OBJECT").outputs[2]
+    tick = s.attribute(FRONT_TICK, -2400, -600, "OBJECT").outputs[2]
+    # the vignette: from the middle out to the corners
+    reach = m("SQRT", m("ADD", m("MULTIPLY", m("DIVIDE", px, aspect, x=-2000, y=0), m("DIVIDE", px, aspect,
+                                                                                       x=-2000, y=-150),
+                                 x=-1800, y=0), m("MULTIPLY", py, py, x=-1800, y=-200), x=-1600, y=0), x=-1400, y=0)
+    vignette = m("MULTIPLY", s.smooth(reach, 0.38, 0.85, -1200, 0), 0.55, x=-1000, y=0)
+    # the grain: a speck every few pixels, new every frame
+    noise = s.node("ShaderNodeTexWhiteNoise", -1400, -500, noise_dimensions="3D")
+    s.feed(noise.inputs["Vector"], s.combine(m("FLOOR", m("MULTIPLY", px, 700.0, x=-1800, y=-500), x=-1600, y=-500),
+                                             m("FLOOR", m("MULTIPLY", py, 700.0, x=-1800, y=-650), x=-1600, y=-650),
+                                             tick, -1500, -600))
+    speck = m("SUBTRACT", noise.outputs[0], 0.5, x=-1200, y=-500)
+    darker = m("MULTIPLY", m("MAXIMUM", m("MULTIPLY", speck, -1.0, x=-1000, y=-500), 0.0, x=-800, y=-500), 0.09,
+               x=-600, y=-500)
+    lighter = m("MULTIPLY", m("MAXIMUM", speck, 0.0, x=-1000, y=-700), 0.025, x=-800, y=-700)
+    shade = m("MULTIPLY", m("MINIMUM", m("ADD", vignette, darker, x=-400, y=-200), 1.0, x=-200, y=-200), film,
+              x=0, y=-200)
+    clear = s.node("ShaderNodeBsdfTransparent", 0, 200).outputs[0]
+    dark = s.mix_shader(shade, clear, s.emission((0.0, 0.0, 0.0), 0.0, 0, 400), 300, 200)
+    light = s.emission((1.0, 0.97, 0.92), m("MULTIPLY", lighter, film, x=0, y=-600), 300, -400)
+    add = s.node("ShaderNodeAddShader", 600, 0)
+    s.feed(add.inputs[0], dark)
+    s.feed(add.inputs[1], light)
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    _blended(mat)
+    if hasattr(mat, "show_transparent_back"):
+        mat.show_transparent_back = False
+    _no_shadow(mat)
+    mat.diffuse_color = (0.0, 0.0, 0.0, 0.1)
+    return mat
 
 
 # --------------------------------------------------------------------------- 1.13: the tint (tint.py)

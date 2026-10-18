@@ -14,7 +14,9 @@ whenever they are missing or out of date.
 * Eras: the copies of the dancer of every era (tint.py), coming one after another and flying into her;
 * Origin Flights: sparks, blobs of paint and tokens flying onto the dancer, each landing where a point of her body
   is now (origins.py);
-* Chain Show: a mesh shown only from one frame to another (chain.py, the outfits before the old one).
+* Chain Show: a mesh shown only from one frame to another (chain.py, the outfits before the old one);
+* Print Supports and Print Lasers (1.14, printer.py): the supports under what hangs over, printed with the layers and
+  breaking into cubes once the print is done, and the laser heads shooting at the layer being printed.
 """
 
 import math
@@ -33,13 +35,20 @@ CURTAIN_GROUP = "MMDDisperse Cover Curtain"
 ERAS_GROUP = "MMDDisperse Eras"
 ORIGINS_GROUP = "MMDDisperse Origin Flights"
 CHAIN_GROUP = "MMDDisperse Chain Show"
+PRINT_SUPPORTS_GROUP = "MMDDisperse Print Supports"
+PRINT_LASERS_GROUP = "MMDDisperse Print Lasers"
 STREAMER = "MMD Disperse Streamer"
 BALLOON = "MMD Disperse Balloon"
 SPARK = "MMD Disperse Spark"
 SPLAT = "MMD Disperse Splat"
 TOKEN = "MMD Disperse Token"
 PLUME = "MMD Disperse Plume"
-REVISION = 1  # bumped when one of these groups changes
+ROD = "MMD Disperse Print Rod"
+TIP = "MMD Disperse Print Tip"
+BEAM = "MMD Disperse Laser Beam"
+CUBE = "MMD Disperse Print Cube"
+LASER_HEAD = "MMD Disperse Laser Head"
+REVISION = 3  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -733,6 +742,350 @@ def ensure_chain_group():
     return bpy.data.node_groups[CHAIN_GROUP]
 
 
+# --------------------------------------------------------------------------- 1.14: the print (printer.py)
+
+def _ring(radius, z, sides):
+    return [(radius * math.cos(2.0 * math.pi * k / sides), radius * math.sin(2.0 * math.pi * k / sides), z)
+            for k in range(sides)]
+
+
+def _tube(name, rings, sides=6, cap_bottom=True, cap_top=True):
+    """A mesh of `rings` ((radius, z) from the bottom up) joined side by side, closed at either end."""
+    verts, faces = [], []
+    for radius, z in rings:
+        verts += _ring(radius, z, sides)
+    for i in range(len(rings) - 1):
+        for k in range(sides):
+            a, b = i * sides + k, i * sides + (k + 1) % sides
+            faces.append((a, b, b + sides, a + sides))
+    if cap_bottom:
+        faces.append(tuple(reversed(range(sides))))
+    if cap_top:
+        top = (len(rings) - 1) * sides
+        faces.append(tuple(range(top, top + sides)))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    return me
+
+
+def _rod_mesh():
+    """The column of a support of the print: 1 long up Z from 0, radius 1."""
+    return _tube(ROD, ((1.0, 0.0), (1.0, 1.0)))
+
+
+def _tip_mesh():
+    """The tip of a support where it holds the outfit up: 1 long up Z from 0, narrowing from radius 1 to 0.3."""
+    return _tube(TIP, ((1.0, 0.0), (0.3, 1.0)))
+
+
+def _beam_mesh():
+    """A laser beam: 1 long up Z from 0, radius 1, open at the ends."""
+    return _tube(BEAM, ((1.0, 0.0), (1.0, 1.0)), sides=8, cap_bottom=False, cap_top=False)
+
+
+def _cube_mesh():
+    """A cube 1 across about its middle."""
+    verts = [(x * 0.5, y * 0.5, z * 0.5) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+    faces = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
+    me = bpy.data.meshes.new(CUBE)
+    me.from_pydata(verts, [], faces)
+    me.update()
+    return me
+
+
+def _laser_head_mesh():
+    """A laser head: a box 1 across and 1.6 long behind its lens (looking up +Z from 0), mmdd_lens 1 on the lens."""
+    box = [(x * 0.5, y * 0.5, z) for x in (-1, 1) for y in (-1, 1) for z in (-1.6, 0.0)]
+    faces = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
+    lens = _ring(0.32, 0.0, 12) + _ring(0.3, 0.12, 12)
+    verts = box + lens
+    for k in range(12):
+        a, b = 8 + k, 8 + (k + 1) % 12
+        faces.append((a, b, b + 12, a + 12))
+    faces.append(tuple(range(20, 32)))
+    me = bpy.data.meshes.new(LASER_HEAD)
+    me.from_pydata(verts, [], faces)
+    attr = me.attributes.new("mmdd_lens", "FLOAT", "POINT")
+    attr.data.foreach_set("value", [0.0] * 8 + [1.0] * 24)
+    me.update()
+    return me
+
+
+def ensure_rod_object(scene):
+    return _asset(ROD, _rod_mesh, scene)
+
+
+def ensure_tip_object(scene):
+    return _asset(TIP, _tip_mesh, scene)
+
+
+def ensure_beam_object(scene):
+    return _asset(BEAM, _beam_mesh, scene)
+
+
+def ensure_cube_object(scene):
+    return _asset(CUBE, _cube_mesh, scene)
+
+
+def ensure_laser_head_object(scene):
+    return _asset(LASER_HEAD, _laser_head_mesh, scene)
+
+
+def _layer_radius(b, gi, x, y):
+    info = b.node("GeometryNodeObjectInfo", x, y, transform_space="RELATIVE")
+    b.feed(info.inputs["Object"], gi.outputs["Mask"])
+    return b.vmath("DOT_PRODUCT", info.outputs["Scale"], (1 / 3, 1 / 3, 1 / 3), x=x + 200, y=y)
+
+
+def _instances(b, points, shape, rotation, scale, x, y):
+    n = b.node("GeometryNodeInstanceOnPoints", x, y)
+    b.feed(n.inputs["Points"], points)
+    b.feed(n.inputs["Instance"], shape)
+    b.feed(n.inputs["Rotation"], rotation)
+    b.feed(n.inputs["Scale"], scale)
+    return n.outputs["Instances"]
+
+
+def _realize(b, geometry, x, y):
+    n = b.node("GeometryNodeRealizeInstances", x, y)
+    b.feed(n.inputs["Geometry"], geometry)
+    return n.outputs["Geometry"]
+
+
+def _aim(b, vector, x, y):
+    n = b.node("FunctionNodeAlignEulerToVector", x, y, axis="Z")
+    b.feed(n.inputs["Vector"], vector)
+    return n.outputs["Rotation"]
+
+
+def _shape(b, gi, name, x, y):
+    n = b.node("GeometryNodeObjectInfo", x, y)
+    b.feed(n.inputs["Object"], gi.outputs[name])
+    return n.outputs["Geometry"]
+
+
+def build_print_supports_group():
+    """The supports of the print (printer.py): each of our points is a support from mmdd_bottom (three vertices of
+    Twin, mmdd_bottom_w their weights) up to mmdd_top (the same), where those points of the dancing body are now. It
+    is printed from its foot as the front (the Mask's size) goes from mmdd_a0 to mmdd_a1, glowing hot (mmdd_heat 1)
+    and cooling over the next four layers; at Snap + mmdd_r * Spread it snaps off and breaks into cubes that fall
+    (Gravity: units a frame squared) and shrink away over Crumble frames. Rod and Cube are the shapes, Size the
+    support's radius."""
+    ng, b = _group(PRINT_SUPPORTS_GROUP, (
+        ("Twin", "NodeSocketObject"),
+        ("Mask", "NodeSocketObject"),
+        ("Layer", "NodeSocketFloat", 0.1),
+        ("Size", "NodeSocketFloat", 0.01),
+        ("Snap", "NodeSocketFloat", 100.0),
+        ("Spread", "NodeSocketFloat", 10.0),
+        ("Crumble", "NodeSocketFloat", 20.0),
+        ("Gravity", "NodeSocketFloat", 0.01),
+        ("Rod", "NodeSocketObject"),
+        ("Tip", "NodeSocketObject"),
+        ("Cube", "NodeSocketObject"),
+        ("Material", "NodeSocketMaterial"),
+    ))
+    gi = b.node("NodeGroupInput", -3200, 0)
+    go = b.node("NodeGroupOutput", 2800, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -3200, -300).outputs["Frame"]
+    radius = _layer_radius(b, gi, -3200, 400)
+    twin = b.node("GeometryNodeObjectInfo", -3200, -2000, transform_space="RELATIVE")
+    b.feed(twin.inputs["Object"], gi.outputs["Twin"])
+    position = b.node("GeometryNodeInputPosition", -3200, -2200).outputs[0]
+
+    def at(name, x, y):
+        """The point of the twin three of its vertices (mmdd_<name>) make with their weights (mmdd_<name>_w)."""
+        ix, iy, iz = b.split_xyz(b.named_attribute("mmdd_" + name, "FLOAT_VECTOR", x=x, y=y)[0], x=x + 200, y=y)
+        wx, wy, wz = b.split_xyz(b.named_attribute("mmdd_%s_w" % name, "FLOAT_VECTOR", x=x, y=y - 200)[0],
+                                 x=x + 200, y=y - 200)
+        total = None
+        for k, (index, weight) in enumerate(((ix, wx), (iy, wy), (iz, wz))):
+            n = b.node("GeometryNodeSampleIndex", x + 400, y - 200 * k, data_type="FLOAT_VECTOR", domain="POINT")
+            b.feed(n.inputs["Geometry"], twin.outputs["Geometry"])
+            b.feed(_enabled(n.inputs, "Value")[0], position)
+            b.feed(n.inputs["Index"], b.math("ROUND", index, x=x + 300, y=y - 200 * k - 100))
+            part = b.vmath("SCALE", _enabled(n.outputs, "Value")[0], scale=weight, x=x + 600, y=y - 200 * k)
+            total = part if total is None else b.vmath("ADD", total, part, x=x + 800, y=y - 200 * k)
+        return total
+
+    top = at("top", -3000, -1000)
+    bottom = at("bottom", -3000, -1700)
+    a0 = b.named_attribute("mmdd_a0", "FLOAT", x=-3000, y=-400)[0]
+    a1 = b.named_attribute("mmdd_a1", "FLOAT", x=-3000, y=-550)[0]
+    r = b.named_attribute("mmdd_r", "FLOAT", x=-3000, y=-700)[0]
+    grown = b.math("DIVIDE", b.math("SUBTRACT", radius, a0, x=-2600, y=300),
+                   b.math("MAXIMUM", b.math("SUBTRACT", a1, a0, x=-2600, y=150), 1e-4, x=-2400, y=150),
+                   x=-2200, y=300, clamp=True)
+    t = b.math("SUBTRACT", frame, b.math("MULTIPLY_ADD", r, gi.outputs["Spread"], gi.outputs["Snap"], x=-2600,
+                                         y=-300), x=-2400, y=-300)  # frames since it snapped off
+    broken = b.compare("GREATER_EQUAL", t, 0.0, x=-2200, y=-300)
+    gone = b.boolean("OR", b.compare("LESS_THAN", radius, a0, x=-2200, y=0),
+                     b.compare("GREATER_THAN", t, gi.outputs["Crumble"], x=-2200, y=-150), x=-2000, y=0)
+    heat = b.math("SUBTRACT", 1.0, b.math("DIVIDE", b.math("SUBTRACT", radius, a1, x=-2400, y=600),
+                                          b.math("MULTIPLY", gi.outputs["Layer"], 4.0, x=-2400, y=750),
+                                          x=-2200, y=600, clamp=True), x=-2000, y=600)
+    way = b.vmath("SUBTRACT", top, bottom, x=-1800, y=-1300)
+    length = b.vmath("LENGTH", way, x=-1600, y=-1300)
+    aim = _aim(b, way, -1600, -1100)
+    alive = b.delete(gi.outputs["Geometry"], gone, "POINT", x=-1800, y=0)
+    alive = b.set_position(alive, position=bottom, x=-1600, y=0)
+    alive = b.store(alive, "mmdd_heat", heat, x=-1400, y=0)
+    alive = b.store(alive, "mmdd_t", t, x=-1200, y=0)
+    alive = b.store(alive, "mmdd_way", way, data_type="FLOAT_VECTOR", x=-1000, y=0)
+    # standing: the column as far up as it is printed, and its tip (the last stretch, a quarter of it at most) once
+    # the print gets there
+    standing = b.delete(alive, broken, "POINT", x=-800, y=300)
+    size = gi.outputs["Size"]
+    tip = b.math("MINIMUM", b.math("MULTIPLY", length, 0.25, x=-1200, y=900), b.math("MULTIPLY", size, 6.0, x=-1200,
+                                                                                    y=1050), x=-1000, y=900)
+    printed = b.math("MULTIPLY", grown, length, x=-1200, y=450)
+    below_tip = b.math("SUBTRACT", length, tip, x=-1000, y=1050)
+    rods = _instances(b, standing, _shape(b, gi, "Rod", -1000, 600), aim,
+                      b.combine(size, size, b.math("MINIMUM", printed, below_tip, x=-1000, y=450), x=-800, y=450),
+                      -600, 300)
+    tip_part = b.math("DIVIDE", b.math("SUBTRACT", printed, below_tip, x=-800, y=1200),
+                      b.math("MAXIMUM", tip, 1e-6, x=-800, y=1350), x=-600, y=1200, clamp=True)
+    tips = b.delete(standing, b.compare("LESS_EQUAL", tip_part, 0.0, x=-600, y=1350), "POINT", x=-400, y=900)
+    tips = b.set_position(tips, offset=b.vmath("SCALE", b.vmath("NORMALIZE", way, x=-600, y=1500),
+                                               scale=below_tip, x=-400, y=1500), x=-200, y=900)
+    tips = _instances(b, tips, _shape(b, gi, "Tip", -200, 1200), aim,
+                      b.combine(size, size, b.math("MULTIPLY", tip, tip_part, x=-200, y=1100), x=0, y=1100), 200,
+                      900)
+    rods = b.join([rods, tips], x=400, y=600)
+    # broken: cubes along it, falling, drifting and shrinking
+    bits = b.delete(alive, b.boolean("NOT", broken, x=-1000, y=-500), "POINT", x=-800, y=-300)
+    line = b.node("GeometryNodeMeshLine", -1000, -700, mode="OFFSET")
+    line.inputs["Count"].default_value = 6
+    b.feed(line.inputs["Start Location"], (0.0, 0.0, 1.0 / 12.0))
+    b.feed(line.inputs["Offset"], (0.0, 0.0, 1.0 / 6.0))
+    bits = _realize(b, _instances(b, bits, line.outputs["Mesh"], aim,
+                                  b.combine(1.0, 1.0, length, x=-800, y=-650), -600, -300), -400, -300)
+    t_bit = b.named_attribute("mmdd_t", "FLOAT", x=-400, y=-600)[0]
+    jitter, spin = b.white_noise(b.combine(b.node("GeometryNodeInputIndex", -600, -900).outputs[0], 0.37, 0.71,
+                                           x=-400, y=-900), x=-200, y=-900)
+    jx, jy, jz = b.split_xyz(spin, x=0, y=-900)
+    drop = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", t_bit, t_bit, x=0, y=-600),
+                                     gi.outputs["Gravity"], x=200, y=-600),
+                  b.math("MULTIPLY_ADD", jitter, 0.6, 0.35, x=200, y=-750), x=400, y=-600)
+    drift = b.math("MULTIPLY", t_bit, b.math("MULTIPLY", size, 0.6, x=200, y=-1100), x=400, y=-1100)
+    offset = b.combine(b.math("MULTIPLY", b.math("SUBTRACT", jx, 0.5, x=200, y=-1250), drift, x=400, y=-1250),
+                       b.math("MULTIPLY", b.math("SUBTRACT", jy, 0.5, x=200, y=-1400), drift, x=400, y=-1400),
+                       b.math("MULTIPLY", drop, -1.0, x=600, y=-600), x=800, y=-1000)
+    bits = b.set_position(bits, offset=offset, x=1000, y=-300)
+    left = b.math("SUBTRACT", 1.0, b.math("DIVIDE", t_bit, b.math("MAXIMUM", gi.outputs["Crumble"], 1.0, x=800,
+                                                                   y=-1500), x=1000, y=-1500, clamp=True),
+                  x=1200, y=-1500)
+    bits = b.store(bits, "mmdd_heat", b.math("MULTIPLY", left, 0.8, x=1200, y=-1650), x=1200, y=-300)
+    turn = b.vmath("SCALE", spin, scale=b.math("MULTIPLY", t_bit, 0.25, x=1000, y=-1800), x=1200, y=-1800)
+    cube_size = b.math("MULTIPLY", b.math("MULTIPLY", size, 2.4, x=1200, y=-2000), left, x=1400, y=-2000)
+    bits = _instances(b, bits, _shape(b, gi, "Cube", 1200, -2200), turn, cube_size, 1400, -300)
+    joined = _realize(b, b.join([rods, bits], x=1800, y=0), 2000, 0)
+    _finish(b, joined, gi, go, 2400, 0)
+    return ng
+
+
+def ensure_print_supports_group():
+    if not _current(PRINT_SUPPORTS_GROUP):
+        build_print_supports_group()
+    return bpy.data.node_groups[PRINT_SUPPORTS_GROUP]
+
+
+def build_print_lasers_group():
+    """The laser heads of the print (printer.py), one on each of our points, shooting while the front (the Mask's
+    size) is between Lead and Lead + Span + Layer: each frame each head aims at a point of the layer being printed at
+    random (a vertex of Twin with that layer's disperse_arrival, not locked), its beam stopping where it first meets
+    the dancer, a glowing spot there. Beam and Spot are sizes, Head the shape of a head (looking up its +Z), Head Size
+    its size; mmdd_part says what is what for the material: 0 a head, 1 a beam, 2 a spot."""
+    ng, b = _group(PRINT_LASERS_GROUP, (
+        ("Twin", "NodeSocketObject"),
+        ("Mask", "NodeSocketObject"),
+        ("Lead", "NodeSocketFloat", 0.0),
+        ("Layer", "NodeSocketFloat", 0.1),
+        ("Span", "NodeSocketFloat", 1.0),
+        ("Beam", "NodeSocketFloat", 0.005),
+        ("Spot", "NodeSocketFloat", 0.03),
+        ("Beam Shape", "NodeSocketObject"),
+        ("Head", "NodeSocketObject"),
+        ("Head Size", "NodeSocketFloat", 0.1),
+        ("Material", "NodeSocketMaterial"),
+    ))
+    gi = b.node("NodeGroupInput", -3000, 0)
+    go = b.node("NodeGroupOutput", 2600, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -3000, -300).outputs["Frame"]
+    radius = _layer_radius(b, gi, -3000, 400)
+    s = b.math("SUBTRACT", radius, gi.outputs["Lead"], x=-2600, y=400)
+    layer = b.math("MAXIMUM", gi.outputs["Layer"], 1e-5, x=-2600, y=250)
+    now = b.math("ADD", b.math("MULTIPLY", b.math("FLOOR", b.math("ADD", b.math("DIVIDE", s, layer, x=-2400, y=400),
+                                                                  1e-4, x=-2200, y=400), x=-2000, y=400),
+                               layer, x=-1800, y=400), gi.outputs["Lead"], x=-1600, y=400)
+    printing = b.boolean("AND", b.compare("GREATER_EQUAL", s, 0.0, x=-2400, y=700),
+                         b.compare("LESS_EQUAL", s, b.math("ADD", gi.outputs["Span"], layer, x=-2600, y=850),
+                                   x=-2400, y=850), x=-2200, y=750)
+    twin = b.node("GeometryNodeObjectInfo", -3000, -1200, transform_space="RELATIVE")
+    b.feed(twin.inputs["Object"], gi.outputs["Twin"])
+    arrival = b.named_attribute("disperse_arrival", "FLOAT", x=-3000, y=-1500)[0]
+    lock = b.named_attribute("disperse_lock", "BOOLEAN", x=-3000, y=-1650)[0]
+    in_layer = b.boolean("AND", b.compare("LESS_THAN", b.math("ABSOLUTE", b.math("SUBTRACT", arrival, now, x=-2800,
+                                                                                  y=-1500), x=-2600, y=-1500),
+                                          b.math("MULTIPLY", layer, 0.5, x=-2600, y=-1350), x=-2400, y=-1450),
+                         b.boolean("NOT", lock, x=-2600, y=-1650), x=-2200, y=-1500)
+    slab = b.separate(twin.outputs["Geometry"], in_layer, "POINT", x=-2000, y=-1300)[0]
+    size = b.node("GeometryNodeAttributeDomainSize", -1800, -1500, component="MESH")
+    b.feed(size.inputs["Geometry"], slab)
+    count = size.outputs["Point Count"]
+    pick = b.node("FunctionNodeRandomValue", -1800, -1000, data_type="FLOAT")
+    b.feed(pick.inputs["Seed"], frame)
+    index = b.math("MINIMUM", b.math("FLOOR", b.math("MULTIPLY", _enabled(pick.outputs, "Value")[0], count, x=-1600,
+                                                     y=-1000), x=-1400, y=-1000),
+                   b.math("SUBTRACT", count, 1.0, x=-1600, y=-1150), x=-1200, y=-1000)
+    sample = b.node("GeometryNodeSampleIndex", -1000, -1200, data_type="FLOAT_VECTOR", domain="POINT")
+    b.feed(sample.inputs["Geometry"], slab)
+    b.feed(_enabled(sample.inputs, "Value")[0], b.node("GeometryNodeInputPosition", -1200, -1300).outputs[0])
+    b.feed(sample.inputs["Index"], index)
+    target = _enabled(sample.outputs, "Value")[0]
+    head = b.node("GeometryNodeInputPosition", -1000, -600).outputs[0]
+    way = b.vmath("SUBTRACT", target, head, x=-800, y=-800)
+    ray = b.node("GeometryNodeRaycast", -600, -1000)
+    b.feed(ray.inputs["Target Geometry"], twin.outputs["Geometry"])
+    b.feed(ray.inputs["Source Position"], head)
+    b.feed(ray.inputs["Ray Direction"], way)
+    b.feed(ray.inputs["Ray Length"], b.math("ADD", b.vmath("LENGTH", way, x=-800, y=-1100), 0.01, x=-600, y=-1300))
+    end = b.switch("VECTOR", ray.outputs["Is Hit"], target, ray.outputs["Hit Position"], x=-400, y=-900)
+    beam_way = b.vmath("SUBTRACT", end, head, x=-200, y=-800)
+    shooting = b.boolean("AND", printing, b.compare("GREATER_THAN", count, 0.5, x=-1600, y=-1700), x=-200, y=-1600)
+    heads = b.delete(gi.outputs["Geometry"], b.boolean("NOT", shooting, x=0, y=-1600), "POINT", x=200, y=0)
+    heads = b.store(heads, "mmdd_end", end, data_type="FLOAT_VECTOR", x=400, y=0)
+    heads = b.store(heads, "mmdd_way", beam_way, data_type="FLOAT_VECTOR", x=600, y=0)
+    stored_way = b.named_attribute("mmdd_way", "FLOAT_VECTOR", x=600, y=-300)[0]
+    stored_end = b.named_attribute("mmdd_end", "FLOAT_VECTOR", x=600, y=-450)[0]
+    stored_aim = _aim(b, stored_way, 800, -300)
+    beam = gi.outputs["Beam"]
+    beams = _instances(b, heads, _shape(b, gi, "Beam Shape", 800, 400), stored_aim,
+                       b.combine(beam, beam, b.vmath("LENGTH", stored_way, x=800, y=200), x=1000, y=200), 1200, 300)
+    beams = b.store(beams, "mmdd_part", 1.0, domain="INSTANCE", x=1400, y=300)
+    flicker = b.white_noise(b.combine(frame, b.node("GeometryNodeInputIndex", 800, -900).outputs[0], 0.5, x=1000,
+                                      y=-900), x=1200, y=-900)[0]
+    sphere = b.node("GeometryNodeMeshIcoSphere", 1000, -1200)
+    sphere.inputs["Radius"].default_value = 1.0
+    sphere.inputs["Subdivisions"].default_value = 2
+    spots = _instances(b, b.set_position(heads, position=stored_end, x=1000, y=-600), sphere.outputs["Mesh"], None,
+                       b.math("MULTIPLY", gi.outputs["Spot"], b.math("MULTIPLY_ADD", flicker, 0.6, 0.7, x=1200,
+                                                                     y=-1050), x=1400, y=-1050), 1400, -600)
+    spots = b.store(spots, "mmdd_part", 2.0, domain="INSTANCE", x=1600, y=-600)
+    housings = _instances(b, heads, _shape(b, gi, "Head", 800, 800), stored_aim, gi.outputs["Head Size"], 1200, 800)
+    housings = b.store(housings, "mmdd_part", 0.0, domain="INSTANCE", x=1400, y=800)
+    joined = _realize(b, b.join([housings, beams, spots], x=1800, y=0), 2000, 0)
+    _finish(b, joined, gi, go, 2300, 0)
+    return ng
+
+
+def ensure_print_lasers_group():
+    if not _current(PRINT_LASERS_GROUP):
+        build_print_lasers_group()
+    return bpy.data.node_groups[PRINT_LASERS_GROUP]
+
+
 def remove_unused():
     """Our shapes to instance and our groups, once no cover uses them."""
     for name in (STREAMER, BALLOON, SPARK, SPLAT, TOKEN, PLUME):
@@ -744,6 +1097,21 @@ def remove_unused():
                 bpy.data.meshes.remove(me)
     for name in (SHATTER_GROUP, RIPPLE_GROUP, PIECES_GROUP, BALLOONS_GROUP, FAN_GROUP, CURTAIN_GROUP, ERAS_GROUP,
                  ORIGINS_GROUP, CHAIN_GROUP):
+        ng = bpy.data.node_groups.get(name)
+        if ng is not None and ng.users == 0:
+            bpy.data.node_groups.remove(ng)
+
+
+def remove_print_assets():
+    """The shapes of the print (printer.py) and its groups, once no print uses them."""
+    for name in (ROD, TIP, BEAM, CUBE, LASER_HEAD):
+        ob = bpy.data.objects.get(name)
+        if ob is not None:
+            me = ob.data
+            bpy.data.objects.remove(ob)
+            if me is not None and me.users == 0:
+                bpy.data.meshes.remove(me)
+    for name in (PRINT_SUPPORTS_GROUP, PRINT_LASERS_GROUP):
         ng = bpy.data.node_groups.get(name)
         if ng is not None and ng.users == 0:
             bpy.data.node_groups.remove(ng)

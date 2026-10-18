@@ -16,7 +16,7 @@ _OFF = dict(
     soul_enable=False, domain_enable=False, shot_enable=False, time_warp="NONE", toon_style="NONE", float_up=False,
     husk_motion="STILL", trail_enable=False, step_flowers=False, look_style="NONE", holo_style="SCAN",
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
-    cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0,
+    cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE",
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -605,18 +605,36 @@ PRESETS = (
                                      "the juke joint of Sinners; best with a dance)",
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, tint_style="ERAS", tint_count=6,
           tint_length=4.0, finale=True, finale_white=0.35, glow_color=(1.0, 0.9, 0.7))),
+    # --- 1.14: printed layer by layer, the dimension switch
+    ("LASER_PRINT", "Laser Print", "The new outfit is printed from the feet up one layer after another, the newest "
+                                   "layers red hot, laser heads round her shooting at the layer being printed; thin "
+                                   "supports hold up what hangs over and crumble into cubes once it is done, while "
+                                   "the old outfit breaks into glowing red flakes (激光打印, Tron: Ares)",
+     dict(_OFF, path="PRINT", entrance="GROW", easing="LINEAR", exit_style="FRAGMENTS", frag_glow=True,
+          noise_amount=0.0, edge_push=0.0, edge_glow=False, edge_width=Height(0.1), print_layers=48,
+          print_supports=True, print_lasers=4, glow_color=(1.0, 0.08, 0.03))),
+    ("DIMENSION", "Into the Real", "The new outfit comes in realistic over her MMD look (her own textures under "
+                                   "realistic shading), her head and hair turning as the front passes them, a film "
+                                   "camera's grain coming up (次元切换, naevis' \"Done\")",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", easing="EASE", dim_style="FRONT", dim_film=True, dim_lights=True,
+          glow_color=(0.9, 0.95, 1.0))),
+    ("DIMENSION_BEATS", "Dimension Flicker", "On the beats before the big moment she flips between her MMD look and "
+                                             "a realistic one, then the outfits swap in a flash and she stays "
+                                             "realistic (次元闪切; best with the music's beats)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, dim_style="BEATS", dim_length=2.5,
+          dim_film=True, dim_lights=True, finale=True, finale_white=0.3, glow_color=(1.0, 1.0, 1.0))),
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
 BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles", "spiral_pitch", "trigger", "garment_order",
               "picture_front", "picture_angle", "picture_follow", "picture_brush", "spot_side", "spray_reach",
-              "motion_amount", "cover_style", "origins_style", "origins_count"}
+              "motion_amount", "cover_style", "origins_style", "origins_count", "print_layers", "print_supports"}
 WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPARKLE_SPIRAL", "BROOCH", "MARK50",
                "LIGHTNING", "COCOON", "CLAP", "TURN", "HAND_SWIPE", "BLUE_FLAME", "SUPER_AURA", "LOTUS", "HUSK",
                "SOUL_DEPART", "IMPACT", "IDOL", "SOUL_RINGS", "DOMAIN", "SKY_MIRROR", "CONCERT", "VELOCITY",
                "SPLIT", "FIGURINE", "NEZHA", "HEART", "SILHOUETTE", "STARRY_VEIL", "IRIS", "CLOCK_HAND", "DHARMA",
                "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE", "COLOR_TUG", "ERAS",
-               "POWER_UP"}
+               "POWER_UP", "DIMENSION_BEATS"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

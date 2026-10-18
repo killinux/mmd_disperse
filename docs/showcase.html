@@ -231,13 +231,13 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.13：用 Blender 几何节点给 MMD 模型做换装变身。下面一百三十四段视频都是插件生成的
+    <p>mmd_disperse 1.14：用 Blender 几何节点给 MMD 模型做换装变身。下面一百三十七段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>134</b> 段演示</span>
-      <span><b>54</b> 组效果</span>
-      <span><b>122</b> 个一键预设</span>
-      <span><b>22230</b> 种基本组合</span>
+      <span><b>137</b> 段演示</span>
+      <span><b>56</b> 组效果</span>
+      <span><b>125</b> 个一键预设</span>
+      <span><b>23400</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
     <div class="links">
@@ -295,7 +295,7 @@
 <section id="effects">
   <div class="wrap">
     <h2>效果演示</h2>
-    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.13 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
+    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.14 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
 
     <div class="index">
       <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
@@ -432,6 +432,9 @@
       <a href="#section-reveal"><img src="../test_output/posters/section_reveal.jpg" alt="" loading="lazy">分段揭晓</a>
       <a href="#outfit-chain"><img src="../test_output/posters/outfit_chain.jpg" alt="" loading="lazy">服装链</a>
       <a href="#power-up"><img src="../test_output/posters/power_up.jpg" alt="" loading="lazy">力量觉醒</a>
+      <a href="#dimension"><img src="../test_output/posters/dimension.jpg" alt="" loading="lazy">次元切换</a>
+      <a href="#dimension-beats"><img src="../test_output/posters/dimension_beats.jpg" alt="" loading="lazy">次元闪切</a>
+      <a href="#laser-print"><img src="../test_output/posters/laser_print.jpg" alt="" loading="lazy">激光打印</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -3501,6 +3504,88 @@
         </article>
       </div>
     </section>
+    <section class="family card" id="fam-dimension">
+      <div class="family-head">
+        <h3>次元切换</h3>
+        <p>从 MMD 的卡通样子变成写实的样子：每个材质用自己的贴图换成写实的着色，跟着前沿变，或者按拍子来回闪切（1.14，只在 EEVEE 里试过）。</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="dimension">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/dimension.jpg">
+              <source src="../test_output/demo_v16/tifa_dimension_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">次元切换 · 跳舞（有声音）</span><span class="ver">1.14</span><span class="tag">VMD 舞蹈</span><span class="tag">沿体表流动</span><span class="tag">次元切换</span><span class="tag">胶片质感</span></div>
+            <h3>次元切换（新预设）</h3>
+            <p class="lead">新衣服从胸口沿体表漫开，带着写实的明暗和高光出来，旧衣服还是 MMD 那样平平的；头和头发在前沿扫过时也变成写实的，画面带上淡淡的胶片颗粒（虚拟偶像 naevis 的《Done》）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">次元切换</span>：<span class="ui">路径</span> <span class="v">沿体表流动</span>，<span class="ui">次元切换</span> <span class="v">随前沿变写实</span>，<span class="ui">胶片质感</span> 勾上。</li>
+            <li>用模型自带的 MMD 材质（换成别的写实材质就看不出切换）；演示保留了 MMD 的卡通材质，台上本来有灯，所以没开补光。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset DIMENSION --keep-toon --vmd "回レ！雪月花.vmd" --wave 140:220 --set dim_lights=0</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="dimension-beats">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/dimension_beats.jpg">
+              <source src="../test_output/demo_v16/tifa_dimension_beats_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">次元闪切 · 跳舞（有声音）</span><span class="ver">1.14</span><span class="tag">VMD 舞蹈</span><span class="tag">次元切换</span><span class="tag">按拍闪切</span><span class="tag">卡音乐节拍</span><span class="tag">全屏闪白</span></div>
+            <h3>次元闪切（新预设）</h3>
+            <p class="lead">换装前的两拍半里，她踩着拍子在 MMD 的卡通样子和写实的样子之间来回闪，换装时一道白光，换成 AC 版的蒂法，之后停在写实。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">次元闪切</span>：<span class="ui">次元切换</span> <span class="v">按拍闪切</span>，<span class="ui">闪切时长</span> <span class="v">2.5</span> 秒，<span class="ui">新服装登场</span> <span class="v">瞬间换装</span>。</li>
+            <li><span class="ui">音乐节拍</span> 里点 <span class="ui">找节拍</span>、打开 <span class="ui">卡音乐节拍</span>，每次闪切都落在拍子上（不开时一秒两三次）。</li>
+            <li><span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。</li>
+            <li>用模型自带的 MMD 材质（换成别的写实材质就看不出切换）；演示保留了 MMD 的卡通材质，台上本来有灯，所以没开补光。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset DIMENSION_BEATS --keep-toon --white-flash --vmd "回レ！雪月花.vmd" --wave 140:220 --music "回レ！雪月花.mp3" --set beat_sync=1 --set dim_lights=0</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
+    <section class="family card" id="fam-print">
+      <div class="family-head">
+        <h3>激光打印</h3>
+        <p>新衣服从脚往上一层一层打印出来：激光头扫着正在打印的那一层，悬空的地方先长支撑柱，打完支撑柱断开、碎成方块（1.14）。</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="laser-print">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/laser_print.jpg">
+              <source src="../test_output/demo_v16/tifa_laser_print_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">激光打印 · 跳舞（有声音）</span><span class="ver">1.14</span><span class="tag">VMD 舞蹈</span><span class="tag">逐层打印</span><span class="tag">激光头</span><span class="tag">支撑柱</span><span class="tag">碎片飞散</span></div>
+            <h3>激光打印（新预设）</h3>
+            <p class="lead">新衣服从脚往上一层一层打印出来，最新的几层红热发光；四个激光头从高处扫着正在打印的那一层，短裙下长出细支撑柱，打完一根根断开、碎成发光的小方块落下，旧衣服在打印线上碎成红色光屑（电影《创：战神》）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">激光打印</span>：<span class="ui">路径</span> <span class="v">逐层打印</span>，<span class="ui">层数</span> <span class="v">48</span>，<span class="ui">支撑柱</span> 勾上，<span class="ui">激光头</span> <span class="v">4</span>。</li>
+            <li><span class="ui">发光颜色</span> 是红色，<span class="ui">噪波强度</span> 设成 0（每层的边才整齐）；<span class="ui">退场方式</span> <span class="v">碎片飞散</span>，<span class="ui">碎片发光</span> 勾上。</li>
+            <li>演示把新衣服换成了 Remake 版蒂法（有短裙，裙摆下的支撑柱多）；紧身衣朝下的地方少，支撑柱就少。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset LASER_PRINT --vmd "回レ！雪月花.vmd" --wave 130:250 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
   </div>
 </section>
 
@@ -3510,13 +3595,13 @@
     <p class="sub">预设只是常用搭配，下面这些选项都可以自由组合。</p>
     <div class="options">
       <div class="opt card">
-        <h3>变身路径 <b>19</b></h3>
+        <h3>变身路径 <b>20</b></h3>
         <ul><li>球形扩散</li><li>沿体表流动（出发点：只从起点 / 起点 + 手脚 / 只从手脚）</li><li>从下往上扫</li><li>从上往下扫</li>
           <li>从左往右扫 / 从右往左扫</li><li>从前往后扫 / 从后往前扫</li><li>螺旋上升</li><li>从腰部上下分开</li>
           <li>一件一件换（从上往下 / 从脚往上 / 随机）</li><li>手扫过的地方（要舞蹈动作）</li>
           <li>画面上扫过（划变 / 圆孔 / 折扇 / 巨笔 / 胶片烧穿 / 颜料抹开 / 表盘跳针 / 太极阴阳 / 编辑器光标）</li>
           <li>照到哪变到哪（追光）</li><li>喷到哪变到哪</li><li>动得多的先变</li><li>切片拼装</li>
-          <li>镜面球光斑</li><li>多点开花（打铁花 / 随机斑点 / 信物上身）</li></ul>
+          <li>镜面球光斑</li><li>多点开花（打铁花 / 随机斑点 / 信物上身）</li><li>逐层打印（激光头、支撑柱）</li></ul>
       </div>
       <div class="opt card">
         <h3>新服装登场 <b>13</b></h3>
@@ -3541,7 +3626,7 @@
           <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>剪纸窗花</li><li>发光纹身</li><li>LED 屏幕</li><li>电子纸</li><li>也可以不变</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>39</b></h3>
+        <h3>叠加开关 <b>40</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行（全息 / 星空纱 / 黑剪影 / 冰晶）</li><li>故障风</li><li>光剪影</li><li>光带</li>
           <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
           <li>毒液共生体（触手、蹼、黏丝；黑色黏液或液态金属）</li>
@@ -3558,7 +3643,8 @@
           <li>镜头星芒</li><li>收尾亮相（写真定格 / 抽卡出金）</li>
           <li>遮挡（打碎画面 / 飞布 / 雨伞 / 风扇叶片 / 表情包 / 画框 / 彩带炮 / 气球 / 羽扇 / 落幕）</li><li>台口火柱</li>
           <li>换色（变脸 / 颜色拉锯 / 历代舞伴）</li><li>长高变壮</li><li>跟着音乐推进</li>
-          <li>前面的几套服装（每拍 / 每小节 / 每四小节一换；白闪 / 黑场）</li></ul>
+          <li>前面的几套服装（每拍 / 每小节 / 每四小节一换；白闪 / 黑场）</li>
+          <li>次元切换（随前沿变写实 / 按拍闪切；反向、胶片质感、补光）</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
@@ -3567,8 +3653,8 @@
           <li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散、全屏闪白</li></ul>
       </div>
     </div>
-    <p class="sum">路径 × 登场 × 退场 × 粒子 = 19 × 13 × 5 × 18 = <b>22230</b> 种基本组合，再乘旧服装表面的 13 种就是 288990 种；
-      再叠加 39 个开关（收尾闪光有两种方式，内衬有两种样式，光环有七种样式，画稿有三种，火焰有两种范围，世界有五个，运镜有七种，绸带有四种，遮挡物有十种，换色有三种）和十六种开始时机，组合多到数不过来
+    <p class="sum">路径 × 登场 × 退场 × 粒子 = 20 × 13 × 5 × 18 = <b>23400</b> 种基本组合，再乘旧服装表面的 13 种就是 304200 种；
+      再叠加 40 个开关（收尾闪光有两种方式，内衬有两种样式，光环有七种样式，画稿有三种，火焰有两种范围，世界有五个，运镜有七种，绸带有四种，遮挡物有十种，换色有三种，次元切换有两种）和十六种开始时机，组合多到数不过来
       （「留在原地」在碎片飞散、装甲弹开、开了粒子、零件飞入或收尾星星时起作用；光环要配平面扫描或螺旋上升）。</p>
   </div>
 </section>
@@ -3703,6 +3789,9 @@
           <tr><td>电子纸</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>旧服装表面：电子纸（身高的 0.5），不发光</td></tr>
           <tr><td>分段揭晓</td><td>一件一件换（从脚往上）</td><td>边缘生长</td><td>收缩消失</td><td>镜头运动：上摇揭晓，星光</td></tr>
           <tr><td>力量觉醒</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>长高变壮 1.5，收尾闪光、全屏闪白，星光</td></tr>
+          <tr><td>次元切换</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>次元切换：随前沿变写实，胶片质感、补光</td></tr>
+          <tr><td>次元闪切</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>次元切换：按拍闪切（2.5 秒），收尾闪光、全屏闪白</td></tr>
+          <tr><td>激光打印</td><td>逐层打印（48 层）</td><td>边缘生长</td><td>碎片飞散（红色光屑）</td><td>激光头 4 个、支撑柱，噪波 0</td></tr>
         </tbody>
       </table>
     </div>

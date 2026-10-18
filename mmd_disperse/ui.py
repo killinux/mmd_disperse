@@ -76,6 +76,10 @@ class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
                 col.prop(s, "origins_color")
             if s.origins_style == "TOKENS":
                 col.prop(s, "origins_object")
+        elif s.path == "PRINT":
+            col.prop(s, "print_layers")
+            col.prop(s, "print_supports")
+            col.prop(s, "print_lasers")
         col.prop(s, "trigger")
         if s.trigger != "NONE" and s.mask is not None and "mmd_disperse_trigger" in s.mask:
             found = float(s.mask["mmd_disperse_trigger"])
@@ -812,6 +816,30 @@ class MMDDISPERSE_PT_tint(_Panel, bpy.types.Panel):
             layout.label(text="On the beats: Sync to Beat (Music Beats)", icon="INFO")
 
 
+class MMDDISPERSE_PT_dimension(_Panel, bpy.types.Panel):
+    bl_label = "Dimension Switch"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "dim_style")
+        if s.dim_style == "NONE":
+            return
+        col = layout.column(align=True)
+        col.prop(s, "dim_reverse")
+        if s.dim_style == "BEATS":
+            col.prop(s, "dim_length")
+        col = layout.column(align=True)
+        col.prop(s, "dim_film")
+        col.prop(s, "dim_lights")
+        if s.dim_style == "BEATS" and not s.beat_sync:
+            layout.label(text="On the beats: Sync to Beat (Music Beats)", icon="INFO")
+
+
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
     bl_label = "Hologram / Veil"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -1074,6 +1102,7 @@ classes = (
     MMDDISPERSE_PT_venom,
     MMDDISPERSE_PT_surface,
     MMDDISPERSE_PT_tint,
+    MMDDISPERSE_PT_dimension,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

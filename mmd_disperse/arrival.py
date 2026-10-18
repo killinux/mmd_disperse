@@ -35,7 +35,8 @@ from .node_groups import ATTR_ARRIVAL
 # Flat sweeps: the direction the front moves in, in the model's own axes (MMD models face -Y, so from the front the
 # camera sees their right hand on the left of the picture, at -X).
 SWEEPS = {"UP": (0.0, 0.0, 1.0), "DOWN": (0.0, 0.0, -1.0), "LEFT_RIGHT": (1.0, 0.0, 0.0),
-          "RIGHT_LEFT": (-1.0, 0.0, 0.0), "FRONT_BACK": (0.0, 1.0, 0.0), "BACK_FRONT": (0.0, -1.0, 0.0)}
+          "RIGHT_LEFT": (-1.0, 0.0, 0.0), "FRONT_BACK": (0.0, 1.0, 0.0), "BACK_FRONT": (0.0, -1.0, 0.0),
+          "PRINT": (0.0, 0.0, 1.0)}  # (1.14: up in whole layers, printer.py)
 PATHS = ("SPHERE", "SURFACE", "SPIRAL", "MIDDLE", "GARMENTS", "HAND", "PICTURE", "SPOTLIGHT", "SPRAY",
          "MOTION", "SLICES") + tuple(SWEEPS)
 # paths whose front has a decoration (rings.py) and a layout: the sweeps, the spiral and the two fronts from the waist

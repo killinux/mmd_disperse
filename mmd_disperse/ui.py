@@ -1,7 +1,7 @@
 import bpy
 from bpy.app.translations import pgettext_iface as iface_
 
-from . import beats, effect
+from . import beats, chain, effect
 from .model import find_armature
 
 
@@ -69,6 +69,13 @@ class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
             col.prop(s, "spray_reach")
         elif s.path == "MOTION":
             col.prop(s, "motion_amount")
+        elif s.path == "ORIGINS":
+            col.prop(s, "origins_style")
+            col.prop(s, "origins_count")
+            if s.origins_style != "SPARKS":
+                col.prop(s, "origins_color")
+            if s.origins_style == "TOKENS":
+                col.prop(s, "origins_object")
         col.prop(s, "trigger")
         if s.trigger != "NONE" and s.mask is not None and "mmd_disperse_trigger" in s.mask:
             found = float(s.mask["mmd_disperse_trigger"])
@@ -95,6 +102,46 @@ class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
         if s.mask is not None:
             row.operator("mmd_disperse.remove", text="", icon="TRASH")
             layout.prop(s, "mask")
+
+
+class MMDDISPERSE_UL_chain(bpy.types.UIList):
+    """The outfits worn before the old one, in order."""
+
+    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, index=0):
+        row = layout.row(align=True)
+        row.label(text="%d" % (index + 1), translate=False)
+        row.prop(item, "outfit", text="")
+
+
+class MMDDISPERSE_PT_chain(_Panel, bpy.types.Panel):
+    bl_label = "Outfits Before"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        s = context.scene.mmd_disperse
+        row = layout.row()
+        row.template_list("MMDDISPERSE_UL_chain", "", s, "chain", s, "chain_index", rows=3)
+        col = row.column(align=True)
+        col.operator("mmd_disperse.chain_add", icon="ADD", text="")
+        col.operator("mmd_disperse.chain_remove", icon="REMOVE", text="")
+        col.separator()
+        col.operator("mmd_disperse.chain_move", icon="TRIA_UP", text="").way = "UP"
+        col.operator("mmd_disperse.chain_move", icon="TRIA_DOWN", text="").way = "DOWN"
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        col = layout.column()
+        col.active = len(s.chain) > 0
+        col.prop(s, "chain_pace")
+        col.prop(s, "chain_cut")
+        if s.chain and s.mask is not None:
+            built = list(s.mask.get("mmd_disperse_chain_models", []))
+            wanted = [m.root.name for m in chain.models(s)]
+            if built != wanted:
+                layout.label(text="Build again to wear the list", icon="INFO")
+        if s.chain and not s.base:
+            layout.label(text="Needs the old outfit", icon="ERROR")
 
 
 class MMDDISPERSE_PT_edge(_Panel, bpy.types.Panel):
@@ -176,7 +223,8 @@ class MMDDISPERSE_PT_ring(_Panel, bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(s, "ring_size")
         col.prop(s, "ring_strength")
-        if s.path in ("SPHERE", "SURFACE", "GARMENTS", "HAND", "PICTURE", "SPOTLIGHT", "SPRAY", "MOTION", "SLICES"):
+        if s.path in ("SPHERE", "SURFACE", "GARMENTS", "HAND", "PICTURE", "SPOTLIGHT", "SPRAY", "MOTION", "SLICES",
+                      "ORIGINS"):
             layout.label(text="Only with the sweeps, Spiral Up or Split from the Waist", icon="INFO")
         elif s.ring_style != "WATER":
             layout.label(text="Uses the glow color of the wire layer", icon="INFO")
@@ -435,6 +483,31 @@ class MMDDISPERSE_PT_finish(_Panel, bpy.types.Panel):
             layout.label(text="Needs a scene camera", icon="ERROR")
 
 
+class MMDDISPERSE_PT_cover(_Panel, bpy.types.Panel):
+    bl_label = "Cover the Dancer"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "cover_style")
+        col = layout.column(align=True)
+        col.active = s.cover_style != "NONE"
+        if s.cover_style in ("CLOTH", "UMBRELLA", "CONFETTI", "BALLOONS", "FEATHERS", "CURTAIN"):
+            col.prop(s, "cover_color")
+        if s.cover_style == "EMOJI":
+            col.prop(s, "cover_image")
+        layout.prop(s, "stage_flames")
+        if s.cover_style != "NONE":
+            if context.scene.camera is None:
+                layout.label(text="Needs a scene camera", icon="ERROR")
+            elif s.mask is not None and s.mask.get("mmd_disperse_cover_seen") is None:
+                layout.label(text="Build again to fit the cover", icon="INFO")
+
+
 class MMDDISPERSE_PT_camera(_Panel, bpy.types.Panel):
     bl_label = "Camera and Time"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -466,6 +539,7 @@ class MMDDISPERSE_PT_camera(_Panel, bpy.types.Panel):
         sub = row.row()
         sub.active = s.float_up
         sub.prop(s, "float_height", text="")
+        layout.prop(s, "body_grow")
         if s.toon_style != "NONE" and s.entrance not in effect.AT_ONCE:
             layout.label(text="Pair it with All at Once", icon="INFO")
 
@@ -712,6 +786,32 @@ class MMDDISPERSE_PT_surface(_Panel, bpy.types.Panel):
             sub.prop(s, "thread_turns")
 
 
+class MMDDISPERSE_PT_tint(_Panel, bpy.types.Panel):
+    bl_label = "Recolour"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "tint_style")
+        if s.tint_style == "NONE":
+            return
+        col = layout.column(align=True)
+        col.prop(s, "tint_count")
+        col.prop(s, "tint_length")
+        if s.tint_style == "TUG":
+            col = layout.column(align=True)
+            col.prop(s, "tint_color_a")
+            col.prop(s, "tint_color_b")
+        if context.scene.render.engine == "CYCLES":
+            layout.label(text="Shows in EEVEE only", icon="ERROR")
+        elif not s.beat_sync:
+            layout.label(text="On the beats: Sync to Beat (Music Beats)", icon="INFO")
+
+
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
     bl_label = "Hologram / Veil"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -781,6 +881,9 @@ class MMDDISPERSE_PT_beats(_Panel, bpy.types.Panel):
         elif s.beat_sync:
             col.label(text="Find the beats first", icon="INFO")
         layout.label(text="Glitch, wires, rim, finale and particles follow them", icon="INFO")
+        col = layout.column()
+        col.prop(s, "music_pace")
+        col.operator_menu_enum("mmd_disperse.suggest_moment", "where", text="Suggest the Moment", icon="TIME")
 
 
 class MMDDISPERSE_PT_ribbons(_Panel, bpy.types.Panel):
@@ -945,7 +1048,9 @@ class MMDDISPERSE_PT_particles(_Panel, bpy.types.Panel):
 
 
 classes = (
+    MMDDISPERSE_UL_chain,
     MMDDISPERSE_PT_main,
+    MMDDISPERSE_PT_chain,
     MMDDISPERSE_PT_edge,
     MMDDISPERSE_PT_wire,
     MMDDISPERSE_PT_ring,
@@ -959,6 +1064,7 @@ classes = (
     MMDDISPERSE_PT_lit,
     MMDDISPERSE_PT_lights,
     MMDDISPERSE_PT_finish,
+    MMDDISPERSE_PT_cover,
     MMDDISPERSE_PT_camera,
     MMDDISPERSE_PT_look,
     MMDDISPERSE_PT_trails,
@@ -967,6 +1073,7 @@ classes = (
     MMDDISPERSE_PT_undersuit,
     MMDDISPERSE_PT_venom,
     MMDDISPERSE_PT_surface,
+    MMDDISPERSE_PT_tint,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

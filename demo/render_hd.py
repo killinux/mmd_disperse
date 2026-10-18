@@ -73,6 +73,8 @@ def parse_args():
                    help="turn the old model this many degrees about Z during the transformation (object animation)")
     p.add_argument("--spin-frames", default="", help="first:last frame of the turn (default: the transformation)")
     p.add_argument("--preset", default="", help="apply a preset first, e.g. MAGICAL")
+    p.add_argument("--chain", action="append", default=[],
+                   help="an outfit worn before the old one: BLEND::ROOT (appended; repeat in order)")
     p.add_argument("--no-base", action="store_true",
                    help="the new outfit materialises from nothing (the old model is hidden)")
     p.add_argument("--music", default="", help="find the beats of this song (from frame 1) for the effect")
@@ -325,11 +327,24 @@ def main():
     base, target = resolve(base_root), resolve(target_root)
     if args.vmd:
         load_dance(base.armature, args.vmd, args.vmd_scale)
-    kinds = upgrade_materials(base.meshes + target.meshes)
+    chained = []
+    for item in args.chain:  # the outfits worn before the old one (chain.py), appended from their own files
+        blend, root = item.split("::")
+        with bpy.data.libraries.load(blend, link=False) as (src, dst):
+            dst.objects = [n for n in src.objects if n.startswith(root)]
+        coll = bpy.data.collections.new("Chain " + root)
+        scene.collection.children.link(coll)
+        for ob in dst.objects:
+            if ob is not None:
+                coll.objects.link(ob)
+        chained.append(resolve(bpy.data.objects[root]))
+    kinds = upgrade_materials(base.meshes + target.meshes + [ob for m in chained for ob in m.meshes])
     print("HD MATERIALS", kinds)
 
     s = scene.mmd_disperse
     s.base, s.target = base_root, target_root
+    for m in chained:
+        s.chain.add().outfit = m.root
     if args.no_base:  # the new outfit stays where it is, the old model is only used to place the camera
         s.base = None
         for ob in [base_root] + list(base_root.children_recursive):

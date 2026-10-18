@@ -1,5 +1,6 @@
 """Camera moves at the big moment (变身镜头): a whip pan, a roll, a zoom punch, a dolly zoom, an orbit round the dancer
-(with the dance frozen: bullet time) or the cuts of a game's ultimate.
+(with the dance frozen: bullet time) or the cuts of a game's ultimate; or a camera rising with the change from the
+feet to the head (1.13, the rising reveal).
 
 The scene camera's own animation is never touched. A camera of ours rides on it (Child Of: where it is when its own
 transform is zero) and makes the whip, the roll, the punch and the dolly on its own keys; the orbit and the cuts have
@@ -11,7 +12,7 @@ import math
 
 import bpy
 from bpy_extras.object_utils import world_to_camera_view
-from mathutils import Matrix, Vector
+from mathutils import Euler, Matrix, Vector
 
 from . import compositor
 
@@ -23,12 +24,15 @@ P_USER = "mmd_disperse_user_camera"  # on the mask: the scene camera the moves r
 P_KEY = "mmd_disperse_shot_key"  # on the mask: the orbit and the cuts as they were set up (redone when it changes)
 ZOOM = "mmdd_zoom"  # on the riding camera: its focal length as a share of the scene camera's (keyed)
 MARKER = "MMD Disperse Shot"  # our timeline markers' names start with it
-STYLES = ("WHIP", "ROLL", "PUNCH", "DOLLY", "ORBIT", "CUTS")
-RIDING = ("WHIP", "ROLL", "PUNCH", "DOLLY")
+STYLES = ("WHIP", "ROLL", "PUNCH", "DOLLY", "ORBIT", "CUTS", "RISE")
+RIDING = ("WHIP", "ROLL", "PUNCH", "DOLLY", "RISE")
 SWING = 2.5  # how far a whip pan swings each way, in the picture's widths (between ...
 SWING_RANGE = (math.radians(20.0), math.radians(75.0))  # ... these angles)
 ROLL = math.radians(100.0)  # ... and a roll
 PUNCH = 1.3  # how far a zoom punch zooms in (focal length)
+RISE_ZOOM = 2.2  # the rising reveal comes this close (focal length) ...
+RISE_BELOW = 0.12  # ... looking this far (model heights) below the top of what has changed ...
+RISE_BACK = 0.7  # ... and pulls back to the scene camera's picture over this many seconds when it is all done
 BLUR = {"WHIP": 0.12, "ROLL": math.radians(35.0), "PUNCH": 0.25}  # the compositor's smear at the fastest
 # The cuts (a game's ultimate): a low angle, the eyes close up, a wide shot from above at the moment; when each starts
 # and ends as a share of the Move Time before (-) or after (+) the moment, and its focal lengths (it pushes in)
@@ -302,18 +306,46 @@ def _cuts(scene, mask, user, collection, armature, frame, length, focus, height)
     return out
 
 
-def sync(settings, mask, moment, focus, armature=None, height=1.0):
+def _rise(ride, user, rise, focus, height, fps):
+    """The rising reveal on the riding camera: close up (RISE_ZOOM), turned to look at the part just changed as the
+    change climbs (`rise`: (frame, height of the top of what has changed)), then back out to the scene camera's
+    picture. Its cuts."""
+    to_camera = user.matrix_world.inverted()
+    floor = rise[0][1]
+    turns, last = [], None
+    for frame, top in rise:
+        z = max(top - RISE_BELOW * height, floor + 0.1 * height)
+        aim = (to_camera @ Vector((focus[0], focus[1], z))).normalized()
+        euler = Vector((0.0, 0.0, -1.0)).rotation_difference(aim).to_euler("XYZ")  # (no roll: the least turn)
+        if last is not None:
+            euler.make_compatible(last)
+        turns.append((frame, euler))
+        last = euler
+    first, end = rise[0][0], rise[-1][0]
+    back = max(int(round(RISE_BACK * fps)), 2)
+    eased = [1.0 - (k / float(back)) ** 2 * (3.0 - 2.0 * k / float(back)) for k in range(1, back + 1)]
+    turns += [(end + k, Euler((last.x * e, last.y * e, last.z * e), "XYZ")) for k, e in enumerate(eased, 1)]
+    _key(ride, "rotation_euler", turns)
+    _key(ride, '["%s"]' % ZOOM, [(first, RISE_ZOOM), (end, RISE_ZOOM)]
+         + [(end + k, 1.0 + (RISE_ZOOM - 1.0) * e) for k, e in enumerate(eased, 1)])
+    return [(first, ride), (end + back + 1, None)]
+
+
+def sync(settings, mask, moment, focus, armature=None, height=1.0, rise=None):
     """Set up the camera move of the panel round the big moment (frame `moment`) at `focus` (a world point, the
-    chest): our cameras, their keys, the markers and the compositor's smear; or remove it when it is off."""
+    chest): our cameras, their keys, the markers and the compositor's smear; or remove it when it is off. The rising
+    reveal follows `rise` ((frame, height of the top of the change) from the start of the wave to its end)."""
     scene = settings.id_data
     user = user_camera(scene, mask)
-    if not settings.shot_enable or user is None or moment is None or focus is None:
+    style = settings.shot_style
+    # (the rising reveal follows the change, not the big moment: it needs `rise` only)
+    if (not settings.shot_enable or user is None or focus is None
+            or (not rise if style == "RISE" else moment is None)):
         remove(mask, scene)
         return
     mask[P_USER] = user
-    style = settings.shot_style
     fps = scene.render.fps / scene.render.fps_base
-    frame = int(moment)
+    frame = int(moment) if moment is not None else 0
     collection = mask.users_collection[0] if mask.users_collection else scene.collection
     keep = ("RIDE",) if style in RIDING else ("ORBIT", "PIVOT") if style == "ORBIT" else tuple(c[0] for c in CUTS)
     for ob in [o for o in shot_objects(mask) if o.get(P_ROLE) not in keep]:
@@ -331,6 +363,8 @@ def sync(settings, mask, moment, focus, armature=None, height=1.0):
                  index=1 if style == "WHIP" else 2)
             blur["shift" if style == "WHIP" else "turn"] = _ramp(frame, before, after, BLUR[style])
             cuts = [(frame - before, ride), (frame + after + 1, None)]
+        elif style == "RISE":
+            cuts = _rise(ride, user, rise, focus, height, fps)
         elif style == "PUNCH":
             before, after = max(int(round(0.07 * fps)), 2), max(int(round(0.15 * fps)), 3)
             _key(ride, '["%s"]' % ZOOM, [(frame - before, 1.0), (frame, PUNCH), (frame + 1, PUNCH),

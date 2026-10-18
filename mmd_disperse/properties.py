@@ -1,6 +1,7 @@
 import bpy
 from bpy.props import (
     BoolProperty,
+    CollectionProperty,
     EnumProperty,
     FloatProperty,
     FloatVectorProperty,
@@ -28,6 +29,14 @@ def _mesh_object(_self, ob):
 def _distance(name, description, default, soft_max=10.0, min_value=0.0):
     return FloatProperty(name=name, description=description, default=default, min=min_value,
                          soft_max=soft_max, subtype="DISTANCE", precision=3, update=_sync)
+
+
+class MMDDisperseChainOutfit(bpy.types.PropertyGroup):
+    """One outfit of the chain worn before the old one (chain.py)."""
+
+    outfit: PointerProperty(name="Outfit", type=bpy.types.Object, poll=_not_effect_object,
+                            description="Any part of a model (its root, armature or a mesh) worn before the old "
+                                        "outfit")
 
 
 class MMDDisperseSettings(bpy.types.PropertyGroup):
@@ -92,10 +101,18 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                 "What moves lights up first: each part of the body changes once it has moved far enough (the dancer's "
                 "own travel aside), in patches, so the dancing arms and legs change first and the still parts last "
                 "(Iris van Herpen's living dress). Building plays the dance; the end frame follows"),
+               ("MIRROR", "Under the Mirror Ball",
+                "A mirror ball turns high in front of the dancer and the outfit changes wherever its spots of light "
+                "sweep over her, front and back alike (Kimi to Idol Precure's mirror ball; pair it with Lights Out). "
+                "Building plays the dance to see where the spots fall; the end frame follows"),
                ("SLICES", "Sliced",
                 "The body is cut into bands at the neck, the waist and the knees and changed band by band, in a random "
                 "order (Garment Order): a quick wipe across a band takes the old outfit away and the new one comes "
-                "half a turn later, so the background shows between them (切片拼装)")),
+                "half a turn later, so the background shows between them (切片拼装)"),
+               ("ORIGINS", "From Many Points",
+                "Things land on the body one after another (sparks of molten iron, blobs of paint, tokens) and the new "
+                "outfit spreads out from each where it lands, each from its own moment (多点开花). The front keeps "
+                "its pace (linear), so the end frame follows")),
         default="SPHERE")
     picture_front: EnumProperty(
         name="Picture Front",
@@ -113,7 +130,11 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("CLOCK", "Clock Hand", "A clock face round the dancer, its hand ticking round from twelve o'clock in "
                                        "twelve jumps; the outfit changes wherever it has gone round (表盘跳针)"),
                ("TAIJI", "Taiji", "A taiji turning and growing round the dancer: wherever its white fish comes over "
-                                  "her the outfit changes, until it has swallowed all of her (太极阴阳)")),
+                                  "her the outfit changes, until it has swallowed all of her (太极阴阳)"),
+               ("MARQUEE", "Editor Cursor", "A mouse pointer flies in, clicks by the dancer's head and drags a "
+                                            "selection box over her, marching ants round it; the outfit changes inside "
+                                            "it, as if someone were editing her (编辑器光标; to the left with the "
+                                            "direction pointing left)")),
         default="WIPE",
         description="The front on the picture (building time)")
     picture_angle: FloatProperty(name="Wipe Direction", default=0.0, min=-2.0 * 3.14159265, max=2.0 * 3.14159265,
@@ -164,6 +185,27 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                              "heights (about; each part needs its own share of it, so the change comes "
                                              "in patches) (building time)")
     spiral_pitch: _distance("Spiral Pitch", "How far up the body the change climbs per turn around it", 2.0)
+    # --- 1.13: from many points (origins.py)
+    origins_style: EnumProperty(
+        name="What Lands",
+        items=(("SPARKS", "Iron Sparks", "On the beat a smith strikes molten iron behind her and a fountain of golden "
+                                         "sparks rains down; the few that land on her are where the new outfit "
+                                         "starts (打铁花; pair it with Lights Out)"),
+               ("SPLATS", "Paint Splats", "Blobs of paint fly at her from the camera's side and splat on her, the new "
+                                          "outfit spreading out from each splat (随机斑点)"),
+               ("TOKENS", "Tokens", "Small tokens fly onto her chest, wrists, waist and ankles one after another on "
+                                    "the beat and stay there, the new outfit spreading out from each (信物上身; She-Ra, "
+                                    "Miraculous)")),
+        default="SPARKS", update=_sync,
+        description="What lands on the body where the new outfit starts (building time)")
+    origins_count: IntProperty(name="Starting Points", default=6, min=1, max=16, update=_sync,
+                               description="How many points the new outfit starts from (building time)")
+    origins_color: FloatVectorProperty(name="Paint / Token Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                       default=(1.0, 0.78, 0.25), update=_sync,
+                                       description="Colour of the paint splats and of the tokens")
+    origins_object: PointerProperty(name="Token Object", type=bpy.types.Object, poll=_mesh_object, update=_sync,
+                                    description="A small mesh of your own to use as the tokens, with its own material "
+                                                "(empty: a gold star of ours)")
     garment_order: EnumProperty(
         name="Garment Order",
         items=(("DOWN", "From the Top", "From the garments at the top of the body down to the shoes"),
@@ -200,7 +242,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("PULL", "Pull the Cord", "Start when a hand pulls at the chest or the neck and snaps away (Chainsaw "
                                          "Man)"),
                ("GAZE", "Eye Contact", "Start when the dancer turns to look straight into the camera, from the eyes, "
-                                       "a star glinting in them (#对视变装)")),
+                                       "a star glinting in them (#对视变装)"),
+               ("OPEN", "Arms Open", "Swap as both arms fly open wide (a drag queen's reveal, flinging her cape "
+                                     "open); with the Balloons cover the cloud bursts out as they open and the outfits "
+                                     "swap once it covers her")),
         default="NONE",
         description="Start the transformation on a move of the dance: building looks for it in the old model's motion "
                     "from the start frame on and moves the transformation there (the start and end frames follow; with "
@@ -458,6 +503,77 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                  description="The name written on the reveal (empty: the name of the new outfit's "
                                              "model)")
 
+    # --- 1.13: what covers the dancer at the big moment (遮挡)
+    cover_style: EnumProperty(
+        name="Covered By",
+        items=(("NONE", "None", "Nothing covers the dancer"),
+               ("SHATTER", "Shattered Picture", "A sword slash streaks across the picture, cracks run out from it, "
+                                                "the glass flashes white as the outfits swap and bursts into shards "
+                                                "flying at the camera (打碎画面; Honkai: Star Rail's Seele)"),
+               ("CLOTH", "Cloth over the Lens", "A cloth flies from her hand at the camera, unfolding, covers the lens "
+                                                "as the outfits swap and slides down (飞布盖镜头)"),
+               ("UMBRELLA", "Umbrella", "An umbrella spins past the lens, its canopy filling the picture as the "
+                                        "outfits swap, and lifts away shedding petals (雨伞变装)"),
+               ("FAN", "Fan Blades", "The wooden blades of a fan turn in front of the camera; the outfits swap as a "
+                                     "blade sweeps over her (风扇变装)"),
+               ("EMOJI", "Emoji", "An emoji on her face pops up over all of her for a few frames while the outfits "
+                                  "swap, and shrinks back (表情包转场; a picture of your own below)"),
+               ("FRAME", "Picture Frame", "A gilded frame stands in front of her; its canvas turns paper white as the "
+                                          "outfits swap and bursts into feathers, and the frame falls away (画框爆羽)"),
+               ("CONFETTI", "Confetti Cannons", "Cannons at the front of the stage fire foil streamers over her as "
+                                                "the outfits swap (彩带炮)"),
+               ("BALLOONS", "Balloons", "A cloud of balloons bursts out in front of her and rises as the outfits swap "
+                                        "(Drag Race's balloon reveal); the moment moves to where they cover most of "
+                                        "her"),
+               ("FEATHERS", "Feather Fans", "A great feather fan opens on each hand in front of her body as the outfits "
+                                            "swap (羽扇遮身, a burlesque fan dance); the moment moves to where they "
+                                            "cover most of her"),
+               ("CURTAIN", "Curtain Drop", "A red curtain comes down in front of her, the outfits swap behind it, and "
+                                           "it drops to the floor (落幕, the kabuki drop)")),
+        default="NONE", update=_sync,
+        description="Something covers the dancer at the big moment (the swap, or the new outfit complete) and the "
+                    "change happens behind it. Building watches where she is on the picture round the moment, so "
+                    "build again after moving the camera or picking another cover")
+    cover_color: FloatVectorProperty(name="Cover Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(0.85, 0.12, 0.2), update=_sync,
+                                     description="Colour of the cloth, the umbrella, the confetti, the balloons, the "
+                                                 "feather fans and the curtain")
+    cover_image: StringProperty(name="Emoji Picture", subtype="FILE_PATH", default="", update=_sync,
+                                description="A picture to use as the emoji (empty: a smiley of our own)")
+    stage_flames: BoolProperty(name="Stage Flames", default=False, update=_sync,
+                               description="A row of flame jets along the front of the stage shoots up columns of "
+                                           "cartoon fire at the big moment, lighting her warm from below (台口火柱; "
+                                           "pair it with Start On: Jump)")
+
+    # --- 1.13: the old outfit recoloured on the way to the big moment (换色)
+    tint_style: EnumProperty(
+        name="Recolour",
+        items=(("NONE", "None", "The old outfit keeps its colours"),
+               ("FACE", "Face Change", "The whole of her flips to another colour of the opera masks again and "
+                                       "again, faster and faster, until the outfits swap (变脸, Sichuan opera's "
+                                       "face changing)"),
+               ("TUG", "Colour Tug", "Two colours chase each other across the outfit, a sweep from one side and "
+                                     "then from the other (on the beats with Sync to Beat), until the outfits swap "
+                                     "(颜色拉锯, the fairies fighting over the dress in Sleeping Beauty)"),
+               ("ERAS", "Dancers of Every Era", "Copies of her in the looks of other ages (an old photo, black and "
+                                                "white, neon, gold, ...) come beside and behind her one after "
+                                                "another and dance along; just before the swap they fly into her "
+                                                "(历代舞伴, the juke joint of Sinners)")),
+        default="NONE", update=_sync,
+        description="The old outfit takes on other colours in the Tint Time before the big moment (the swap, or the "
+                    "new outfit complete), its own shading kept (EEVEE)")
+    tint_count: IntProperty(name="Changes", default=6, min=2, max=8, update=_sync,
+                            description="How many colours the face change goes through, how many sweeps the tug "
+                                        "makes, how many copies of her come")
+    tint_length: FloatProperty(name="Tint Time", default=3.0, min=0.2, soft_max=10.0, update=_sync,
+                               description="Seconds before the big moment the recolouring starts")
+    tint_color_a: FloatVectorProperty(name="Colour A", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                      default=(1.0, 0.35, 0.65), update=_sync,
+                                      description="The first colour of the tug (it sweeps in first)")
+    tint_color_b: FloatVectorProperty(name="Colour B", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                      default=(0.2, 0.45, 1.0), update=_sync,
+                                      description="The other colour of the tug")
+
     # --- 1.11: the camera and time at the big moment
     shot_enable: BoolProperty(name="Camera Move", default=False, update=_sync,
                               description="The camera moves at the big moment (the swap, or the new outfit complete): "
@@ -477,7 +593,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                   "Freeze: bullet time)"),
                ("CUTS", "Ultimate Cuts", "Quick cuts round the moment, like a game's ultimate: a low angle pushing in, "
                                          "the eyes close up (riding on the head), then a wide shot from above as the "
-                                         "outfits swap, and back to the scene camera")),
+                                         "outfits swap, and back to the scene camera"),
+               ("RISE", "Rising Reveal", "Close up on the front, the camera tilts up the body with it from the feet "
+                                         "to the head (pausing where the front pauses), then pulls back to show all "
+                                         "of her (a VTuber's new outfit shown part by part; pair it with Sweep Up)")),
         default="WHIP", update=_sync)
     shot_length: FloatProperty(name="Move Time", default=2.0, min=0.2, soft_max=10.0, update=_sync,
                                description="How long the dolly zoom, the orbit and the cuts take, in seconds")
@@ -522,6 +641,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                        "the old model's armature, removed with the effect)")
     float_height: FloatProperty(name="Float Height", default=0.12, min=0.0, soft_max=1.0, subtype="FACTOR",
                                 update=_sync, description="How high the dancer floats, a share of the model height")
+    body_grow: FloatProperty(name="Taller and Stronger", default=0.0, min=0.0, soft_max=2.0, update=_sync,
+                             description="At the big moment the dancer grows a little taller (3% at 1) and broader "
+                                         "in the chest and shoulders (6% at 1) over half a second (He-Man's first "
+                                         "change); 0 is off. Removing the effect puts her back")
 
     # --- 1.11: the picture's look round the big moment
     look_style: EnumProperty(
@@ -533,7 +656,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                                        "(a colour splash on the drop; Honkai: Star Rail's Acheron)"),
                ("SONG", "Old Painting", "The picture turns into an old Chinese painting: the dancer painted in ink on "
                                         "blank yellowed silk, ink lines round her, a mounting and a red seal (pair "
-                                        "it with On Twos)")),
+                                        "it with On Twos)"),
+               ("PIXEL", "Pixelated", "The dancer breaks up into big blocks of colour, biggest at the moment the "
+                                      "outfits swap behind them, then sharp again (像素打码; pair it with All at "
+                                      "Once)")),
         default="NONE", update=_sync,
         description="A look the picture takes round the big moment, made in the compositor (each turns on Cryptomatte "
                     "for the view layer to find the dancer); removing the effect takes it out")
@@ -763,7 +889,13 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                          "for the red paper; pair it with Paper Birds)"),
                ("TATTOO", "Glowing Tattoos", "Swirling patterns of light like tattoos spread over the old outfit in "
                                              "patches and brighten as the edge comes (KPop Demon Hunters; the surface "
-                                             "color is their light: gold or purple)")),
+                                             "color is their light: gold or purple)"),
+               ("LED", "LED Screen", "The old outfit turns into an LED screen ahead of the edge, dots of red, green and "
+                                     "blue showing a new picture every few beats: colour bars, scrolling stripes, "
+                                     "rings, TV snow (Beyoncé's LED dress by ANREALAGE)"),
+               ("EPAPER", "Electronic Paper", "The old outfit turns into scales of electronic paper ahead of the "
+                                              "edge, each flashing white once and turning grey, before the new outfit "
+                                              "comes (ANREALAGE's SKIN collection)")),
         default="NONE", update=_sync)
     surface_width: _distance("Surface Reach", "How far ahead of the edge the old outfit starts to change", 3.0)
     surface_color: FloatVectorProperty(name="Surface Color", subtype="COLOR", size=3, min=0.0, max=1.0,
@@ -835,6 +967,11 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     glitch_shift: _distance("Slice Shift", "How far a slice jumps sideways", 0.4)
     glitch_flash: BoolProperty(name="Flashes", default=True, update=_sync,
                                description="Some slices flash in the glow color")
+    music_pace: BoolProperty(name="Pace to the Music", default=False,
+                             description="The front runs with the music instead of at an even pace: on through the "
+                                         "loud parts, slow in the quiet ones, from the same start to the same end "
+                                         "(Find Beats first; building time; not for the paths found by playing the "
+                                         "dance)")
     beat_sync: BoolProperty(name="Sync to Beat", default=False, update=_sync,
                             description="Follow the beats of the music (Find Beats first): the glitch slices "
                                         "reshuffle, jump and flash on them, the wires and the rim flare, the particles "
@@ -1027,8 +1164,28 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     mask: PointerProperty(name="Mask", type=bpy.types.Object,
                           description="Sphere empty of the current effect; its scale is the reveal radius")
 
+    # --- 1.13: outfits worn before the old one (chain.py)
+    chain: CollectionProperty(type=MMDDisperseChainOutfit, name="Outfits Before",
+                              description="Outfits the dancer wears one after another before the old outfit, each "
+                                          "following the old model's dance (building time)")
+    chain_index: IntProperty(name="Active Outfit", default=0, min=0)
+    chain_pace: EnumProperty(
+        name="Pace",
+        items=(("BEAT", "Every Beat", "A new outfit on every beat (a carousel; 0.45 s apart without beats)"),
+               ("BAR", "Every Bar", "A new outfit every bar of four beats (1.8 s without beats)"),
+               ("PHRASE", "Every Phrase", "A new outfit every four bars (7.2 s without beats)")),
+        default="BAR", update=_sync,
+        description="How far apart the cuts come; the last one (to the old outfit) half a second before the start, "
+                    "on the beats with Sync to Beat")
+    chain_cut: EnumProperty(
+        name="Cut",
+        items=(("FLASH", "Flash of White", "The picture flashes white at each cut and clears over a few frames"),
+               ("BLACK", "Black Frame", "A frame or two of black at each cut, like a magic trick's blackout")),
+        default="FLASH", update=_sync, description="What hides each cut from one outfit to the next")
+
 
 def register():
+    bpy.utils.register_class(MMDDisperseChainOutfit)
     bpy.utils.register_class(MMDDisperseSettings)
     bpy.types.Scene.mmd_disperse = PointerProperty(type=MMDDisperseSettings)
 
@@ -1036,3 +1193,4 @@ def register():
 def unregister():
     del bpy.types.Scene.mmd_disperse
     bpy.utils.unregister_class(MMDDisperseSettings)
+    bpy.utils.unregister_class(MMDDisperseChainOutfit)

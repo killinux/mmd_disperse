@@ -25,7 +25,7 @@ import numpy as np
 from . import motion, shots
 from .model import ORIGIN_BONES
 
-SHAPES = ("WIPE", "IRIS", "FAN", "BRUSH", "BURN", "SMEAR", "CLOCK", "TAIJI")
+SHAPES = ("WIPE", "IRIS", "FAN", "BRUSH", "BURN", "SMEAR", "CLOCK", "TAIJI", "MARQUEE")
 CENTRED = ("IRIS", "BURN", "CLOCK", "TAIJI")  # fronts round the dancer's chest (or the middle of the picture)
 MARGIN = 0.02  # the fronts start (and end) this far outside the dancer, a share of the picture's height ...
 SPAN_MARGIN = 0.06  # ... and this share of her size, so their glow comes in
@@ -234,7 +234,7 @@ def front_span(shape, x, y, aspect, angle=0.0, centre=(0.0, 0.0)):
         lo, hi = float(phi.min()), float(phi.max())
         m = SPAN_MARGIN * (hi - lo) + 0.05
         return (min(hi + m, math.pi), max(lo - m, 0.0), 0.0, 0.0)
-    if shape == "BRUSH":
+    if shape in ("BRUSH", "MARQUEE"):
         mx = SPAN_MARGIN * float(x.max() - x.min()) + MARGIN
         my = SPAN_MARGIN * float(y.max() - y.min()) + MARGIN
         return (float(x.min()) - mx, float(x.max()) + mx, float(y.max()) + my, float(y.min()) - my)
@@ -270,6 +270,11 @@ def time_field(shape, x, y, angle, centre, span):
         wobble = 1.0 + sum(a * np.sin(n * theta + phase) for a, n, phase in BURN_WOBBLE)
         return r / (BURN_SPAN * wobble)
     rightwards = math.cos(angle) >= 0.0
+    if shape == "MARQUEE":  # 1.13: a selection box dragged from its top corner (materials._picture_field: the same)
+        across = (x - s0) / max(s1 - s0, 1e-6)
+        if not rightwards:
+            across = 1.0 - across
+        return np.maximum(across, (s2 - y) / max(s2 - s3, 1e-6))
     if shape == "FAN":
         phi = np.arctan2(y - FAN_PIVOT, x if rightwards else -x)
         phi = np.where(phi >= 0.0, phi, np.where(phi < -0.5 * math.pi, math.pi, 0.0))
@@ -550,6 +555,65 @@ class Spray:
                 hit = crossing & (when < o)
                 o[hit] = when[hit]
                 self.dose[k] = after
+        return out
+
+
+MIRROR_SPOTS = 48  # 1.13, the mirror ball: how many spots of light it throws ...
+MIRROR_HALF = math.radians(2.5)  # ... each this wide (half its angle) ...
+MIRROR_TURN = 4.0  # ... turning round once every this many seconds ...
+MIRROR_UP = 1.9  # ... from where it hangs: this high over the floor and ...
+MIRROR_AHEAD = 0.6  # ... this far in front of the dancer (model heights)
+
+
+def mirror_spots(ball, floor, top, middle, count=MIRROR_SPOTS, seed=19):
+    """The ball's spots at the first frame (unit directions from the ball at `ball`, world): spread evenly round it,
+    each tipped down at its own angle between the line to the top of the dancer (`top`, the height of her head) and
+    the line to her feet (`floor`), over the level distance to her `middle`, so as the ball turns every spot sweeps
+    across her once a turn, each at its own height."""
+    rng = np.random.default_rng(seed)
+    reach = max(float(np.hypot(ball[0] - middle[0], ball[1] - middle[1])), 1e-6)
+    low = math.atan2(ball[2] - top, reach)
+    high = math.atan2(ball[2] - floor, reach)
+    order = rng.permutation(count)
+    dirs = []
+    for k in range(count):
+        az = 2.0 * math.pi * (k + rng.uniform(-0.3, 0.3)) / count
+        dip = low + (high - low) * (order[k] + rng.uniform(0.0, 1.0)) / count
+        dirs.append((math.cos(dip) * math.cos(az), math.cos(dip) * math.sin(az), -math.sin(dip)))
+    return np.asarray(dirs)
+
+
+class MirrorBall:
+    """Did a spot of the mirror ball light the vertex (1.13; Kimi to Idol Precure's heart-shaped mirror ball)? The ball
+    hangs at `ball`; its spots (`dirs`, unit directions at frame `start`) turn round the upright axis, once every
+    MIRROR_TURN seconds; a spot lights what lies within MIRROR_HALF of its direction (front or back alike)."""
+
+    def __init__(self, ball, dirs, start, fps):
+        self.ball, self.dirs = np.asarray(ball, dtype=np.float64), np.asarray(dirs, dtype=np.float64)
+        self.start, self.rate = float(start), 2.0 * math.pi / (MIRROR_TURN * max(fps, 1e-3))
+        self.last = None
+
+    def directions(self, frame):
+        """The spots' directions at `frame`."""
+        a = (frame - self.start) * self.rate
+        c, s = math.cos(a), math.sin(a)
+        x, y, z = self.dirs[:, 0], self.dirs[:, 1], self.dirs[:, 2]
+        return np.stack([c * x - s * y, s * x + c * y, z], axis=1)
+
+    def __call__(self, i, frame, positions):
+        dirs = self.directions(frame)
+        ahead = []
+        for pts in positions:
+            if not len(pts):
+                ahead.append(np.zeros(0))
+                continue
+            v = pts - self.ball
+            v /= np.maximum(np.linalg.norm(v, axis=1), 1e-9)[:, None]
+            nearest = np.max(v @ dirs.T, axis=1)  # the cosine of the angle to the nearest spot
+            ahead.append(np.arccos(np.clip(nearest, -1.0, 1.0)) - MIRROR_HALF)
+        out = [_crossing(self.last[k] if self.last is not None and len(self.last[k]) == len(a) else None, a, frame)
+               for k, a in enumerate(ahead)]
+        self.last = ahead
         return out
 
 

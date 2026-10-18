@@ -1,7 +1,11 @@
-"""One-click looks. A preset only sets panel values (sizes stay fitted to the model); some of them are
-build-time settings, so an effect that is already built gets rebuilt with them. Presets in WHITE_FLASH also want
-the compositor's white flash, those in REFRACTION EEVEE's refraction, those with impact frames the compositor's impact
-frames (the operator adds them)."""
+"""One-click looks. A preset only sets panel values (sizes stay fitted to the model, or are a share of its height:
+Height); some of them are build-time settings, so an effect that is already built gets rebuilt with them. Presets in
+WHITE_FLASH also want the compositor's white flash, those in REFRACTION EEVEE's refraction, those with impact frames the
+compositor's impact frames (the operator adds them)."""
+
+
+class Height(float):
+    """A size in a preset as a share of the model height (turned into world units when the preset is applied)."""
 
 _OFF = dict(
     entrance="GROW", exit_style="SHRINK", exit_timing="EDGE", particles="NONE", wire_enable=False, holo_enable=False,
@@ -12,6 +16,7 @@ _OFF = dict(
     soul_enable=False, domain_enable=False, shot_enable=False, time_warp="NONE", toon_style="NONE", float_up=False,
     husk_motion="STILL", trail_enable=False, step_flowers=False, look_style="NONE", holo_style="SCAN",
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
+    cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -485,26 +490,161 @@ PRESETS = (
           exit_style="FRAGMENTS", frag_glow=True, particles="STAR", particle_count=300,
           particle_color=(0.8, 0.9, 1.0), particle_glow=3.0, glow_color=(0.4, 0.8, 1.0),
           frag_wind_dir=(0.0, 0.2, 0.6))),
+    # --- 1.13: what covers the dancer at the big moment
+    ("SHATTER", "Shattered Picture", "A sword slash streaks across the picture, cracks run out from it, the glass "
+                                     "flashes white as the outfits swap and bursts into shards flying at the camera "
+                                     "(打碎画面; Honkai: Star Rail's Seele)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="SHATTER",
+          glow_color=(0.55, 0.8, 1.0))),
+    ("CLOTH_COVER", "Cloth over the Lens", "A silk cloth flies from her hand at the camera, covers the lens as the "
+                                           "outfits swap and slides down (飞布盖镜头)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="CLOTH",
+          cover_color=(0.75, 0.08, 0.16), glow_color=(1.0, 0.8, 0.8))),
+    ("UMBRELLA", "Umbrella Change", "An umbrella spins past the lens, its canopy filling the picture as the outfits "
+                                    "swap, and lifts away shedding petals (雨伞变装)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="UMBRELLA",
+          cover_color=(0.85, 0.2, 0.3), particle_color=(1.0, 0.72, 0.78), glow_color=(1.0, 0.8, 0.85))),
+    ("FAN_BLADES", "Fan Blades", "The wooden blades of a fan turn in front of the camera and the outfits swap as one "
+                                 "sweeps over her (风扇变装)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="FAN",
+          glow_color=(1.0, 0.9, 0.8))),
+    ("EMOJI", "Emoji Pop", "An emoji on her face pops up over all of her while the outfits swap and shrinks back "
+                           "(表情包转场; a picture of your own in the Cover panel)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="EMOJI",
+          glow_color=(1.0, 0.85, 0.3))),
+    ("FRAME_BURST", "Feathers from the Frame", "A gilded frame stands in front of her, its canvas turns white as the "
+                                               "outfits swap and bursts into feathers (画框爆羽, Solange Kardinaly's "
+                                               "quick change)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="FRAME",
+          glow_color=(1.0, 0.85, 0.5))),
+    ("CONFETTI", "Confetti Cannons", "Cannons at the front of the stage fire foil streamers over her as the outfits "
+                                     "swap (彩带炮)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="CONFETTI",
+          cover_color=(1.0, 0.35, 0.6), finale=True, finale_white=0.2, glow_color=(1.0, 0.85, 0.6))),
+    ("BALLOONS", "Balloon Reveal", "As her arms fly open a cloud of balloons bursts out in front of her and rises, "
+                                   "the outfits swapping behind it (Drag Race's balloon reveal; on the dance's first "
+                                   "open arms when it has them)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, trigger="OPEN",
+          cover_style="BALLOONS", cover_color=(0.95, 0.3, 0.55), glow_color=(1.0, 0.8, 0.9))),
+    ("FEATHER_FANS", "Feather Fan Dance", "A great feather fan opens on each hand in front of her as the outfits swap "
+                                          "(羽扇遮身, a burlesque fan dance; needs a dance)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="FEATHERS",
+          cover_color=(1.0, 0.45, 0.7), glow_color=(1.0, 0.85, 0.9))),
+    ("CURTAIN_DROP", "Curtain Drop", "A red curtain comes down in front of her, the outfits swap behind it and it "
+                                     "drops to the floor (落幕, the kabuki drop)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="CURTAIN",
+          cover_color=(0.5, 0.02, 0.04), glow_color=(1.0, 0.75, 0.4))),
+    ("MIRROR_BALL", "Mirror Ball", "The lights go down and a mirror ball turns over the dancer, its spots of light "
+                                   "sweeping over her and the outfit changing wherever they pass (needs a dance)",
+     dict(_OFF, path="MIRROR", easing="LINEAR", lights_out=True, lights_level=0.12, spot_energy=1.0,
+          exit_style="FRAGMENTS", frag_glow=True, particles="GLITTER", particle_count=400,
+          particle_color=(1.0, 0.8, 0.95), particle_glow=2.0, glow_color=(1.0, 0.8, 1.0),
+          frag_wind_dir=(0.0, 0.2, 0.6))),
+    ("FLAME_JETS", "Stage Flames", "At the top of her first jump the outfits swap and a row of flame jets along "
+                                   "the front of the stage shoots up columns of fire, the lights down round it "
+                                   "(台口火柱; needs a dance with a jump)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, trigger="JUMP", stage_flames=True,
+          lights_out=True, lights_level=0.25, glow_color=(1.0, 0.6, 0.2))),
+    # --- 1.13: tricks on the picture
+    ("PIXELATED", "Pixelated Change", "The dancer breaks up into big blocks of colour, the outfits swap while the "
+                                      "blocks are biggest, and she comes sharp again (像素打码)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", look_style="PIXEL", look_length=1.2,
+          glow_color=(1.0, 1.0, 1.0))),
+    ("EDITOR_CURSOR", "Editor Cursor", "A mouse pointer flies in, clicks by the dancer's head and drags a selection "
+                                       "box over her; the outfit changes inside it (编辑器光标)",
+     dict(_OFF, path="PICTURE", picture_front="MARQUEE", picture_angle=0.0, easing="LINEAR", edge_glow=False,
+          glow_color=(1.0, 1.0, 1.0))),
+    # --- 1.13: the outfit as a screen
+    ("LED_DRESS", "LED Dress", "The old outfit lights up as an LED screen, colour bars, stripes and rings running over "
+                               "it, and the new outfit comes behind it from the chest (Beyoncé's LED dress)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", old_surface="LED", surface_width=Height(0.6), edge_glow=True,
+          glow_color=(0.6, 0.8, 1.0))),
+    ("EPAPER_DRESS", "Electronic Paper", "The old outfit turns into scales of electronic paper that flash and turn "
+                                         "grey one by one, and the new outfit ripples in after them (ANREALAGE's SKIN)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", old_surface="EPAPER", surface_width=Height(0.5), edge_glow=False,
+          glow_color=(1.0, 1.0, 1.0))),
+    # --- 1.13: from many points
+    ("IRON_SPARKS", "Iron Sparks", "On the beat a smith strikes molten iron behind her and golden sparks rain down; "
+                                   "where they land on her the new outfit starts, with the lights down (打铁花)",
+     dict(_OFF, path="ORIGINS", origins_style="SPARKS", origins_count=9, easing="LINEAR", lights_out=True,
+          lights_level=0.15, particles="EMBER", particle_count=300, particle_color=(1.0, 0.6, 0.2), particle_glow=3.0,
+          glow_color=(1.0, 0.55, 0.15))),
+    ("PAINT_SPLATS", "Paint Splats", "Blobs of paint fly at her and splat, the new outfit spreading out from each "
+                                     "splat (随机斑点)",
+     dict(_OFF, path="ORIGINS", origins_style="SPLATS", origins_count=7, origins_color=(0.95, 0.2, 0.5),
+          easing="LINEAR", edge_glow=False)),
+    ("TOKENS", "Tokens", "Gold stars fly onto her chest, wrists, waist and ankles one after another and the new outfit "
+                         "spreads out from each (信物上身)",
+     dict(_OFF, path="ORIGINS", origins_style="TOKENS", origins_count=5, origins_color=(1.0, 0.78, 0.25),
+          easing="LINEAR", particles="STAR", particle_count=250, particle_color=(1.0, 0.9, 0.5), particle_glow=3.0,
+          glow_color=(1.0, 0.85, 0.4))),
+    # --- 1.13: the camera rising with the reveal, growing
+    ("SECTION_REVEAL", "Section Reveal", "The new outfit comes garment by garment from the feet up while the camera, "
+                                         "close up, rises with it, pausing between the garments, then pulls back to "
+                                         "show all of her (分段揭晓, a VTuber's new outfit shown part by part)",
+     dict(_OFF, path="GARMENTS", garment_order="UP", easing="LINEAR", shot_enable=True, shot_style="RISE",
+          particles="STAR", particle_count=200, particle_color=(1.0, 0.95, 0.85), particle_glow=2.0,
+          glow_color=(0.9, 0.95, 1.0))),
+    ("POWER_UP", "Power Up", "The new outfit spreads out over her from the chest and she grows a little taller and "
+                             "broader as it completes, in a flash (长高变壮, He-Man's first change)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", easing="EASE", body_grow=1.5, finale=True, finale_white=0.35,
+          particles="STAR", particle_count=300, particle_color=(1.0, 0.9, 0.5), particle_glow=3.0,
+          glow_color=(1.0, 0.85, 0.4))),
+    # --- 1.13: the old outfit recoloured on the way to the big moment
+    ("FACE_CHANGE", "Face Change", "The whole of her flips through the colours of the opera masks, faster and "
+                                   "faster, and the new outfit is the last face (变脸)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, tint_style="FACE", tint_count=7,
+          tint_length=2.4, glow_color=(1.0, 0.85, 0.5))),
+    ("COLOR_TUG", "Colour Tug", "Pink and blue chase each other across the dress, sweep after sweep, until the new "
+                                "outfit takes over (颜色拉锯, the fairies of Sleeping Beauty)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, tint_style="TUG", tint_count=6,
+          tint_length=3.0, tint_color_a=(1.0, 0.35, 0.65), tint_color_b=(0.2, 0.45, 1.0), finale=True,
+          finale_white=0.2, glow_color=(1.0, 0.8, 1.0))),
+    ("ERAS", "Dancers of Every Era", "Copies of her in the looks of other ages come beside and behind her one after "
+                                     "another and dance along, then fly into her as the outfits swap (历代舞伴, "
+                                     "the juke joint of Sinners; best with a dance)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, tint_style="ERAS", tint_count=6,
+          tint_length=4.0, finale=True, finale_white=0.35, glow_color=(1.0, 0.9, 0.7))),
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
 BUILD_TIME = {"path", "seeds", "entrance", "exit_style", "particles", "spiral_pitch", "trigger", "garment_order",
               "picture_front", "picture_angle", "picture_follow", "picture_brush", "spot_side", "spray_reach",
-              "motion_amount"}
+              "motion_amount", "cover_style", "origins_style", "origins_count"}
 WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPARKLE_SPIRAL", "BROOCH", "MARK50",
                "LIGHTNING", "COCOON", "CLAP", "TURN", "HAND_SWIPE", "BLUE_FLAME", "SUPER_AURA", "LOTUS", "HUSK",
                "SOUL_DEPART", "IMPACT", "IDOL", "SOUL_RINGS", "DOMAIN", "SKY_MIRROR", "CONCERT", "VELOCITY",
                "SPLIT", "FIGURINE", "NEZHA", "HEART", "SILHOUETTE", "STARRY_VEIL", "IRIS", "CLOCK_HAND", "DHARMA",
-               "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE"}
+               "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE", "COLOR_TUG", "ERAS",
+               "POWER_UP"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 
 def apply(settings, key):
-    """Set the panel values of preset `key`; True when a rebuild is needed for them to take effect."""
+    """Set the panel values of preset `key`; True when a rebuild is needed for them to take effect. A Height value is
+    a share of the model height (the panel's sizes are fitted to the model)."""
     values = next(values for k, _label, _description, values in PRESETS if k == key)
     rebuild = False
+    height = None
     for name, value in values.items():
+        if isinstance(value, Height):
+            if height is None:
+                height = _model_height(settings)
+            value = float(value) * height
         if name in BUILD_TIME and getattr(settings, name) != value:
             rebuild = True
         setattr(settings, name, value)
     return rebuild
+
+
+def _model_height(settings):
+    if settings.size_reference > 0.0:
+        return settings.size_reference
+    from .effect import model_height
+
+    for ob in (settings.base, settings.target):
+        if ob is not None:
+            height = model_height(ob)
+            if height > 0.0:
+                return height
+    return 1.0

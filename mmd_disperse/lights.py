@@ -150,6 +150,101 @@ def sync_spot(settings, mask, rec, height, collection):
     materials.update_beam_glow_material(settings.spot_color, settings.spot_beam)
 
 
+MIRROR = "MMD Disperse Mirror Ball"
+MIRROR_POWER = 320.0  # 1.13: each of the mirror ball's spots, in watts per square model height
+MIRROR_COLORS = ((1.0, 1.0, 1.0), (1.0, 0.55, 0.85), (0.5, 0.85, 1.0), (1.0, 0.85, 0.45))
+MIRROR_SIZE = 0.09  # the ball's radius (model heights)
+
+
+def _mirror_ball_mesh():
+    import bmesh
+
+    bm = bmesh.new()
+    bmesh.ops.create_uvsphere(bm, u_segments=32, v_segments=16, radius=1.0)
+    me = bpy.data.meshes.new(MIRROR)
+    bm.to_mesh(me)
+    bm.free()
+    me.materials.append(materials.ensure_cover_material("MIRRORBALL"))  # (flat faces: its tiles)
+    return me
+
+
+def sync_mirror(settings, mask, rec, height, collection):
+    """The mirror ball of the path Swept by a Mirror Ball from what building found (`rec`: where it hangs, its spots'
+    directions at the first frame): the ball and a spot light for each spot, hung on an empty that turns as the
+    spots turned while building, on from a little before the transformation to a little after it."""
+    from .sampling import MIRROR_HALF, MIRROR_TURN
+
+    kinds = ("MIRROR_PIVOT", "MIRROR_BALL", "MIRROR_SPOT")
+    if rec is None:
+        for ob in [ob for kind in kinds for ob in objects(mask, kind)]:
+            _delete(ob)
+        return
+    ball = Vector(rec["ball"])
+    flat = list(rec["dirs"])
+    dirs = [Vector(flat[i:i + 3]) for i in range(0, len(flat) - 2, 3)]
+    start = float(rec["start"])
+    scene = settings.id_data
+    fps = scene.render.fps / scene.render.fps_base
+    first = start - 0.5 * fps
+    last = max(float(settings.frame_end), start + 1.0) + 0.8 * fps
+    pivot = next(iter(objects(mask, "MIRROR_PIVOT")), None)
+    if pivot is None:
+        pivot = bpy.data.objects.new(MIRROR + " Pivot", None)
+        pivot.empty_display_size = 0.05 * height
+        collection.objects.link(pivot)
+        pivot[P_LIGHT] = mask
+        pivot[P_KIND] = "MIRROR_PIVOT"
+        pivot.hide_select = True
+    _clear(pivot)
+    pivot.location = ball
+    pivot.rotation_mode = "XYZ"
+    rate = 2.0 * math.pi / (MIRROR_TURN * fps)
+    for f in (first, last):
+        pivot.rotation_euler = (0.0, 0.0, (f - start) * rate)
+        pivot.keyframe_insert("rotation_euler", frame=f)
+    _linear(pivot)
+    sphere = next(iter(objects(mask, "MIRROR_BALL")), None)
+    if sphere is None:
+        sphere = bpy.data.objects.new(MIRROR, _mirror_ball_mesh())
+        collection.objects.link(sphere)
+        sphere[P_LIGHT] = mask
+        sphere[P_KIND] = "MIRROR_BALL"
+        sphere.hide_select = True
+    sphere.parent = pivot
+    sphere.location = (0.0, 0.0, 0.0)
+    sphere.scale = (MIRROR_SIZE * height,) * 3
+    spots = objects(mask, "MIRROR_SPOT")
+    for ob in spots[len(dirs):]:
+        _delete(ob)
+    spots = spots[:len(dirs)]
+    while len(spots) < len(dirs):
+        data = bpy.data.lights.new(MIRROR + " Spot", "SPOT")
+        ob = bpy.data.objects.new(MIRROR + " Spot", data)
+        collection.objects.link(ob)
+        ob[P_LIGHT] = mask
+        ob[P_KIND] = "MIRROR_SPOT"
+        ob.hide_select = True
+        spots.append(ob)
+    power = MIRROR_POWER * height * height * max(settings.spot_energy, 0.0)
+    for k, (ob, way) in enumerate(zip(spots, dirs)):
+        ob.parent = pivot
+        ob.location = (0.0, 0.0, 0.0)
+        ob.rotation_mode = "QUATERNION"
+        ob.rotation_quaternion = way.to_track_quat("-Z", "Y")  # (as at the first frame, when the pivot is not turned)
+        data = ob.data
+        data.color = MIRROR_COLORS[k % len(MIRROR_COLORS)]
+        data.spot_size = 2.0 * MIRROR_HALF * 1.1
+        data.spot_blend = 0.05
+        data.shadow_soft_size = 0.002 * height
+        if hasattr(data, "use_shadow"):
+            data.use_shadow = False
+        _clear(data)
+        for f, level in ((first, 0.0), (first + 0.3 * fps, 1.0), (last - 0.3 * fps, 1.0), (last, 0.0)):
+            data.energy = power * level
+            data.keyframe_insert("energy", frame=f)
+        _linear(data)
+
+
 def _dimmed(mask=None):
     ids = list(bpy.data.lights) + list(bpy.data.worlds)
     return [i for i in ids if P_DIM in i and (mask is None or i.get(P_DIM_MASK) == mask)]

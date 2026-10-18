@@ -104,6 +104,13 @@ class FakeLayout:
     def operator_menu_enum(self, idname, prop, **kw):
         self.operator(idname, **kw)
 
+    def template_list(self, list_type, _list_id, data, name, active_data, active_name, **_kw):
+        if not hasattr(bpy.types, list_type):
+            self.errors.append("list " + list_type)
+        for owner, prop in ((data, name), (active_data, active_name)):
+            if prop not in owner.bl_rna.properties:
+                self.errors.append("prop " + prop)
+
     def operator(self, idname, **kw):
         self._icon(kw)
         module, name = idname.split(".")
@@ -120,6 +127,8 @@ def draw_panels(context):
     layout = FakeLayout()
     holder = type("PanelSelf", (), {"layout": layout})()
     for cls in ui.classes:
+        if not issubclass(cls, bpy.types.Panel):  # (the lists draw their items themselves)
+            continue
         if hasattr(cls, "draw_header"):
             cls.draw_header(holder, context)
         cls.draw(holder, context)
@@ -425,17 +434,17 @@ def strand_gaps(skeleton, ob):
     return np.linalg.norm(ends[1] - ends[0], axis=1)[first], length[first]
 
 
-def write_clicks(path, times, seconds, rate=44100):
-    """A WAV file with a kick-like click at each of `times` (seconds) over quiet noise."""
+def write_clicks(path, times, seconds, rate=44100, loud=None):
+    """A WAV file with a kick-like click at each of `times` (seconds) over quiet noise (each `loud` times as loud)."""
     rng = np.random.default_rng(3)
     data = rng.normal(0.0, 0.004, int(seconds * rate))
     k = np.arange(int(0.08 * rate))
     click = (0.8 * np.sin(2.0 * math.pi * 70.0 * k / rate) * np.exp(-k / (0.015 * rate))
              + rng.normal(0.0, 0.2, len(k)) * np.exp(-k / (0.004 * rate)))
-    for t in times:
+    for j, t in enumerate(times):
         i = int(t * rate)
         n = min(len(k), len(data) - i)
-        data[i:i + n] += click[:n]
+        data[i:i + n] += click[:n] * (loud[j] if loud is not None else 1.0)
     with wave.open(path, "wb") as out:
         out.setnchannels(1)
         out.setsampwidth(2)
@@ -2652,6 +2661,244 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.12 checks")
+
+    # --- 1.13: covers, pixels, the outfit as a screen, the stage gear, recolouring, many starting points, the music,
+    # the rising camera, growing, the outfits worn before the old one
+    from mmd_disperse import chain as outfit_chain, cover, grow, origins, pyro, tint  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "particles", "easing", "finale", "frame_start", "frame_end",
+        "trigger", "old_surface", "look_style", "cover_style", "stage_flames", "tint_style", "lights_out",
+        "shot_enable", "shot_style", "body_grow", "music_pace", "beat_sync", "beat_audio", "edge_glow",
+        "garment_order", "chain_pace", "chain_cut", "origins_style", "origins_count")}
+    had_beats = beats.beat_object() is not None
+    made_camera = None
+    if scene.camera is None:  # (the covers are fitted to its picture)
+        made_camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(made_camera)
+        made_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
+        made_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        scene.camera = made_camera
+    s.trigger, s.entrance, s.easing, s.exit_style, s.particles = "NONE", "SWAP", "LINEAR", "SHRINK", "NONE"
+    s.finale, s.path, s.old_surface, s.look_style, s.beat_sync = False, "SPHERE", "NONE", "NONE", False
+    s.frame_start, s.frame_end = 20, 80
+
+    # the covers: each has its pieces, fitted to where she is on the picture round the moment, gone with it off
+    for style in cover.STYLES[1:]:
+        s.cover_style = style
+        built = bpy.ops.mmd_disperse.build() == {"FINISHED"}
+        kinds = sorted({o.get(cover.P_KIND) for o in cover.objects(s.mask)})
+        check(built and kinds and cover.seen_of(s.mask) is not None,
+              "cover %s: %s, fitted to where she is on the picture" % (style, kinds))
+    check(not draw_panels(bpy.context), "panels draw with a cover")
+    s.cover_style = "NONE"
+    check(not cover.objects(s.mask), "cover off: its pieces gone")
+    # the pixelated look: a Pixelate node in the compositor round the moment
+    s.look_style = "PIXEL"
+    tree = compositor._existing_tree(scene)
+    pixel = [n for n in compositor._look_nodes(tree) if n.bl_idname == "CompositorNodePixelate"] if tree else []
+    check(len(pixel) >= 1, "pixelated look: Pixelate nodes in the compositor (%d: the picture and the dancer's matte)"
+          % len(pixel))
+    s.look_style = "NONE"
+    check(not compositor._look_nodes(tree), "pixelated look off")
+
+    # the old outfit as a screen
+    s.path, s.entrance = "SURFACE", "GROW"
+    for style in ("LED", "EPAPER"):
+        s.old_surface = style
+        built = bpy.ops.mmd_disperse.build() == {"FINISHED"}
+        styles = {sl.material.get(materials.P_SURFACE) for ob in base.meshes for sl in ob.material_slots
+                  if sl.material is not None}
+        check(built and style in styles, "the old outfit as a screen: %s" % style.lower())
+    s.old_surface = "NONE"
+
+    # the stage: flame jets with their light at the moment; the mirror ball's spots find where she changes
+    s.path, s.entrance, s.stage_flames = "SPHERE", "SWAP", True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with stage flames")
+    jets = [o for o in pyro.objects(s.mask) if str(o.get(pyro.P_KIND, "")).startswith("JET")]
+    check(len(jets) == len(pyro.JETS) and len(pyro.objects(s.mask, "LIGHT")) == 1,
+          "stage flames: %d jets and their light" % len(jets))
+    s.stage_flames = False
+    check(not pyro.objects(s.mask), "stage flames off")
+    s.path, s.entrance = "MIRROR", "GROW"
+    built = bpy.ops.mmd_disperse.build() == {"FINISHED"}
+    values = arrival_values(old_mesh)
+    spots = lights.objects(s.mask, "MIRROR_SPOT")
+    check(built and spots and lights.objects(s.mask, "MIRROR_BALL") and values is not None
+          and np.isfinite(values).all(), "mirror ball: %d spots, an arrival for every vertex" % len(spots))
+    check("OPEN" in motion.TRIGGERS and "OPEN" in motion.MOMENTS, "arms open is a moment to start on")
+
+    # recolouring: the tint in the old outfit's materials, driven by simple expressions; the copies of every era
+    s.path, s.entrance = "SPHERE", "SWAP"
+    for style in ("FACE", "TUG", "ERAS"):
+        s.tint_style = style
+        built = bpy.ops.mmd_disperse.build() == {"FINISHED"}
+        tinted = [sl.material for ob in base.meshes for sl in ob.material_slots
+                  if sl.material is not None and sl.material.get(materials.P_TINT)]
+        drivers = [d for m in tinted[:1] for d in (m.node_tree.animation_data.drivers
+                                                    if m.node_tree.animation_data else [])]
+        simple = all(d.driver.is_simple_expression and len(d.driver.expression) < 256 for d in drivers)
+        copies = tint.objects(s.mask)
+        check(built and tinted and simple and bool(copies) == (style == "ERAS") and (style == "ERAS" or drivers),
+              "recolour %s: %d materials, %d drivers (simple: %s), %d copies"
+              % (style, len(tinted), len(drivers), simple, len(copies)))
+        if style == "FACE":  # the colours change on the way to the moment, more and more often
+            node = tinted[0].node_tree.nodes[materials.TINT + " A"].outputs[0]
+            moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask[effect.P_WAVE]), s.mask))
+            seen = []
+            for f in np.linspace(moment - s.tint_length * scene.render.fps / scene.render.fps_base + 1, moment - 1, 6):
+                scene.frame_set(int(f))
+                seen.append(node.default_value)
+            check(all(b >= a for a, b in zip(seen, seen[1:])) and seen[-1] >= 3, "face change: %s" % seen)
+    s.tint_style = "NONE"
+    check(not tint.objects(s.mask) and not any(sl.material.get(materials.P_TINT) for ob in base.meshes
+                                               for sl in ob.material_slots if sl.material is not None),
+          "recolour off: the tint and the copies gone")
+
+    # many starting points: each lands at its own frame and the change spreads from it
+    s.path, s.entrance = "ORIGINS", "GROW"
+    for style in origins.STYLES:
+        s.origins_style = style
+        built = bpy.ops.mmd_disperse.build() == {"FINISHED"}
+        rec = origins.record(s.mask) or {}
+        lands = [effect._frame_at(s.mask, d) for d in rec.get("delay", [])]
+        values = arrival_values(old_mesh)
+        check(built and len(lands) == s.origins_count and None not in lands and lands == sorted(lands)
+              and origins.objects(s.mask) and values is not None and np.isfinite(values).all(),
+              "from many points (%s): %d points landing at %s" % (style, len(lands),
+                                                                   [round(f) for f in lands if f is not None]))
+    check(not draw_panels(bpy.context), "panels draw with many starting points")
+
+    # the music: its loudness kept with the beats; the change suggested where it surges after a quiet stretch; the
+    # front paced to it
+    song = os.path.join(tempfile.gettempdir(), "mmdd_song_113.wav")
+    times = [0.5 * i for i in range(48)]
+    write_clicks(song, times, 24.5, loud=[0.1 if 14.0 <= t < 18.0 else 1.0 for t in times])
+    s.beat_audio = song
+    check(bpy.ops.mmd_disperse.find_beats() == {"FINISHED"}, "beats and loudness found in a song")
+    fps = scene.render.fps / scene.render.fps_base
+    found = beats.suggest("MIDDLE")
+    check(found is not None and abs(found[0] - (scene.frame_start + 18.0 * fps)) <= 2.0,
+          "the change suggested on the first beat after the quiet bars (%s, want %.0f)"
+          % (found, scene.frame_start + 18.0 * fps))
+    check(bpy.ops.mmd_disperse.suggest_moment(where="START") == {"FINISHED"}, "suggest a moment near the start")
+    s.path, s.entrance, s.music_pace = "SPHERE", "GROW", True
+    s.frame_start, s.frame_end = 20, 80
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build paced to the music")
+    keys = effect._scale_curves(s.mask)[0].keyframe_points
+    radii = [k.co[1] for k in keys]
+    steps = np.diff(radii)
+    check(len(keys) > 10 and keys[0].co[0] == 20 and abs(keys[-1].co[0] - 80) <= 1.0 and steps.min() >= -1e-6
+          and steps.max() > 2.0 * max(steps.min(), 1e-9),
+          "paced to the music: %d keys from %d to %d, never going back, faster in the loud parts"
+          % (len(keys), keys[0].co[0], keys[-1].co[0]))
+    s.music_pace = False
+
+    # the rising reveal: the riding camera turns up the body with the change, garment by garment
+    s.path, s.garment_order, s.shot_enable, s.shot_style = "GARMENTS", "UP", True, "RISE"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build the rising reveal")
+    ride = next((o for o in camera_moves.shot_objects(s.mask) if o.get(camera_moves.P_ROLE) == "RIDE"), None)
+    turns = [fc for fc in (camera_moves._curves(ride) if ride is not None else []) if fc.data_path == "rotation_euler"]
+    marks = [m for m in scene.timeline_markers if m.name.startswith(camera_moves.MARKER)]
+    tilt = [fc for fc in turns if fc.array_index == 0]
+    up = tilt and tilt[0].keyframe_points[0].co[1] < max(k.co[1] for k in tilt[0].keyframe_points)
+    rise = effect._rise_heights(s, s.mask)
+    check(ride is not None and len(turns) == 3 and len(turns[0].keyframe_points) > 10 and len(marks) >= 2 and up,
+          "rising reveal: the camera turns up with the change (%d keys), the markers cut to it and back (camera %s, "
+          "rise %s, our cameras %s, markers %s; on %s %s, user %s, moment %s, focus %s)"
+          % (len(turns[0].keyframe_points) if turns else 0, scene.camera.name if scene.camera else None,
+             len(rise) if rise else rise, [o.get(camera_moves.P_ROLE) for o in camera_moves.shot_objects(s.mask)],
+             [(m.frame, m.camera.name if m.camera else None) for m in marks], s.shot_enable, s.shot_style,
+             camera_moves.user_camera(scene, s.mask), effect._big_frame(s, s.mask, float(s.mask[effect.P_WAVE])),
+             effect._focus(s.mask)))
+    s.shot_enable = False
+
+    # taller and stronger: drivers on the armature, gone with the effect
+    arm = base.armature
+    scale_before = tuple(arm.delta_scale)
+    s.path, s.body_grow = "SPHERE", 1.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build taller and stronger")
+    scene.frame_set(s.frame_start - 5)
+    early = arm.delta_scale[2]
+    scene.frame_set(s.frame_end + 40)
+    late = arm.delta_scale[2]
+    check(abs(early - scale_before[2]) < 1e-4 and abs(late - scale_before[2] * (1.0 + grow.TALLER)) < 1e-3,
+          "taller and stronger: %.4f -> %.4f" % (early, late))
+    s.body_grow = 0.0
+    driven = [d.data_path for d in (arm.animation_data.drivers if arm.animation_data else [])]
+    check(tuple(arm.delta_scale) == scale_before and "delta_scale" not in driven and arm.get(grow.P_GROW) is None,
+          "grow off: the armature as it was")
+
+    # the outfits worn before the old one: a copy of the new outfit's model worn until the cut, then the old one
+    copy_root = target_root.copy()
+    scene.collection.objects.link(copy_root)
+    copy_arm = target.armature.copy()
+    scene.collection.objects.link(copy_arm)
+    copy_arm.parent = copy_root
+    copies = []
+    for ob in target.meshes:
+        c = ob.copy()
+        c.data = ob.data.copy()
+        scene.collection.objects.link(c)
+        c.parent = copy_arm
+        for mod in list(c.modifiers):  # (a plain outfit: none of the effect's modifiers or marks)
+            if mod.type == "NODES":
+                c.modifiers.remove(mod)
+            elif mod.type == "ARMATURE":
+                mod.object = copy_arm
+        for key_ in [k for k in c.keys() if k.startswith("mmd_disperse")]:
+            del c[key_]
+        copies.append(c)
+    for c in list(copy_root.constraints):  # (the copy took the new outfit's follow constraint along)
+        copy_root.constraints.remove(c)
+    s.chain.clear()
+    s.chain.add().outfit = copy_root
+    s.chain_pace, s.chain_cut = "BAR", "FLASH"
+    s.frame_start, s.frame_end = 80, 140
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with an outfit before the old one")
+    cut = int(outfit_chain.cut_frames(s, 1)[0])
+    scene.frame_set(cut - 1)
+    before_cut = (evaluated_counts(copies[0]), evaluated_counts(old_mesh))
+    scene.frame_set(cut)
+    at_cut = (evaluated_counts(copies[0]), evaluated_counts(old_mesh))
+    card = [o for o in bpy.data.objects if o.get(outfit_chain.P_CARD) == s.mask]
+    bound = all(m.object == base.armature for c in copies for m in c.modifiers if m.type == "ARMATURE")
+    # (a mesh that does not share the old skeleton stays on its own armature, which copies the old pose bone by bone)
+    copying = copy_arm.name in list(s.mask.get(effect.P_FOLLOWERS, [])) and any(
+        con.name == effect.FOLLOW for pb in copy_arm.pose.bones for con in pb.constraints)
+    models = list(s.mask.get(outfit_chain.P_MODELS, []))
+    check(models == [copy_root.name] and (bound or copying) and card
+          and before_cut[0] > 0 and before_cut[1] == 0 and at_cut[0] == 0 and at_cut[1] > 0,
+          "outfit before the old one: worn until the cut at %d %s, then the old one %s, a card hides it "
+          "(%s, models %s, %d card)" % (cut, before_cut, at_cut, "bound" if bound else "copying the pose" if copying
+                                       else "not following", models, len(card)))
+    check(not draw_panels(bpy.context), "panels draw with the outfits before the old one")
+    bpy.ops.mmd_disperse.remove()
+    back = all(m.object == copy_arm for c in copies for m in c.modifiers if m.type == "ARMATURE")
+    back = back and not any(con.name == effect.FOLLOW for pb in copy_arm.pose.bones for con in pb.constraints)
+    check(back and not [c for c in copies if c.modifiers.get(outfit_chain.MOD)] and not copy_root.constraints
+          and not [o for o in bpy.data.objects if o.get(outfit_chain.P_CARD) is not None]
+          and not [o for o in base.meshes if o.modifiers.get(outfit_chain.MOD)],
+          "outfit chain removed with the effect: back on its own armature")
+    s.chain.clear()
+    for c in copies:
+        me = c.data
+        bpy.data.objects.remove(c)
+        bpy.data.meshes.remove(me)
+    bpy.data.objects.remove(copy_arm)
+    bpy.data.objects.remove(copy_root)
+
+    check(not draw_panels(bpy.context), "panels draw with the 1.13 options")
+    if made_camera is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    if had_beats and s.beat_audio:
+        bpy.ops.mmd_disperse.find_beats()
+    else:
+        beats.remove()
+    s.beat_sync = saved["beat_sync"]
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.13 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along

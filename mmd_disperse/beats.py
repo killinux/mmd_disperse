@@ -23,6 +23,9 @@ BEAT = "MMD Disperse Beat"
 P_BEATS = "mmd_disperse_beats"  # on the empty: how many beats
 P_SOURCE = "mmd_disperse_beat_source"  # ... where they came from
 P_FRAMES = "mmd_disperse_beat_frames"  # ... and the frames they are on
+P_LOUD = "mmd_disperse_loudness"  # ... the music's loudness frame by frame (1.13), from frame ...
+P_LOUD_START = "mmd_disperse_loudness_start"  # ... this one on
+BAR = 4  # beats in a bar
 DECAY = 3.0  # frames for the pulse to fade to a third
 MIN_GAP = 0.2  # seconds between two beats at least
 
@@ -73,6 +76,11 @@ def _loudness(data, hop):
 
 def find(path, fps, sensitivity=0.5):
     """Times (seconds) of the beats in the music file `path`."""
+    return analyse(path, fps, sensitivity)[0]
+
+
+def analyse(path, fps, sensitivity=0.5):
+    """(times (seconds) of the beats in the music file `path`, its loudness frame by frame from its start)."""
     try:
         import aud
     except ImportError as exc:  # pragma: no cover - Blender always has it
@@ -89,6 +97,7 @@ def find(path, fps, sensitivity=0.5):
     hop = max(1, int(round(rate / fps / 2.0)))
     step = hop / float(rate)
     loud = _loudness(full, hop) + 1.5 * _loudness(bass, hop)
+    frames = loud[:len(loud) // 2 * 2].reshape(-1, 2).mean(axis=1)  # (two windows a frame)
     rise = np.maximum(np.diff(loud, prepend=0.0), 0.0)  # (a loud start is a beat too)
     # compared with the rises within about a second around it
     window = max(3, int(round(1.0 / step)))
@@ -114,7 +123,7 @@ def find(path, fps, sensitivity=0.5):
         part = np.abs(full[i * hop:(i + 3) * hop])
         onset = int(np.argmax(part >= 0.5 * part.max())) if len(part) else 0
         times.append((i * hop + onset) / float(rate))
-    return times
+    return times, frames
 
 
 def _fcurves(ob):
@@ -152,8 +161,9 @@ def remove():
             bpy.data.actions.remove(action)
 
 
-def write(scene, times, start, source=""):
-    """The beat empty for beats at `times` (seconds) of music starting at frame `start`."""
+def write(scene, times, start, source="", loudness=None):
+    """The beat empty for beats at `times` (seconds) of music starting at frame `start` (and the music's `loudness`
+    frame by frame, for the pace of the front and the suggested moment)."""
     remove()
     fps = scene.render.fps / scene.render.fps_base
     ob = bpy.data.objects.new(BEAT, None)
@@ -176,6 +186,9 @@ def write(scene, times, start, source=""):
     ob[P_BEATS] = len(times)
     ob[P_SOURCE] = source
     ob[P_FRAMES] = [float(f) for f in beat_frames]
+    if loudness is not None and len(loudness):
+        ob[P_LOUD] = [float(v) for v in loudness]
+        ob[P_LOUD_START] = float(start)
     return ob
 
 
@@ -188,3 +201,69 @@ def beat_frames():
     """Frames of the beats found (whole frames, in order); empty when there are none."""
     ob = beat_object()
     return [float(f) for f in ob.get(P_FRAMES, ())] if ob is not None else []
+
+
+def loudness_at(frames):
+    """The music's loudness at `frames` (an array; the quietest level of the song outside it), or None without it."""
+    ob = beat_object()
+    track = ob.get(P_LOUD) if ob is not None else None
+    if not track:
+        return None
+    track = np.asarray(track, dtype=np.float64)
+    index = np.round(np.asarray(frames, dtype=np.float64) - float(ob.get(P_LOUD_START, 0.0))).astype(np.int64)
+    inside = (index >= 0) & (index < len(track))
+    return np.where(inside, track[np.clip(index, 0, len(track) - 1)], float(track.min()))
+
+
+SPANS = {"MIDDLE": (0.55, 0.8), "START": (0.03, 0.35), "END": (0.8, 0.97)}
+LATEST = 0.88  # the surge after the quiet bars mid-song no later than this share of the song
+
+
+def suggest(where="MIDDLE"):
+    """A frame to change on, from the beats and the loudness of the music: in the middle of the song (55-80% of it,
+    where idol games change), the first strong beat after the quietest two bars there whose bar is much louder; near
+    the start, the first bar much louder than the two before; near the end, the bar that rises most over the two
+    before. (frame, share of the song) or None without beats and loudness."""
+    ob = beat_object()
+    frames = beat_frames()
+    track = ob.get(P_LOUD) if ob is not None else None
+    if not track or len(frames) < 3 * BAR:
+        return None
+    first = float(ob.get(P_LOUD_START, 0.0))
+    length = float(len(track))
+    gap = float(np.median(np.diff(frames)))
+    # the bars every BAR beats from the first, each start put on the beat nearest to it (a beat missed in a quiet
+    # passage does not shift the bars after it)
+    beat = np.asarray(frames, dtype=np.float64)
+    starts = [float(beat[0])]
+    while starts[-1] + BAR * gap <= beat[-1] + 0.5 * gap:
+        want = starts[-1] + BAR * gap
+        near = float(beat[np.argmin(np.abs(beat - want))])
+        starts.append(near if abs(near - want) < 0.3 * gap else want)
+    bars = list(zip(starts, starts[1:] + [starts[-1] + BAR * gap]))
+    level = np.array([float(loudness_at(np.arange(a, max(b, a + 1))).mean()) for a, b in bars])
+    lo, hi = SPANS[where]
+    inside = [k for k, (a, _b) in enumerate(bars) if first + lo * length <= a <= first + hi * length]
+    if not inside:
+        return None
+    pick = None
+    if where == "MIDDLE":
+        pairs = [k for k in inside if k + 2 < len(bars)]
+        if pairs:
+            quiet = min(pairs, key=lambda k: level[k] + level[k + 1])
+            floor = 0.5 * (level[quiet] + level[quiet + 1])
+            loud = max(1.2 * floor, 0.9 * float(np.median(level)))
+            latest = first + LATEST * length
+            after = quiet + 2 if bars[quiet + 2][0] <= latest else quiet + 1
+            pick = next((j for j in range(quiet + 2, len(bars)) if level[j] >= loud and bars[j][0] <= latest), after)
+    else:
+        rises = [(level[j] / max(0.5 * (level[j - 1] + level[j - 2]), 1e-6), j) for j in inside if j >= 2]
+        if where == "START":
+            pick = next((j for ratio, j in rises if ratio >= 1.25), rises[0][1] if rises else inside[0])
+        else:
+            pick = max(rises)[1] if rises else inside[-1]
+    if pick is None:  # (too few bars after the quiet ones)
+        pick = inside[0]
+    frame = bars[pick][0]
+    return frame, (frame - first) / length
+

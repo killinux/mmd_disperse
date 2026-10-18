@@ -400,7 +400,8 @@ def update_streaks(scene, moment, fps):
 
 
 LOOK = "MMD Disperse Look"  # the Mix node that blends the look in; the look's other nodes are named LOOK + " ..."
-LOOK_STYLES = ("NONE", "SILHOUETTE", "ACCENT", "SONG")
+LOOK_STYLES = ("NONE", "SILHOUETTE", "ACCENT", "SONG", "PIXEL")
+PIXEL_SIZE = 0.045  # 1.13, the pixelated change: its blocks at their biggest, a share of the picture's width
 P_LOOK = "mmd_disperse_look"  # on the Mix node: what its nodes were made for
 INK = (0.07, 0.05, 0.04, 1.0)
 PAPER = (0.86, 0.76, 0.56, 1.0)  # the old painting's silk, yellowed ...
@@ -493,6 +494,37 @@ class _Look:
         """`matte` with the holes up to about `pixels` across filled (grown, then shrunk back)."""
         return self.dilated(self.dilated(matte, pixels), -pixels)
 
+    def pixelated(self, image, size):
+        """`image` in square blocks `size` pixels across (`size` a driver expression on the frame): the Pixelate node's
+        own size (4.x), its Size socket (5.0+), or, before, scaled down by it, pixelated and scaled back up."""
+        n = self.node("CompositorNodePixelate")
+        if hasattr(n, "pixel_size"):
+            self.feed(n.inputs[0], image)
+            _drive(n, "pixel_size", "max(%s, 1.0)" % size)
+            return n.outputs[0]
+        sock = n.inputs.get("Size")
+        if sock is not None:
+            self.feed(n.inputs[0], image)
+            _drive(sock, "default_value", "max(%s, 1.0)" % size)
+            return n.outputs[0]
+        down, up = self.node("CompositorNodeScale"), self.node("CompositorNodeScale")
+        for scale, expression in ((down, "1.0 / max(%s, 1.0)" % size), (up, "max(%s, 1.0)" % size)):
+            scale.space = "RELATIVE"
+            for name in ("X", "Y"):
+                _drive(scale.inputs[name], "default_value", expression)
+        self.feed(down.inputs[0], image)
+        self.feed(n.inputs[0], down.outputs[0])
+        self.feed(up.inputs[0], n.outputs[0])
+        return up.outputs[0]
+
+    def above(self, value, level):
+        """1 where `value` is above `level`, else 0."""
+        n = self.node("CompositorNodeMath" if hasattr(bpy.types, "CompositorNodeMath") else "ShaderNodeMath")
+        n.operation = "GREATER_THAN"
+        self.feed(n.inputs[0], value)
+        n.inputs[1].default_value = level
+        return n.outputs[0]
+
     def matte(self, scene, objects):
         """The coverage of `objects` in the picture (Cryptomatte, turned on for the view layer)."""
         layer = next((vl for vl in scene.view_layers if vl.use), scene.view_layers[0])
@@ -507,6 +539,22 @@ class _Look:
         n.matte_id = ",".join(ob.name for ob in objects)
         # (see-through parts can add up to more than full coverage in EEVEE Next: kept to 0 .. 1)
         return self.mix("MIX", 1.0, (0.0, 0.0, 0.0, 1.0), n.outputs["Matte"])
+
+
+def _drive(target, path, expression):
+    """A scripted driver on the frame on `path` of `target` (a node or a socket)."""
+    target.driver_remove(path)
+    driver = target.driver_add(path).driver
+    driver.type = "SCRIPTED"
+    driver.expression = expression
+
+
+def pixel_expression(peak, before, after, biggest):
+    """Driver expression on the frame: the pixelated change's block size in pixels, `biggest` at frame `peak`, 1 (none)
+    `before` frames before it and `after` frames after, smooth in between."""
+    # (a simple expression, which Blender runs without Python: no conditionals; the side the frame is on wins the max)
+    return ("max(1.0, {k:.1f} * smoothstep(0.0, 1.0, 1.0 - max(({p:.2f} - frame) / {b:.2f}, (frame - {p:.2f}) / "
+            "{a:.2f})))").format(k=biggest, p=peak, b=max(before, 1.0), a=max(after, 1.0))
 
 
 def _look_nodes(tree):
@@ -534,17 +582,21 @@ def look_expression(first, last):
     return "(frame >= {f}) * (frame < {l})".format(f=int(first), l=int(last))
 
 
-def update_look(scene, style, first, last, dancer=(), color=(1.0, 0.08, 0.03)):
+def update_look(scene, style, first, last, dancer=(), color=(1.0, 0.08, 0.03), peak=None):
     """Splice the look `style` into the compositor (or take it out with NONE), on from frame `first` to `last`:
     SILHOUETTE the `dancer` objects black with a white rim on a flat `color`; ACCENT the picture black and white but
     for the `dancer` objects; SONG an old Chinese painting: the `dancer` objects painted in ink on yellowed silk, ink
-    lines round them, a mounting and a red seal."""
+    lines round them, a mounting and a red seal; PIXEL (1.13) the `dancer` objects in big blocks of colour, biggest at
+    frame `peak` (the big moment)."""
     if style == "NONE" or first is None:
         remove_look(scene)
         return None
     render = scene.render
     key = "%s:%s:%s:%dx%d" % (style, ",".join(sorted(ob.name for ob in dancer)), ",".join("%.3f" % c for c in color),
                               render.resolution_x, render.resolution_y)
+    if style == "PIXEL":  # (its blocks are timed in its nodes' drivers: made anew when the timing changes)
+        peak = first + 0.4 * (last - first) if peak is None else peak
+        key += ":%d:%d:%.2f" % (first, last, peak)
     tree = _existing_tree(scene)
     node = tree.nodes.get(LOOK) if tree is not None else None
     if node is not None and node.get(P_LOOK) != key:
@@ -571,6 +623,12 @@ def update_look(scene, style, first, last, dancer=(), color=(1.0, 0.08, 0.03)):
             look = b.mix("ADD", b.edges(matte), shape, (1.0, 0.95, 0.85, 1.0))
         elif style == "ACCENT":
             look = b.mix("MIX", b.matte(scene, dancer), b.grey(source), source)
+        elif style == "PIXEL":  # the dancer in blocks (the matte in the same blocks, so they are whole)
+            size = pixel_expression(peak, peak - first, last - peak, PIXEL_SIZE * render.resolution_x)
+            blocks = b.pixelated(source, size)
+            # (a block she covers a good part of is all hers: solid blocks, as a censor's)
+            shape = b.above(b.grey(b.pixelated(b.matte(scene, dancer), size)), 0.3)
+            look = b.mix("MIX", shape, source, blocks)
         else:  # SONG: the dancer painted in ink on blank silk, ink lines round her
             pixels = max(2, int(round(0.004 * scene.render.resolution_x)))
             matte = b.closed(b.matte(scene, dancer), pixels)

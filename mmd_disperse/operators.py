@@ -1,7 +1,7 @@
 import bpy
 from bpy.props import EnumProperty
 
-from . import beats, compositor, effect, materials, presets
+from . import beats, compositor, effect, materials, model, presets
 
 
 class MMDDISPERSE_OT_assign(bpy.types.Operator):
@@ -182,21 +182,122 @@ class MMDDISPERSE_OT_find_beats(bpy.types.Operator):
         fps = scene.render.fps / scene.render.fps_base
         try:
             path, start = beats.music_source(scene, settings.beat_audio)
-            times = beats.find(path, fps, settings.beat_sensitivity)
+            times, loudness = beats.analyse(path, fps, settings.beat_sensitivity)
         except beats.BeatError as err:
             self.report({"ERROR"}, str(err))
             return {"CANCELLED"}
         if not times:
             self.report({"WARNING"}, "No beats found; try a higher sensitivity")
             return {"CANCELLED"}
-        beats.write(scene, times, start, path)
+        beats.write(scene, times, start, path, loudness)
         settings.beat_sync = True
+        if settings.music_pace and settings.mask is not None:  # the front's pace follows the music: build again
+            try:
+                effect.build(context, settings)
+            except effect.EffectError as err:
+                self.report({"ERROR"}, str(err))
+                return {"CANCELLED"}
         effect.sync(settings)
         if len(times) > 1:
             bpm = 60.0 * (len(times) - 1) / max(times[-1] - times[0], 1e-6)
             self.report({"INFO"}, "Found {} beats (about {:.0f} per minute)".format(len(times), bpm))
         else:
             self.report({"INFO"}, "Found 1 beat")
+        return {"FINISHED"}
+
+
+class MMDDISPERSE_OT_chain_add(bpy.types.Operator):
+    """Add an outfit worn before the old one: the selected model (when it is not the old or the new outfit), or an
+    empty slot to pick it in"""
+
+    bl_idname = "mmd_disperse.chain_add"
+    bl_label = "Add Outfit"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        s = context.scene.mmd_disperse
+        item = s.chain.add()
+        ob = context.active_object
+        if ob is not None and ob.type in {"EMPTY", "ARMATURE", "MESH"} and not ob.name.startswith(effect.MASK_NAME):
+            root = model.find_root(ob)
+            taken = {model.find_root(o) for o in (s.base, s.target) if o is not None}
+            if root not in taken:
+                item.outfit = root
+        s.chain_index = len(s.chain) - 1
+        return {"FINISHED"}
+
+
+class MMDDISPERSE_OT_chain_remove(bpy.types.Operator):
+    """Take the outfit off the list (build again to undress it)"""
+
+    bl_idname = "mmd_disperse.chain_remove"
+    bl_label = "Remove Outfit"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        s = context.scene.mmd_disperse
+        if 0 <= s.chain_index < len(s.chain):
+            s.chain.remove(s.chain_index)
+            s.chain_index = max(0, min(s.chain_index, len(s.chain) - 1))
+        return {"FINISHED"}
+
+
+class MMDDISPERSE_OT_chain_move(bpy.types.Operator):
+    """Wear the outfit earlier or later in the chain"""
+
+    bl_idname = "mmd_disperse.chain_move"
+    bl_label = "Move Outfit"
+    bl_options = {"REGISTER", "UNDO"}
+
+    way: bpy.props.EnumProperty(items=(("UP", "Up", "Earlier"), ("DOWN", "Down", "Later")), default="UP")
+
+    def execute(self, context):
+        s = context.scene.mmd_disperse
+        k = s.chain_index
+        to = k - 1 if self.way == "UP" else k + 1
+        if 0 <= k < len(s.chain) and 0 <= to < len(s.chain):
+            s.chain.move(k, to)
+            s.chain_index = to
+        return {"FINISHED"}
+
+
+class MMDDISPERSE_OT_suggest_moment(bpy.types.Operator):
+    """Move the start of the change to a moment the music suggests (from the beats and the loudness found with Find
+    Beats): in the middle of the song, near its start or near its end"""
+
+    bl_idname = "mmd_disperse.suggest_moment"
+    bl_label = "Suggest the Moment"
+    bl_options = {"REGISTER", "UNDO"}
+
+    where: bpy.props.EnumProperty(
+        name="Where",
+        items=(("MIDDLE", "Mid-Song", "55-80% into the song (where idol games change): the first strong beat after "
+                                      "the quietest two bars there, as the music surges"),
+               ("START", "Near the Start", "The first surge of the song, after the intro"),
+               ("END", "Near the End", "The biggest surge of the last part of the song")),
+        default="MIDDLE")
+
+    def execute(self, context):
+        settings = context.scene.mmd_disperse
+        found = beats.suggest(self.where)
+        if found is None:
+            self.report({"ERROR"}, "Find Beats first (the music has to be long enough)")
+            return {"CANCELLED"}
+        frame, share = found
+        scene = context.scene
+        fps = scene.render.fps / scene.render.fps_base
+        length = settings.frame_end - settings.frame_start
+        settings.frame_start = int(round(frame))
+        settings.frame_end = settings.frame_start + length
+        if settings.mask is not None:
+            try:
+                effect.build(context, settings)
+            except effect.EffectError as err:
+                self.report({"ERROR"}, str(err))
+                return {"CANCELLED"}
+        seconds = (frame - scene.frame_start) / fps
+        self.report({"INFO"}, "Starts at frame {} ({}:{:04.1f}, {:.0%} into the song)".format(
+            settings.frame_start, int(seconds // 60), seconds % 60, share))
         return {"FINISHED"}
 
 
@@ -253,6 +354,10 @@ classes = (
     MMDDISPERSE_OT_bloom,
     MMDDISPERSE_OT_glitch_fx,
     MMDDISPERSE_OT_find_beats,
+    MMDDISPERSE_OT_suggest_moment,
+    MMDDISPERSE_OT_chain_add,
+    MMDDISPERSE_OT_chain_remove,
+    MMDDISPERSE_OT_chain_move,
     MMDDISPERSE_OT_white_flash,
     MMDDISPERSE_OT_impact,
     MMDDISPERSE_OT_preset,

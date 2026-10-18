@@ -20,11 +20,14 @@ from . import arrival
 from .model import ORIGIN_BONES
 
 TRIGGERS = ("NONE", "CLAP", "KISS", "SALUTE", "FLIP", "TURN", "SQUAT", "JUMP", "LAND", "STEP", "RAISE", "HEART",
-            "WINK", "PULL", "GAZE")
+            "WINK", "PULL", "GAZE", "OPEN")
 # moves the front starts from (where they are made) ...
 GESTURES = ("CLAP", "KISS", "SALUTE", "FLIP", "STEP", "RAISE", "HEART", "WINK", "PULL", "GAZE")
 # ... and moves the big moment (the swap, or the middle of the wave) is put on
-MOMENTS = ("TURN", "SQUAT", "JUMP", "LAND")
+MOMENTS = ("TURN", "SQUAT", "JUMP", "LAND", "OPEN")
+OPEN_WIDE = 0.32  # 1.13: both wrists this far out from the body's middle (a share of the height), at about the chest
+OPEN_LOW = 0.06  # ... or higher (no more than this share below it), for OPEN_FRAMES frames: the arms flung open
+OPEN_FRAMES = 3
 ANKLES = arrival.LIMB_BONES[2:4]
 TOES = (("つま先ＩＫ.L", "左つま先ＩＫ", "つま先.L", "左つま先", "toe.L", "Toes_L", "LeftToeBase", "J_Bip_L_ToeBase"),
         ("つま先ＩＫ.R", "右つま先ＩＫ", "つま先.R", "右つま先", "toe.R", "Toes_R", "RightToeBase", "J_Bip_R_ToeBase"))
@@ -544,6 +547,23 @@ def _raise(track, height, fps):
     return best
 
 
+def _open(track, height, fps):
+    """Both arms flung open (a drag queen's reveal, opening her cape): both wrists OPEN_WIDE out from the body's middle
+    line and at about the chest's height or higher, for OPEN_FRAMES frames, after they were not; the first frame of
+    that."""
+    middle = track.chest if np.isfinite(track.chest).any() else track.hips
+    wide = np.ones(len(track.frames), dtype=bool)
+    for side in SIDES:
+        reach = np.linalg.norm(track.wrist[side][:, :2] - middle[:, :2], axis=1)
+        wide &= np.nan_to_num(reach) > OPEN_WIDE * height
+        wide &= track.wrist[side][:, 2] > middle[:, 2] - OPEN_LOW * height  # (False where either is unknown)
+    wide &= _settled(track, height, fps)
+    for start, end in _runs(wide):
+        if start > 0 and end - start + 1 >= OPEN_FRAMES:
+            return start, ("L", "R")
+    return None
+
+
 def _heart(track, height, fps):
     """A finger heart: the thumb and forefinger tips of a hand crossed above the chest, the forefinger about straight,
     the other fingers curled (or both hands making one: the forefinger tips together and the thumb tips together), for
@@ -665,6 +685,8 @@ def find(track, kind, height, fps):
         return _flip(track, height, fps)
     if kind == "TURN":
         return _turn(track)
+    if kind == "OPEN":
+        return _open(track, height, fps)
     return None
 
 

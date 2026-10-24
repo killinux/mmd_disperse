@@ -2942,7 +2942,7 @@ def run():
     supports = printer.objects(mask, "SUPPORTS")
     fps = scene.render.fps / scene.render.fps_base
     scene.frame_set(int(first) - 2)
-    before = evaluated_counts(lasers)
+    waiting = evaluated_counts(lasers)
     mid = int(round((first + last) / 2.0))
     scene.frame_set(mid)
     shooting = evaluated_counts(lasers)
@@ -2950,16 +2950,16 @@ def run():
     light_z = printer.objects(mask, "LIGHT")[0].matrix_world.translation.z
     standing = sum(evaluated_counts(o) for o in supports)
     scene.frame_set(int(last) + 3)
-    after = evaluated_counts(lasers)
+    stopped = evaluated_counts(lasers)
     gone_at = last + (printer.SNAP + printer.SNAP_SPREAD + printer.CRUMBLE) * fps + 2.0
     scene.frame_set(int(math.ceil(last + (printer.SNAP + 0.5 * printer.SNAP_SPREAD) * fps)))
     crumbling = sum(evaluated_counts(o) for o in supports)
     scene.frame_set(int(math.ceil(gone_at)))
     left = sum(evaluated_counts(o) for o in supports)
-    check(before == 0 and shooting > 0 and after == 0 and whole == len(new_mesh.data.vertices)
+    check(waiting == 0 and shooting > 0 and stopped == 0 and whole == len(new_mesh.data.vertices)
           and rec["lo"] < light_z < rec["lo"] + rec["height"],
           "laser heads shoot only while it prints (%d, %d, %d vertices), the twin is all of her (%d), the light on "
-          "the layer (%.2f)" % (before, shooting, after, whole, light_z))
+          "the layer (%.2f)" % (waiting, shooting, stopped, whole, light_z))
     check(rec["supports"] == 0 or (standing > 0 and crumbling > 0 and left == 0),
           "supports: %d found, printed (%d vertices half way), crumbling once it is done (%d), gone after (%d)"
           % (rec["supports"], standing, crumbling, left))

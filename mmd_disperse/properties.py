@@ -546,7 +546,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                            "it drops to the floor (落幕, the kabuki drop)"),
                ("SLOT", "Slot Machine", "A slot machine drops in front of her, its lever is pulled and the reels stop "
                                         "one by one on the beats: 7 7 7 as the outfits swap behind it, coins gush "
-                                        "out and it rises away (老虎机开奖)")),
+                                        "out and it rises away (老虎机开奖)"),
+               ("POLAROID", "Polaroid", "A polaroid shows up in her hand with her in it dancing in the new outfit "
+                                        "already; it flies at the camera, the outfits swap behind it and it tumbles "
+                                        "away: the girl in the photo comes to life (拍立得)")),
         default="NONE", update=_sync,
         description="Something covers the dancer at the big moment (the swap, or the new outfit complete) and the "
                     "change happens behind it. Building watches where she is on the picture round the moment, so "
@@ -648,6 +651,66 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                           "heights")
     totem_lead: FloatProperty(name="Swirl Time", default=2.0, min=0.0, soft_max=6.0, update=_sync,
                               description="Seconds the mist swirls round her before it gathers into the shape")
+
+    # --- 1.16: the ghost (ghost.py)
+    ghost_enable: BoolProperty(name="Ghost", default=False, update=_sync,
+                               description="She turns into a spirit while she changes: see-through from the feet up, "
+                                           "a rim of pale light flowing up her, mist sinking from under her feet and "
+                                           "a candle flickering by her; once the new outfit is complete her feet come "
+                                           "back solid (幽灵化; with Float Up she floats meanwhile and lands)")
+    ghost_color: FloatVectorProperty(name="Ghost Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(0.6, 0.78, 1.0), update=_sync,
+                                     description="Colour of the spirit's glow and of the mist")
+    ghost_alpha: FloatProperty(name="Solid", default=0.45, min=0.0, max=1.0, subtype="FACTOR", update=_sync,
+                               description="How solid she stays above the feet while she is a spirit")
+    ghost_glow: FloatProperty(name="Ghost Glow", default=1.0, min=0.0, soft_max=4.0, update=_sync,
+                              description="How bright the rim of light and the wisps flowing up her are")
+    ghost_mist: BoolProperty(name="Mist", default=True, update=_sync,
+                             description="Mist sinks and spreads from under her feet while she is a spirit")
+    ghost_light: BoolProperty(name="Candle", default=True, update=_sync,
+                              description="A candle-warm light flickers by her while she is a spirit")
+
+    # --- 1.16: the marionette (puppet.py)
+    puppet_enable: BoolProperty(name="Marionette", default=False, update=_sync,
+                                description="A wooden control bar comes down above her head and threads of light hook "
+                                            "her head, wrists and knees; the old outfit turns to porcelain, and on the "
+                                            "beats before the big moment the strings snap one by one, the last as the "
+                                            "outfits swap (人偶; with Float Up she hangs on them, with Time: On Twos "
+                                            "she dances like stop motion till the moment)")
+    puppet_color: FloatVectorProperty(name="String Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                      default=(1.0, 0.82, 0.55), update=_sync,
+                                      description="Colour of the strings' light")
+
+    # --- 1.16: the shadow play (shadowplay.py)
+    shadow_enable: BoolProperty(name="Flat Figure", default=False, update=_sync,
+                                description="A glowing screen stands behind her and she is pressed flat onto it as a "
+                                            "shadow-play figure (dyed leather lit from behind, flowers cut out of it, "
+                                            "rods on her hands); the outfits swap in that state, then the screen rises "
+                                            "and she steps out of it (皮影; with Time: On Twos she moves like a puppet)")
+    shadow_style: EnumProperty(
+        name="Figure",
+        items=(("SHADOW", "Shadow Play", "Dyed leather lit from behind a glowing screen, flowers cut out of it, rods on "
+                                         "her hands (皮影)"),
+               ("PAINTING", "Into the Painting", "Oil paint on a canvas in a gilded frame, then she steps out of it "
+                                                 "(画中人活过来)")),
+        default="SHADOW", update=_sync,
+        description="What she is pressed into")
+    shadow_color: FloatVectorProperty(name="Lamp Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                      default=(1.0, 0.82, 0.55), update=_sync,
+                                      description="Colour of the lamp behind the screen")
+    # --- 1.16: the mirror first (mirror.py)
+    mirror_enable: BoolProperty(name="Mirror First", default=False, update=_sync,
+                                description="A tall mirror in a gilded frame stands beside her and her reflection "
+                                            "dances along; a little before the big moment the glass flashes and the "
+                                            "reflection wears the new outfit already, then she changes to match "
+                                            "(倒影先换, The Little Mermaid's mirror)")
+    mirror_length: FloatProperty(name="Mirror Time", default=2.8, min=0.5, soft_max=10.0, update=_sync,
+                                 description="Seconds before the big moment the mirror stands up beside her")
+    mirror_first: FloatProperty(name="Reflection Ahead", default=0.9, min=0.0, soft_max=4.0, update=_sync,
+                                description="Seconds before the big moment the reflection changes")
+    shadow_length: FloatProperty(name="Shadow Time", default=2.5, min=0.2, soft_max=10.0, update=_sync,
+                                 description="Seconds before the big moment she is pressed onto the screen (or from "
+                                             "the start of the transformation, when that is later)")
 
     # --- 1.11: the camera and time at the big moment
     shot_enable: BoolProperty(name="Camera Move", default=False, update=_sync,

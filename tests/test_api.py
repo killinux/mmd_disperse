@@ -3252,6 +3252,185 @@ def run():
           % (stand_in.noise_amount, stand_in.edge_push))
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.15 checks")
 
+    # --- 1.16: the ghost, the marionette, the shadow play and the painting, the mirror first
+    from mmd_disperse import ghost as ghost_mod, mirror as mirror_mod, puppet as puppet_mod  # noqa: E402
+    from mmd_disperse import shadowplay, timewarp  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "float_up", "float_height", "time_warp", "warp_length", "ghost_enable", "ghost_mist",
+        "ghost_light", "puppet_enable", "shadow_enable", "shadow_style", "shadow_length", "mirror_enable",
+        "mirror_length", "mirror_first")}
+    made_camera = None
+    if scene.camera is None:  # (the shadow play and the mirror turn to it)
+        made_camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(made_camera)
+        made_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
+        made_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        scene.camera = made_camera
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+
+    def moment_of():
+        return effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+
+    def outfit_materials(model):
+        return {sl.material for ob in model.meshes for sl in ob.material_slots
+                if sl.material is not None and sl.material.node_tree is not None}
+
+    def node_value(mat, name):
+        return mat.node_tree.nodes[name].outputs[0].default_value
+
+    # the ghost: see-through from the feet up while she is a spirit, floating, the mist and the candle
+    s.float_up, s.float_height = True, 0.1
+    s.ghost_enable, s.ghost_mist, s.ghost_light = True, True, True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the ghost")
+    moment = moment_of()
+    start = effect._frame_at(s.mask, 0.0)
+    both = outfit_materials(base) | outfit_materials(target)
+    spirits = [mm for mm in bpy.data.materials if mm.get(materials.P_GHOST)]
+    drivers = [d for mm in spirits for d in (mm.node_tree.animation_data.drivers if mm.node_tree.animation_data else [])]
+    one = next(iter(sorted(spirits, key=lambda mm: mm.name)), None)
+    seen_on, seen_feet = [], []
+    for f_ in (start - ghost_mod.IN * fps - 3, 0.5 * (start + moment), moment + (ghost_mod.AFTER + ghost_mod.OUT) * fps + 3):
+        scene.frame_set(int(round(f_)))
+        seen_on.append(round(node_value(one, materials.GHOST + " On"), 2) if one else -1.0)
+        seen_feet.append(node_value(one, materials.GHOST + " Feet") if one else 0.0)
+    mist = next(iter(ghost_mod.objects(s.mask, "MIST")), None)
+    candle = next(iter(ghost_mod.objects(s.mask, "CANDLE")), None)
+    scene.frame_set(int(round(0.5 * (start + moment))))
+    lit = candle.data.energy if candle else 0.0
+    puffs = evaluated_counts(mist) if mist else 0
+    check(set(spirits) == both and drivers and all(d.driver.is_valid and d.driver.is_simple_expression for d in drivers)
+          and seen_on == [0.0, 1.0, 0.0] and seen_feet[1] > seen_feet[0] + 0.05 * height and puffs > 0 and lit > 0.0,
+          "ghost: every material of both outfits a spirit (by simple expressions) while she changes (%s), her feet "
+          "lifted with the float, the mist sinking (%d), the candle lit" % (seen_on, puffs))
+    check(not draw_panels(bpy.context), "panels draw with the ghost")
+    s.ghost_enable = False
+    check(not [mm for mm in bpy.data.materials if mm.get(materials.P_GHOST) or mm.get(materials.P_GHOST_BLEND)]
+          and not ghost_mod.objects(s.mask), "ghost off: the spirit look out of the materials, the mist and candle gone")
+    s.float_up = False
+    # the marionette: the bar, its strings snapping one by one up to the moment, porcelain on the old outfit only
+    s.puppet_enable, s.time_warp, s.warp_length = True, "TWOS", 2.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the marionette")
+    moment = moment_of()
+    snaps_ = puppet_mod.snaps(moment, [], fps)
+    kinds = sorted(o.get(puppet_mod.P_KIND) for o in puppet_mod.objects(s.mask))
+    porcelain = {mm for mm in bpy.data.materials if mm.get(materials.P_PORCELAIN)}
+    strings = next(iter(puppet_mod.objects(s.mask, "STRINGS")), None)
+
+    def string_area():
+        ev = strings.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        me_ = ev.to_mesh()
+        area = sum(p.area for p in me_.polygons)
+        ev.to_mesh_clear()
+        return area
+
+    scene.frame_set(int(snaps_[0]) - 2)
+    hanging = string_area()
+    scene.frame_set(int(math.ceil(moment + (puppet_mod.WHIP + puppet_mod.AWAY[1]) * fps)) + 2)
+    snapped = string_area()
+    locked_mats = [mm for mm in porcelain if dimension._locked(s, mm)]
+    scene.frame_set(int(math.ceil(moment)) + 1)
+    turned_back = all(node_value(mm, materials.PORCELAIN + " On") < 0.01 for mm in locked_mats)
+    time_keys, _speeds = timewarp.keys_for("TWOS", int(moment), s.warp_length, fps, before=True)
+    parts_ = {"objects": kinds == ["BAR", "HOOK_0", "HOOK_1", "HOOK_2", "HOOK_3", "HOOK_4", "STRINGS"],
+              "porcelain": bool(porcelain) and porcelain <= outfit_materials(base)
+              and not porcelain & outfit_materials(target),
+              "snaps": abs(snaps_[-1] - moment) < 0.5 and all(b_ > a_ for a_, b_ in zip(snaps_, snaps_[1:])),
+              "strings": hanging > 0.0 and snapped < 1e-5 * hanging, "head back": turned_back,
+              "twos": max(f_ for f_, _v, _i in time_keys) <= moment + 1}
+    check(all(parts_.values()), "marionette: the bar, five strings snapping up to the moment (%s; %.4f then %.6f), "
+                                "porcelain on the old outfit, her head and hair back at the moment, on twos only "
+                                "before it (%s)" % ([round(x_, 1) for x_ in snaps_], hanging, snapped,
+                                                    [k_ for k_, ok_ in parts_.items() if not ok_] or "all"))
+    check(not draw_panels(bpy.context), "panels draw with the marionette")
+    s.puppet_enable, s.time_warp = False, "NONE"
+    check(not puppet_mod.objects(s.mask) and not [mm for mm in bpy.data.materials if mm.get(materials.P_PORCELAIN)],
+          "marionette off: its bar, strings and porcelain gone")
+    # the shadow play and the painting: pressed flat onto the plane, leather or oil paint, out again after the moment
+    for style in ("SHADOW", "PAINTING"):
+        s.shadow_enable, s.shadow_style, s.shadow_length = True, style, 1.5
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the %s" % style.lower())
+        moment = moment_of()
+        meshes_ = base.meshes + target.meshes
+        mods = [ob.modifiers.get(shadowplay.MOD) for ob in meshes_]
+        plane = next(iter(shadowplay.objects(s.mask, "PLANE")), None)
+        normal = plane.matrix_world.to_3x3().normalized() @ Vector((0.0, 1.0, 0.0)) if plane else Vector()
+        scene.frame_set(int(round(moment - 0.5 * s.shadow_length * fps)))
+        ev = base.meshes[0].evaluated_get(bpy.context.evaluated_depsgraph_get())
+        me_ = ev.to_mesh()
+        depths = [(base.meshes[0].matrix_world @ v.co).dot(normal) for v in me_.vertices]
+        ev.to_mesh_clear()
+        flat_depth = (max(depths) - min(depths)) if depths else -1.0
+        look = materials.P_OIL if style == "PAINTING" else materials.P_LEATHER
+        dressed = {mm for mm in bpy.data.materials if mm.get(look)}
+        kinds = sorted(o.get(shadowplay.P_KIND) for o in shadowplay.objects(s.mask))
+        want = ["CANVAS", "FRAME", "PLANE"] if style == "PAINTING" else ["HOOK_L", "HOOK_R", "PLANE", "RODS", "SCREEN"]
+        check(all(mod is not None and ob.modifiers[-1] == mod for ob, mod in zip(meshes_, mods))
+              and 0.0 <= flat_depth < 0.01 * height and dressed == outfit_materials(base) | outfit_materials(target)
+              and kinds == want,
+              "%s: both outfits pressed flat (%.4f model heights deep), every material %s, %s"
+              % (style.lower(), flat_depth / height, "oil paint" if style == "PAINTING" else "leather", kinds))
+    check(not draw_panels(bpy.context), "panels draw with the shadow play")
+    s.shadow_enable = False
+    check(not shadowplay.objects(s.mask) and not any(ob.modifiers.get(shadowplay.MOD) for ob in base.meshes + target.meshes)
+          and not [mm for mm in bpy.data.materials if mm.get(materials.P_LEATHER) or mm.get(materials.P_OIL)],
+          "shadow play off: the modifiers, the screen, the frame and the looks gone")
+    # the mirror first: her reflection in the old outfit, then in the new one before she changes, behind the glass
+    s.mirror_enable, s.mirror_length, s.mirror_first = True, 2.0, 0.8
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the mirror first")
+    moment = moment_of()
+    copies = {o.get(mirror_mod.P_OUTFIT): o for o in mirror_mod.objects(s.mask, "REFLECTION")}
+    glass = next(iter(mirror_mod.objects(s.mask, "GLASS")), None)
+    shown = []
+    behind_ok = True
+    for f_ in (moment - 1.5 * fps, moment - 0.3 * fps):
+        scene.frame_set(int(round(f_)))
+        shown.append(sorted(k_ for k_, o in copies.items() if evaluated_counts(o) > 0))
+        front_ = glass.matrix_world.to_3x3().normalized() @ Vector((0.0, -1.0, 0.0))
+        for o in copies.values():
+            ev = o.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            me_ = ev.to_mesh()
+            if any((o.matrix_world @ v.co - glass.matrix_world.translation).dot(front_) > 1e-4 * height
+                   for v in me_.vertices):
+                behind_ok = False
+            ev.to_mesh_clear()
+    check(shown == [["OLD"], ["NEW"]] and behind_ok,
+          "mirror first: her reflection in the old outfit, then the new one before she changes (%s), all of it "
+          "behind the glass" % shown)
+    check(not draw_panels(bpy.context), "panels draw with the mirror")
+    s.mirror_enable = False
+    check(not mirror_mod.objects(s.mask), "mirror off: the glass, the frame, the twins and the reflections gone")
+    # the polaroid: in her hand she is in it, small, in the new outfit, on the photo and in front of it
+    from mmd_disperse import photo as photo_mod  # noqa: E402
+    s.cover_style = "POLAROID"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the polaroid")
+    moment = moment_of()
+    figures = cover.objects(s.mask, "PHOTO_FIGURE")
+    scene.frame_set(int(round(moment - 0.5 * (photo_mod.IN + photo_mod.FLY) * fps)))
+    inside, total = True, 0
+    for o in figures:
+        ev = o.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        me_ = ev.to_mesh()
+        for v in me_.vertices:
+            total += 1
+            if (abs(v.co.x - photo_mod.PHOTO[2]) > 0.5 * photo_mod.PHOTO[0] + 1e-4
+                    or abs(v.co.y - photo_mod.PHOTO[3]) > 0.5 * photo_mod.PHOTO[1] + 1e-4 or v.co.z < 0.0006):
+                inside = False
+        ev.to_mesh_clear()
+    check(figures and total > 0 and inside and len(figures) == len(target.meshes),
+          "polaroid: the new outfit in the photo in her hand (%d points), all on the photo and in front of it" % total)
+    s.cover_style = "NONE"
+    check(not cover.objects(s.mask), "polaroid off: the card, the figure and the twins gone")
+    if made_camera is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.16 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

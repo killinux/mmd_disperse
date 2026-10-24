@@ -76,9 +76,10 @@ def rewind_frames(moment, start, length, fps):
     return (a, b, c, d), (back, end)
 
 
-def keys_for(kind, moment, length, fps, start=None):
+def keys_for(kind, moment, length, fps, start=None, before=False):
     """(time keys [(scene frame, action frame, interpolation)], speed keys [(frame, rigid body speed factor)]) of the
-    warp `kind` round frame `moment`, lasting `length` seconds (REWIND: the transformation starting at `start`)."""
+    warp `kind` round frame `moment`, lasting `length` seconds (REWIND: the transformation starting at `start`; TWOS
+    `before`: all of it before the moment, as the marionette hangs on its strings)."""
     span = max(int(round(length * fps)), 2)
     if kind == "REWIND":  # on, back like a tape, again slowly, fast forward
         (a, b, c, d), (back, end) = rewind_frames(moment, moment if start is None else start, length, fps)
@@ -100,7 +101,7 @@ def keys_for(kind, moment, length, fps, start=None):
         time = [(a - 1, a - 1), (a, a), (b, reached), (c, c), (c + 1, c + 1)]
         return [(f, v, "LINEAR") for f, v in time], [(a, slow), (b, (c - reached) / float(c - b)), (c, 1.0)]
     # TWOS: every pose held for two frames over the span round the moment, as in stop motion
-    a = moment - span // 2
+    a = moment - (span if before else span // 2)
     b = a + span
     time = [(a - 1, a - 1, "LINEAR")] + [(f, f, "CONSTANT") for f in range(a, b, 2)] + [(b, b, "LINEAR"),
                                                                                          (b + 1, b + 1, "LINEAR")]
@@ -229,14 +230,16 @@ def sync(settings, mask, models, moment, hold=None):
         restore(mask, scene)
         return 0
     fps = scene.render.fps / scene.render.fps_base
-    key = "%s:%s:%.3f:%.3f:%s:%d" % (kind, int(moment) if moment is not None else -1, settings.warp_length, fps,
-                                     "%d,%d" % (int(hold[0]), int(hold[1])) if hold is not None else "-",
-                                     settings.frame_start)
+    before = bool(getattr(settings, "puppet_enable", False) or getattr(settings, "shadow_enable", False))  # (1.16:
+    # on twos while she hangs on the strings or is a figure of the shadow play, not after)
+    key = "%s:%s:%.3f:%.3f:%s:%d:%d" % (kind, int(moment) if moment is not None else -1, settings.warp_length, fps,
+                                        "%d,%d" % (int(hold[0]), int(hold[1])) if hold is not None else "-",
+                                        settings.frame_start, before)
     if mask.get(P_KEY) == key and _warped(mask):
         return len(_warped(mask))
     restore(mask, scene)
     time, speeds = keys_for(kind, int(moment), settings.warp_length, fps,
-                            settings.frame_start) if kind != "NONE" else ([], [])
+                            settings.frame_start, before) if kind != "NONE" else ([], [])
     held, held_speeds = [], []
     if hold is not None:
         first = int(hold[0])

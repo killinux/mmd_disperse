@@ -71,9 +71,19 @@ PRINT = "MMDD Print"  # 1.14 (printer.py): the newest layers of the print glowin
 P_PRINT = "mmd_disperse_print"
 REAL = "MMDD Real"  # 1.14 (dimension.py): the realistic look, a Principled BSDF made from the MMD material
 P_REAL = "mmd_disperse_real"
-_CHAIN = ((REAL + " Mix", 1), (SURFACE + " Mix", 1), (LAYER + " Mix", 1), (PAINT + " Mix", 1), (TINT + " Mix", 1),
+PORCELAIN = "MMDD Porcelain"  # 1.16 (puppet.py): the marionette's old outfit turned to white porcelain
+P_PORCELAIN = "mmd_disperse_porcelain"
+LEATHER = "MMDD Leather"  # 1.16 (shadowplay.py): pressed flat, dyed leather lit from behind, flowers cut out
+P_LEATHER = "mmd_disperse_leather"
+P_LEATHER_BLEND = "mmd_disperse_leather_blend"  # blend mode to put back (Hashed before 4.2)
+OIL = "MMDD Oil"  # 1.16 (shadowplay.py, into the painting): pressed flat, painted in oils on the canvas
+P_OIL = "mmd_disperse_oil"
+GHOST = "MMDD Ghost"  # 1.16 (ghost.py): she turns see-through from the feet up, a rim of light flowing up her
+P_GHOST = "mmd_disperse_ghost"
+P_GHOST_BLEND = "mmd_disperse_ghost_blend"  # blend mode to put back once the ghost is gone (Hashed before 4.2)
+_CHAIN = ((REAL + " Mix", 1), (PORCELAIN + " Mix", 1), (LEATHER + " Mix", 1), (OIL + " Mix", 1), (SURFACE + " Mix", 1), (LAYER + " Mix", 1), (PAINT + " Mix", 1), (TINT + " Mix", 1),
           (INNER + " Mix", 1), (HOLO + " Mix", 1),
-          (HUSK + " Mix", 1), (GLOW + " Add", 0), (PRINT + " Add", 0), (SHADOW + " Mix", 1))
+          (HUSK + " Mix", 1), (GLOW + " Add", 0), (PRINT + " Add", 0), (GHOST + " Mix", 1), (SHADOW + " Mix", 1))
 
 
 def _set_input(node, names, value):
@@ -5304,6 +5314,160 @@ def _cover_mist(name):
     return mat
 
 
+def _cover_ghost_mist(name):
+    """The ghost's mist (GHOST_MIST, ghost.py, on the cover pieces group): soft puffs of light in mmdd_color (the
+    object's), brightest in their middle, coming up and fading out over their life (mmdd_age); it adds light."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    tint = s.attribute("mmdd_color", -1400, 300, "OBJECT").outputs["Color"]
+    age = s.attribute("mmdd_age", -1400, -400).outputs[2]
+    life = m("MULTIPLY", m("MULTIPLY", age, m("SUBTRACT", 1.0, age, x=-1200, y=-500), x=-1000, y=-400), 4.0, x=-800,
+             y=-400)
+    facing = s.node("ShaderNodeLayerWeight", -1400, 0)
+    facing.inputs["Blend"].default_value = 0.5
+    core = m("POWER", m("SUBTRACT", 1.0, facing.outputs["Facing"], x=-1200, y=0), 2.5, x=-1000, y=0)
+    glow = s.emission(tint, m("MULTIPLY", m("MULTIPLY", core, life, x=-800, y=-100), 0.12, x=-600, y=-100), -300, 100)
+    add = s.node("ShaderNodeAddShader", 0, 0)
+    nt.links.new(s.node("ShaderNodeBsdfTransparent", -300, -100).outputs[0], add.inputs[0])
+    nt.links.new(glow, add.inputs[1])
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    if hasattr(mat, "use_backface_culling"):
+        mat.use_backface_culling = True
+    mat.diffuse_color = (0.6, 0.75, 1.0, 0.3)
+    return mat
+
+
+def _cover_puppet_bar(name):
+    """The marionette's control bar (PUPPET_BAR): dark lacquered wood with gold caps where the strings hang
+    (mmdd_gold: the mesh's own attribute, 1 on the caps)."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    gold = s.attribute("mmdd_gold", -1000, -200).outputs[2]
+    grain = s.noise(s.combine(s.math("MULTIPLY", s.split(s.node("ShaderNodeTexCoord", -1400, 200).outputs["Object"],
+                                                          -1200, 200)[0], 40.0, x=-1000, y=300), 0.0, 0.0, -800, 200),
+                    1.0, 4.0, -600, 200)
+    wood = s.lerp((0.12, 0.05, 0.025), (0.28, 0.12, 0.05), grain, -400, 300)
+    color = s.lerp(wood, (1.0, 0.72, 0.3), gold, -200, 200)
+    nt.links.new(s.principled(100, 200, color=color, roughness=s.math("MULTIPLY_ADD", gold, -0.3, 0.45, x=-200,
+                                                                         y=-100),
+                              metallic=gold), out.inputs["Surface"])
+    mat.diffuse_color = (0.2, 0.09, 0.04, 1.0)
+    return mat
+
+
+def _cover_puppet_string(name):
+    """The marionette's strings (PUPPET_STRING): fine threads of light in mmdd_color (the object's)."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    tint = s.attribute("mmdd_color", -600, 200, "OBJECT").outputs["Color"]
+    nt.links.new(s.emission(s.lerp(tint, (1.0, 1.0, 1.0), 0.35, -400, 200), 6.0, -100, 200), out.inputs["Surface"])
+    _no_shadow(mat)
+    mat.diffuse_color = (1.0, 0.9, 0.7, 1.0)
+    return mat
+
+
+def _cover_screen(name):
+    """The shadow play's screen (SCREEN): a sheet glowing with the lamp behind it in mmdd_color (the object's),
+    brightest in its middle, the cloth's weave faintly in it; a dark wooden border (mmdd_frame)."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    tint = s.attribute("mmdd_color", -1400, 300, "OBJECT").outputs["Color"]
+    frame = s.attribute("mmdd_frame", -1400, -500).outputs[2]
+    uv = s.node("ShaderNodeTexCoord", -1600, 0).outputs["UV"]
+    u, v, _w = s.split(uv, -1400, 0)
+    du, dv = m("SUBTRACT", u, 0.5, x=-1200, y=0), m("SUBTRACT", v, 0.45, x=-1200, y=-150)
+    middle = m("SUBTRACT", 1.0, m("MULTIPLY", m("ADD", m("MULTIPLY", du, du, x=-1000, y=0), m("MULTIPLY", dv, dv,
+                                                                                              x=-1000, y=-150),
+                                                x=-800, y=-50), 1.6, x=-600, y=-50), x=-400, y=-50, clamp=True)
+    weave = s.noise(s.vmath("MULTIPLY", uv, (120.0, 120.0, 1.0), x=-1200, y=-300), 1.0, 1.0, -1000, -300)
+    light = m("MULTIPLY", m("MULTIPLY_ADD", middle, 2.2, 0.6, x=-200, y=-50), m("MULTIPLY_ADD", weave, 0.15, 0.92,
+                                                                               x=-800, y=-300), x=0, y=-100)
+    glow = s.emission(tint, light, 300, 100)
+    wood = s.principled(300, -300, color=(0.09, 0.04, 0.02), roughness=0.6)
+    nt.links.new(s.mix_shader(frame, glow, wood, 600, 0), out.inputs["Surface"])
+    mat.diffuse_color = (1.0, 0.85, 0.6, 1.0)
+    return mat
+
+
+def _cover_rod(name):
+    """The shadow play's rods (ROD): thin dark bamboo."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    nt.links.new(s.principled(-200, 100, color=(0.05, 0.035, 0.02), roughness=0.5), out.inputs["Surface"])
+    mat.diffuse_color = (0.05, 0.035, 0.02, 1.0)
+    return mat
+
+
+def _cover_oil_canvas(name):
+    """The painting's canvas behind her (OIL_CANVAS): a dark warm ground laid on in broad strokes, lighter in its
+    middle, under varnish."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    uv = s.node("ShaderNodeTexCoord", -1600, 0).outputs["UV"]
+    u, v, _w = s.split(uv, -1400, 0)
+    strokes = s.noise(s.combine(m("MULTIPLY", u, 9.0, x=-1200, y=0), m("MULTIPLY", v, 2.5, x=-1200, y=-150), 0.0,
+                                -1000, 0), 1.0, 6.0, -800, 0)
+    du, dv = m("SUBTRACT", u, 0.5, x=-1200, y=-300), m("SUBTRACT", v, 0.55, x=-1200, y=-450)
+    middle = m("SUBTRACT", 1.0, m("MULTIPLY", m("ADD", m("MULTIPLY", du, du, x=-1000, y=-300), m("MULTIPLY", dv, dv,
+                                                                                                 x=-1000, y=-450),
+                                                x=-800, y=-350), 2.2, x=-600, y=-350), x=-400, y=-350, clamp=True)
+    ground = s.ramp(m("ADD", m("MULTIPLY", strokes, 0.6, x=-600, y=0), m("MULTIPLY", middle, 0.5, x=-400, y=-200),
+                      x=-200, y=-100), ((0.0, (0.03, 0.035, 0.025)), (0.5, (0.12, 0.09, 0.05)),
+                                        (1.0, (0.32, 0.22, 0.11))), 0, 0)
+    nt.links.new(s.principled(300, 100, color=ground, roughness=0.4), out.inputs["Surface"])
+    mat.diffuse_color = (0.12, 0.09, 0.05, 1.0)
+    return mat
+
+
+def _cover_mirror_glass(name):
+    """The mirror's glass (MIRROR_GLASS): clear with a faint blue cast, catching the light at a glance (a sheen where it
+    turns away), a soft bright streak across it, flashing white with mmdd_flash (the object's) as the reflection
+    changes."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    flash = s.attribute("mmdd_flash", -1400, -400, "OBJECT").outputs[2]
+    u, v, _w = s.split(s.node("ShaderNodeTexCoord", -1600, 0).outputs["UV"], -1400, 0)
+    streak = m("SUBTRACT", 1.0, s.smooth(m("ABSOLUTE", m("SUBTRACT", m("ADD", u, m("MULTIPLY", v, 0.6, x=-1200, y=-100),
+                                                                      x=-1000, y=0), 0.75, x=-800, y=0), x=-600, y=0),
+                                         0.0, 0.08, -400, 0), x=-200, y=0)
+    sheen = s.node("ShaderNodeLayerWeight", -800, -250)
+    sheen.inputs["Blend"].default_value = 0.2
+    light = m("ADD", m("ADD", m("MULTIPLY", streak, 0.25, x=0, y=0), m("MULTIPLY", sheen.outputs["Facing"], 0.35,
+                                                                        x=-600, y=-250), x=200, y=-100),
+              m("MULTIPLY", flash, 3.0, x=0, y=-400), x=400, y=-200)
+    glow = s.emission(s.lerp((0.75, 0.85, 1.0), (1.0, 1.0, 1.0), flash, 200, 200), light, 500, 200)
+    add = s.node("ShaderNodeAddShader", 900, 0)  # (it adds light: the reflection behind it shows through)
+    nt.links.new(s.node("ShaderNodeBsdfTransparent", 500, -100).outputs[0], add.inputs[0])
+    nt.links.new(glow, add.inputs[1])
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    mat.diffuse_color = (0.75, 0.85, 1.0, 0.2)
+    return mat
+
+
+def _cover_polaroid(name):
+    """The polaroid (POLAROID): a white card, faintly glossy, and on it the photo's ground (mmdd_photo 1): a soft sky,
+    pale blue at the top to pink at the bottom, a little of its own light."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    photo = s.attribute("mmdd_photo", -1000, -300).outputs[2]
+    _u, v, _w = s.split(s.node("ShaderNodeTexCoord", -1200, 0).outputs["UV"], -1000, 0)
+    sky = s.lerp((1.0, 0.72, 0.8), (0.62, 0.8, 1.0), v, -800, 100)
+    color = s.lerp((0.95, 0.94, 0.9), sky, photo, -600, 200)
+    nt.links.new(s.principled(-300, 200, color=color, roughness=0.35, emission=color, strength=0.25),
+                 out.inputs["Surface"])
+    _two_sided(mat)
+    mat.diffuse_color = (0.95, 0.94, 0.9, 1.0)
+    return mat
+
+
 def _cover_reel(name):
     """A reel of the slot machine (REEL, slot.py): its symbols (Col), a little lit from within; as the object's
     mmdd_blur nears 1 they smear into streaks along the turn (stripes across the reel in their colours)."""
@@ -5333,7 +5497,11 @@ _COVER_MAKERS = {"MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS"
                  "CONFETTI": _cover_confetti, "CANNON": _cover_cannon, "BALLOON": _cover_balloon,
                  "CURTAIN": _cover_curtain, "SPARK": _cover_spark, "SPLAT": _cover_splat, "TOKEN": _cover_token,
                  "CUT": _cover_cut, "PRINT_ROD": _cover_print_rod, "LASER": _cover_laser, "SLOT": _cover_slot,
-                 "REEL": _cover_reel, "COIN": _cover_coin, "MIST": _cover_mist}
+                 "REEL": _cover_reel, "COIN": _cover_coin, "MIST": _cover_mist,
+                 "GHOST_MIST": _cover_ghost_mist, "PUPPET_BAR": _cover_puppet_bar,
+                 "PUPPET_STRING": _cover_puppet_string, "SCREEN": _cover_screen, "ROD": _cover_rod,
+                 "OIL_CANVAS": _cover_oil_canvas, "MIRROR_GLASS": _cover_mirror_glass,
+                 "POLAROID": _cover_polaroid}
 
 
 # --------------------------------------------------------------------------- 1.14: the print (printer.py)
@@ -5701,3 +5869,411 @@ def remove_tint(mat):
         mat.blend_method = mat["mmd_disperse_tint_blend"]
         del mat["mmd_disperse_tint_blend"]
     del mat[P_TINT]
+
+
+# --------------------------------------------------------------------------- 1.16: the ghost (ghost.py)
+
+def add_ghost(mat):
+    """Splice the spirit look in front of every material output (GHOST + " Mix", nearly last: it fades what all of
+    ours added too). As GHOST + " On" goes 0 .. 1 she turns see-through: nothing at all at the world height GHOST +
+    " Feet" (her feet) and below, as solid as GHOST + " Alpha" from GHOST + " Fade" above it on; a rim of light in
+    GHOST + " Color" round her outline, a glow flowing up her (a noise on the world position, rising with GHOST +
+    " Tick", the frame), as bright as GHOST + " Strength". What reaches the mix is linked again by update_ghost."""
+    nt = mat.node_tree
+    if nt is None or mat.get(P_GHOST):
+        return
+    outputs = _outputs(nt)
+    if not outputs:
+        return
+    m = _shader_math(nt, GHOST)
+    x = min(n.location.x for n in outputs) - 400
+    y = min(n.location.y for n in outputs) - 9600
+    values = {}
+    for k, (name, value) in enumerate((("On", 0.0), ("Feet", 0.0), ("Fade", 1.0), ("Alpha", 0.5), ("Tick", 0.0),
+                                       ("Strength", 1.0))):
+        node = _new(nt, "ShaderNodeValue", "%s %s" % (GHOST, name), x - 2400, y - 150 * k)
+        node.outputs[0].default_value = value
+        values[name] = node.outputs[0]
+    color = _new(nt, "ShaderNodeRGB", GHOST + " Color", x - 2400, y - 1000)
+    color.outputs[0].default_value = (0.6, 0.75, 1.0, 1.0)
+    where = _new(nt, "ShaderNodeNewGeometry", GHOST + " Where", x - 2400, y + 400)
+    split = _new(nt, "ShaderNodeSeparateXYZ", GHOST + " Split", x - 2200, y + 400)
+    nt.links.new(where.outputs["Position"], split.inputs[0])
+    fade = m("MAXIMUM", values["Fade"], 1e-5, x=x - 2000, y=y - 300)
+    up = m("DIVIDE", m("SUBTRACT", split.outputs[2], values["Feet"], x=x - 2000, y=y + 300), fade, x=x - 1800,
+           y=y + 300)
+    rise = _smooth_node(nt, GHOST + " Rise", up, 0.0, 1.0, x - 1600, y + 300)
+    solid = m("MULTIPLY", rise, values["Alpha"], x=x - 1400, y=y + 300)
+    alpha = _alpha_source(nt)
+    if alpha is not None:
+        solid = m("MULTIPLY", solid, alpha, x=x - 1250, y=y + 300)
+    # the glow: a rim round her outline and a noise flowing up her, faintest where she has faded out
+    rim = _new(nt, "ShaderNodeLayerWeight", GHOST + " Rim", x - 1800, y - 300)
+    rim.inputs["Blend"].default_value = 0.35
+    flow_at = _new(nt, "ShaderNodeVectorMath", GHOST + " Flow At", x - 1800, y - 500, operation="SUBTRACT")
+    nt.links.new(where.outputs["Position"], flow_at.inputs[0])
+    lift = _new(nt, "ShaderNodeCombineXYZ", GHOST + " Lift", x - 2000, y - 600)
+    nt.links.new(m("MULTIPLY", m("MULTIPLY", values["Tick"], fade, x=x - 2200, y=y - 700), 0.02, x=x - 2100,
+                   y=y - 700), lift.inputs[2])
+    nt.links.new(lift.outputs[0], flow_at.inputs[1])
+    scaled = _new(nt, "ShaderNodeVectorMath", GHOST + " Flow Scale", x - 1600, y - 500, operation="DIVIDE")
+    nt.links.new(flow_at.outputs[0], scaled.inputs[0])
+    span = _new(nt, "ShaderNodeCombineXYZ", GHOST + " Flow Span", x - 1800, y - 700)
+    for i in range(3):
+        nt.links.new(m("MULTIPLY", fade, 0.6, x=x - 2000, y=y - 800 - 60 * i), span.inputs[i])
+    nt.links.new(span.outputs[0], scaled.inputs[1])
+    flow = _new(nt, "ShaderNodeTexNoise", GHOST + " Flow", x - 1400, y - 500)
+    nt.links.new(scaled.outputs[0], flow.inputs["Vector"])
+    flow.inputs["Scale"].default_value = 1.0
+    flow.inputs["Detail"].default_value = 3.0
+    wisps = _smooth_node(nt, GHOST + " Wisps", flow.outputs["Fac"], 0.45, 0.75, x - 1200, y - 500)
+    glow = m("MULTIPLY", m("MULTIPLY", m("ADD", m("MULTIPLY", m("POWER", rim.outputs["Fresnel"], 1.5, x=x - 1400,
+                                                                    y=y - 250), 1.2, x=x - 1200, y=y - 250),
+                                             m("MULTIPLY", m("MULTIPLY", wisps, 0.5, x=x - 1100, y=y - 600),
+                                               m("MULTIPLY_ADD", rise, -0.5, 1.0, x=x - 1200, y=y - 700), x=x - 1000,
+                                               y=y - 600),
+                                             x=x - 800, y=y - 400),
+                               values["Strength"], x=x - 600, y=y - 400), values["On"], x=x - 400, y=y - 400)
+    emission = _new(nt, "ShaderNodeEmission", GHOST + " Emission", x - 200, y - 400)
+    nt.links.new(color.outputs[0], emission.inputs["Color"])
+    nt.links.new(glow, emission.inputs["Strength"])
+    clear = _new(nt, "ShaderNodeBsdfTransparent", GHOST + " Clear", x - 200, y - 100)
+    for i, out in enumerate(outputs):
+        mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (GHOST, i), out.location.x - 180, out.location.y + 1000)
+        nt.links.new(values["On"], mix.inputs[0])
+        _splice(nt, out, mix)
+        lit = _new(nt, "ShaderNodeAddShader", "%s Lit %d" % (GHOST, i), x, y - 200 - 200 * i)
+        nt.links.new(emission.outputs[0], lit.inputs[1])
+        thin = _new(nt, "ShaderNodeMixShader", "%s Thin %d" % (GHOST, i), x + 200, y - 200 - 200 * i)
+        nt.links.new(solid, thin.inputs[0])
+        nt.links.new(clear.outputs[0], thin.inputs[1])
+        nt.links.new(lit.outputs[0], thin.inputs[2])
+        nt.links.new(thin.outputs[0], mix.inputs[2])
+    if bpy.app.version < (4, 2, 0) and mat.blend_method == "OPAQUE":  # legacy EEVEE ignores transparency
+        mat[P_GHOST_BLEND] = mat.blend_method
+        mat.blend_method = "HASHED"
+    mat[P_GHOST] = 1
+    update_ghost(mat, (0.6, 0.75, 1.0), 1.0, 0.5)
+
+
+def update_ghost(mat, color, strength, alpha):
+    """The spirit's glow colour and strength, how solid she stays, and what reaches the ghost's mix linked again into
+    the spirit look (it keeps what was added before it)."""
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_GHOST):
+        return
+    nodes = nt.nodes
+    nodes[GHOST + " Color"].outputs[0].default_value = tuple(color) + (1.0,)
+    nodes[GHOST + " Strength"].outputs[0].default_value = strength
+    nodes[GHOST + " Alpha"].outputs[0].default_value = alpha
+    for node in [n for n in nodes if n.name.startswith(GHOST + " Mix ")]:
+        i = node.name.rsplit(" ", 1)[1]
+        lit = nodes.get("%s Lit %s" % (GHOST, i))
+        if lit is None:
+            continue
+        for link in list(lit.inputs[0].links):
+            nt.links.remove(link)
+        if node.inputs[1].links:
+            nt.links.new(node.inputs[1].links[0].from_socket, lit.inputs[0])
+
+
+def remove_ghost(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_GHOST):
+        return
+    for node in [n for n in nt.nodes if n.name.startswith(GHOST)]:
+        for fc in list(getattr(mat.node_tree.animation_data, "drivers", []) or []):
+            if fc.data_path.startswith('nodes["%s"]' % node.name):
+                mat.node_tree.driver_remove(fc.data_path, fc.array_index)
+    _unsplice(nt, GHOST + " Mix")
+    for node in [n for n in nt.nodes if n.name.startswith(GHOST)]:
+        nt.nodes.remove(node)
+    if P_GHOST_BLEND in mat:
+        mat.blend_method = mat[P_GHOST_BLEND]
+        del mat[P_GHOST_BLEND]
+    del mat[P_GHOST]
+
+
+# --------------------------------------------------------------------------- 1.16: the marionette's porcelain (puppet.py)
+
+def add_porcelain(mat):
+    """Splice white porcelain in at the surface (PORCELAIN + " Mix", right after the realistic look: what our other
+    nodes add stays on top): ivory glaze with a hint of the material's own texture (its shading shows through, as a
+    painted doll's), glossy under a clear coat, keeping the material's alpha; as much of it as PORCELAIN + " On" says
+    (puppet.py drives it)."""
+    nt = mat.node_tree
+    if nt is None or mat.get(P_PORCELAIN):
+        return
+    outputs = _outputs(nt)
+    if not outputs:
+        return
+    m = _shader_math(nt, PORCELAIN)
+    x = min(n.location.x for n in outputs) - 400
+    y = min(n.location.y for n in outputs) - 11200
+    on = _new(nt, "ShaderNodeValue", PORCELAIN + " On", x - 1200, y + 300)
+    on.outputs[0].default_value = 0.0
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", PORCELAIN + " BSDF", x - 600, y)
+    shader = nt.nodes.get("mmd_shader")
+    base = nt.nodes.get("mmd_base_tex")
+    ivory = _new(nt, "ShaderNodeRGB", PORCELAIN + " Ivory", x - 1200, y)
+    ivory.outputs[0].default_value = (0.92, 0.9, 0.86, 1.0)
+    color = ivory.outputs[0]
+    if base is not None and base.bl_idname == "ShaderNodeTexImage" and base.image is not None:
+        bw = _new(nt, "ShaderNodeRGBToBW", PORCELAIN + " Shade", x - 1200, y - 150)
+        nt.links.new(base.outputs["Color"], bw.inputs[0])
+        painted = _new(nt, "ShaderNodeVectorMath", PORCELAIN + " Painted", x - 900, y - 100, operation="SCALE")
+        nt.links.new(ivory.outputs[0], painted.inputs[0])
+        nt.links.new(m("MULTIPLY_ADD", bw.outputs[0], 0.35, 0.7, x=x - 1000, y=y - 250), painted.inputs[3])
+        color = painted.outputs[0]
+    nt.links.new(color, bsdf.inputs["Base Color"])
+    alpha = _alpha_source(nt)
+    own = shader.inputs.get("Alpha") if shader is not None else None
+    if own is not None and own.is_linked:
+        alpha = m("MULTIPLY", alpha, own.links[0].from_socket, x=x - 900, y=y - 400) if alpha is not None else \
+            own.links[0].from_socket
+    elif own is not None and own.default_value < 1.0:
+        alpha = m("MULTIPLY", alpha if alpha is not None else 1.0, own.default_value, x=x - 900, y=y - 400)
+    if alpha is not None:
+        nt.links.new(alpha, bsdf.inputs["Alpha"])
+    _set_input(bsdf, ("Roughness",), 0.12)
+    _set_input(bsdf, ("Specular IOR Level", "Specular"), 0.6)
+    _set_input(bsdf, ("Coat Weight", "Clearcoat"), 1.0)
+    _set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.03)
+    for i, out in enumerate(outputs):
+        mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (PORCELAIN, i), out.location.x - 180,
+                   out.location.y + 1100)
+        _splice(nt, out, mix)
+        nt.links.new(on.outputs[0], mix.inputs[0])
+        nt.links.new(bsdf.outputs[0], mix.inputs[2])
+    mat[P_PORCELAIN] = 1
+
+
+def remove_porcelain(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_PORCELAIN):
+        return
+    node = nt.nodes.get(PORCELAIN + " On")
+    if node is not None:
+        node.outputs[0].driver_remove("default_value")
+    _unsplice(nt, PORCELAIN + " Mix")
+    for node in [n for n in nt.nodes if n.name.startswith(PORCELAIN)]:
+        nt.nodes.remove(node)
+    del mat[P_PORCELAIN]
+
+
+# --------------------------------------------------------------------------- 1.16: the shadow play's leather (shadowplay.py)
+
+def add_leather(mat):
+    """Splice dyed leather in at the surface (LEATHER + " Mix", after the porcelain): the material's own colours,
+    richer and lit from behind (the screen's light coming through: emission), with flowers cut out of it in rows
+    across the screen (world X and Z times LEATHER + " Scale": holes, see-through); as much of it as LEATHER + " On"
+    says (shadowplay.py drives it with how flat she is)."""
+    nt = mat.node_tree
+    if nt is None or mat.get(P_LEATHER):
+        return
+    outputs = _outputs(nt)
+    if not outputs:
+        return
+    m = _shader_math(nt, LEATHER)
+    x = min(n.location.x for n in outputs) - 400
+    y = min(n.location.y for n in outputs) - 12400
+    on = _new(nt, "ShaderNodeValue", LEATHER + " On", x - 1600, y + 300)
+    scale = _new(nt, "ShaderNodeValue", LEATHER + " Scale", x - 1600, y + 150)
+    scale.outputs[0].default_value = 1.0
+    shader = nt.nodes.get("mmd_shader")
+    base = nt.nodes.get("mmd_base_tex")
+    if base is not None and base.bl_idname == "ShaderNodeTexImage" and base.image is not None:
+        color = base.outputs["Color"]
+    else:
+        rgb = _new(nt, "ShaderNodeRGB", LEATHER + " Color", x - 1600, y)
+        diffuse = shader.inputs.get("Diffuse Color") if shader is not None else None
+        rgb.outputs[0].default_value = tuple(diffuse.default_value) if diffuse is not None and \
+            not diffuse.is_linked else tuple(mat.diffuse_color)
+        color = rgb.outputs[0]
+    dyed = _new(nt, "ShaderNodeHueSaturation", LEATHER + " Dye", x - 1300, y)
+    dyed.inputs["Saturation"].default_value = 1.9
+    dyed.inputs["Value"].default_value = 1.0
+    nt.links.new(color, dyed.inputs["Color"])
+    hide = _new(nt, "ShaderNodeMixRGB", LEATHER + " Hide", x - 1200, y - 150, blend_type="ADD")  # (dark: red-brown)
+    hide.inputs[0].default_value = 1.0
+    nt.links.new(dyed.outputs[0], hide.inputs[1])
+    hide.inputs[2].default_value = (0.3, 0.07, 0.02, 1.0)
+    warm = _new(nt, "ShaderNodeMixRGB", LEATHER + " Warm", x - 1100, y, blend_type="MULTIPLY")
+    warm.inputs[0].default_value = 0.6
+    nt.links.new(hide.outputs[0], warm.inputs[1])
+    warm.inputs[2].default_value = (1.0, 0.72, 0.42, 1.0)
+    glow = _new(nt, "ShaderNodeEmission", LEATHER + " Glow", x - 700, y)
+    nt.links.new(warm.outputs[0], glow.inputs["Color"])
+    glow.inputs["Strength"].default_value = 1.15
+    # the flowers cut out: in rows across the screen, a ring of petals round each middle
+    where = _new(nt, "ShaderNodeNewGeometry", LEATHER + " Where", x - 1600, y - 300)
+    split = _new(nt, "ShaderNodeSeparateXYZ", LEATHER + " Split", x - 1400, y - 300)
+    nt.links.new(where.outputs["Position"], split.inputs[0])
+    u = m("FRACT", m("MULTIPLY", split.outputs[0], scale.outputs[0], x=x - 1200, y=y - 250), x=x - 1000, y=y - 250)
+    v = m("FRACT", m("MULTIPLY", split.outputs[2], scale.outputs[0], x=x - 1200, y=y - 400), x=x - 1000, y=y - 400)
+    du, dv = m("SUBTRACT", u, 0.5, x=x - 800, y=y - 250), m("SUBTRACT", v, 0.5, x=x - 800, y=y - 400)
+    r = m("SQRT", m("ADD", m("MULTIPLY", du, du, x=x - 600, y=y - 250), m("MULTIPLY", dv, dv, x=x - 600, y=y - 400),
+                    x=x - 400, y=y - 300), x=x - 200, y=y - 300)
+    a = m("ARCTAN2", dv, du, x=x - 600, y=y - 550)
+    petal = m("MULTIPLY_ADD", m("COSINE", m("MULTIPLY", a, 6.0, x=x - 400, y=y - 550), x=x - 200, y=y - 550), 0.07,
+              0.25, x=0, y=y - 550)
+    ring = m("MULTIPLY", m("GREATER_THAN", r, m("MULTIPLY", petal, 0.55, x=200, y=y - 450), x=400, y=y - 400),
+             m("LESS_THAN", r, petal, x=400, y=y - 550), x=600, y=y - 450)
+    hole = m("MAXIMUM", ring, m("LESS_THAN", r, 0.035, x=400, y=y - 700), x=800, y=y - 500)
+    alpha = _alpha_source(nt)
+    own = shader.inputs.get("Alpha") if shader is not None else None
+    if own is not None and own.is_linked:
+        alpha = m("MULTIPLY", alpha, own.links[0].from_socket, x=x - 900, y=y - 800) if alpha is not None else \
+            own.links[0].from_socket
+    solid = m("SUBTRACT", 1.0, hole, x=1000, y=y - 500)
+    if alpha is not None:
+        solid = m("MULTIPLY", solid, alpha, x=1100, y=y - 600)
+    clear = _new(nt, "ShaderNodeBsdfTransparent", LEATHER + " Clear", x - 700, y - 200)
+    for i, out in enumerate(outputs):
+        cut = _new(nt, "ShaderNodeMixShader", "%s Cut %d" % (LEATHER, i), x + 1200, y - 200 * i)
+        nt.links.new(solid, cut.inputs[0])
+        nt.links.new(clear.outputs[0], cut.inputs[1])
+        nt.links.new(glow.outputs[0], cut.inputs[2])
+        mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (LEATHER, i), out.location.x - 180,
+                   out.location.y + 1000)
+        _splice(nt, out, mix)
+        nt.links.new(on.outputs[0], mix.inputs[0])
+        nt.links.new(cut.outputs[0], mix.inputs[2])
+    if bpy.app.version < (4, 2, 0) and mat.blend_method == "OPAQUE":  # legacy EEVEE ignores transparency
+        mat[P_LEATHER_BLEND] = mat.blend_method
+        mat.blend_method = "HASHED"
+    mat[P_LEATHER] = 1
+
+
+def update_leather(mat, expression, scale):
+    """How flat she is (a driver expression on the frame) and how many flowers a world unit."""
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_LEATHER):
+        return
+    nt.nodes[LEATHER + " Scale"].outputs[0].default_value = scale
+    sock = nt.nodes[LEATHER + " On"].outputs[0]
+    sock.driver_remove("default_value")
+    driver = sock.driver_add("default_value").driver
+    driver.type = "SCRIPTED"
+    driver.expression = expression
+
+
+def remove_leather(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_LEATHER):
+        return
+    node = nt.nodes.get(LEATHER + " On")
+    if node is not None:
+        node.outputs[0].driver_remove("default_value")
+    _unsplice(nt, LEATHER + " Mix")
+    for node in [n for n in nt.nodes if n.name.startswith(LEATHER)]:
+        nt.nodes.remove(node)
+    if P_LEATHER_BLEND in mat:
+        mat.blend_method = mat[P_LEATHER_BLEND]
+        del mat[P_LEATHER_BLEND]
+    del mat[P_LEATHER]
+
+
+# --------------------------------------------------------------------------- 1.16: into the painting (shadowplay.py)
+
+def add_oil(mat):
+    """Splice oil paint in at the surface (OIL + " Mix", after the leather): the material's own colours laid on in
+    strokes (a noise stretched along the canvas, world X and Z times OIL + " Scale"), a little richer and warmer under
+    varnish, with the fine cracks of old paint; lit as it is. As much of it as OIL + " On" says."""
+    nt = mat.node_tree
+    if nt is None or mat.get(P_OIL):
+        return
+    outputs = _outputs(nt)
+    if not outputs:
+        return
+    m = _shader_math(nt, OIL)
+    x = min(n.location.x for n in outputs) - 400
+    y = min(n.location.y for n in outputs) - 13600
+    on = _new(nt, "ShaderNodeValue", OIL + " On", x - 1600, y + 300)
+    scale = _new(nt, "ShaderNodeValue", OIL + " Scale", x - 1600, y + 150)
+    scale.outputs[0].default_value = 1.0
+    shader = nt.nodes.get("mmd_shader")
+    base = nt.nodes.get("mmd_base_tex")
+    if base is not None and base.bl_idname == "ShaderNodeTexImage" and base.image is not None:
+        color = base.outputs["Color"]
+    else:
+        rgb = _new(nt, "ShaderNodeRGB", OIL + " Color", x - 1600, y)
+        diffuse = shader.inputs.get("Diffuse Color") if shader is not None else None
+        rgb.outputs[0].default_value = tuple(diffuse.default_value) if diffuse is not None and \
+            not diffuse.is_linked else tuple(mat.diffuse_color)
+        color = rgb.outputs[0]
+    where = _new(nt, "ShaderNodeNewGeometry", OIL + " Where", x - 1600, y - 300)
+    split = _new(nt, "ShaderNodeSeparateXYZ", OIL + " Split", x - 1400, y - 300)
+    nt.links.new(where.outputs["Position"], split.inputs[0])
+    strokes_at = _new(nt, "ShaderNodeCombineXYZ", OIL + " Strokes At", x - 1200, y - 300)
+    nt.links.new(m("MULTIPLY", split.outputs[0], m("MULTIPLY", scale.outputs[0], 3.0, x=x - 1400, y=y - 450),
+                   x=x - 1300, y=y - 350), strokes_at.inputs[0])
+    nt.links.new(m("MULTIPLY", split.outputs[2], m("MULTIPLY", scale.outputs[0], 0.8, x=x - 1400, y=y - 550),
+                   x=x - 1300, y=y - 500), strokes_at.inputs[1])
+    strokes = _new(nt, "ShaderNodeTexNoise", OIL + " Strokes", x - 1000, y - 300)
+    nt.links.new(strokes_at.outputs[0], strokes.inputs["Vector"])
+    strokes.inputs["Scale"].default_value = 1.0
+    strokes.inputs["Detail"].default_value = 6.0
+    rich = _new(nt, "ShaderNodeHueSaturation", OIL + " Rich", x - 1200, y)
+    rich.inputs["Saturation"].default_value = 1.3
+    nt.links.new(color, rich.inputs["Color"])
+    nt.links.new(m("MULTIPLY_ADD", strokes.outputs["Fac"], 0.9, 0.55, x=x - 800, y=y - 300), rich.inputs["Value"])
+    nt.links.new(m("MULTIPLY_ADD", strokes.outputs["Fac"], 0.08, 0.46, x=x - 800, y=y - 150), rich.inputs["Hue"])
+    warm = _new(nt, "ShaderNodeMixRGB", OIL + " Varnish", x - 900, y, blend_type="MULTIPLY")
+    warm.inputs[0].default_value = 0.35
+    nt.links.new(rich.outputs[0], warm.inputs[1])
+    warm.inputs[2].default_value = (1.0, 0.82, 0.55, 1.0)
+    cracks = _new(nt, "ShaderNodeTexVoronoi", OIL + " Cracks", x - 1000, y - 600, feature="DISTANCE_TO_EDGE")
+    nt.links.new(where.outputs["Position"], cracks.inputs["Vector"])
+    nt.links.new(m("MULTIPLY", scale.outputs[0], 9.0, x=x - 1200, y=y - 700), cracks.inputs["Scale"])
+    line = m("SUBTRACT", 1.0, m("MULTIPLY", m("LESS_THAN", cracks.outputs["Distance"], 0.03, x=x - 800, y=y - 600),
+                                0.45, x=x - 600, y=y - 600), x=x - 400, y=y - 600)
+    painted = _new(nt, "ShaderNodeVectorMath", OIL + " Painted", x - 600, y, operation="SCALE")
+    nt.links.new(warm.outputs[0], painted.inputs[0])
+    nt.links.new(line, painted.inputs[3])
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", OIL + " BSDF", x - 300, y)
+    nt.links.new(painted.outputs[0], bsdf.inputs["Base Color"])
+    _set_input(bsdf, ("Roughness",), 0.58)
+    _set_input(bsdf, ("Coat Weight", "Clearcoat"), 0.12)
+    impasto = _new(nt, "ShaderNodeBump", OIL + " Impasto", x - 600, y - 400)  # (the paint laid on thick)
+    impasto.inputs["Strength"].default_value = 0.45
+    nt.links.new(strokes.outputs["Fac"], impasto.inputs["Height"])
+    nt.links.new(impasto.outputs["Normal"], bsdf.inputs["Normal"])
+    alpha = _alpha_source(nt)
+    own = shader.inputs.get("Alpha") if shader is not None else None
+    if own is not None and own.is_linked:
+        alpha = m("MULTIPLY", alpha, own.links[0].from_socket, x=x - 600, y=y - 800) if alpha is not None else \
+            own.links[0].from_socket
+    if alpha is not None:
+        nt.links.new(alpha, bsdf.inputs["Alpha"])
+    for i, out in enumerate(outputs):
+        mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (OIL, i), out.location.x - 180, out.location.y + 900)
+        _splice(nt, out, mix)
+        nt.links.new(on.outputs[0], mix.inputs[0])
+        nt.links.new(bsdf.outputs[0], mix.inputs[2])
+    mat[P_OIL] = 1
+
+
+def update_oil(mat, expression, scale):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_OIL):
+        return
+    nt.nodes[OIL + " Scale"].outputs[0].default_value = scale
+    sock = nt.nodes[OIL + " On"].outputs[0]
+    sock.driver_remove("default_value")
+    driver = sock.driver_add("default_value").driver
+    driver.type = "SCRIPTED"
+    driver.expression = expression
+
+
+def remove_oil(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_OIL):
+        return
+    node = nt.nodes.get(OIL + " On")
+    if node is not None:
+        node.outputs[0].driver_remove("default_value")
+    _unsplice(nt, OIL + " Mix")
+    for node in [n for n in nt.nodes if n.name.startswith(OIL)]:
+        nt.nodes.remove(node)
+    del mat[P_OIL]

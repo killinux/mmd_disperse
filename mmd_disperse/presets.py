@@ -10,13 +10,14 @@ class Height(float):
 _OFF = dict(
     entrance="GROW", exit_style="SHRINK", exit_timing="EDGE", particles="NONE", wire_enable=False, holo_enable=False,
     glitch_enable=False, silhouette=False, ribbon_enable=False, edge_glow=True, finale=False, finale_style="PULSE",
-    finale_length=0.15, layer_enable=False, layer_style="NANO", inner_glow=False, venom_enable=False,
+    finale_length=0.15, finale_white=0.8, layer_enable=False, layer_style="NANO", inner_glow=False, venom_enable=False,
     venom_metallic=0.0, old_surface="NONE", particle_count=600, easing="EASE", ring_enable=False, paint_style="NONE",
     reactor=False, plates=False, arc_enable=False, trigger="NONE", flame_enable=False, impact_enable=False,
     soul_enable=False, domain_enable=False, shot_enable=False, time_warp="NONE", toon_style="NONE", float_up=False,
     husk_motion="STILL", trail_enable=False, step_flowers=False, look_style="NONE", holo_style="SCAN",
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
     cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
+    ghost_enable=False, puppet_enable=False, shadow_enable=False, shadow_style="SHADOW", mirror_enable=False,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -637,6 +638,44 @@ PRESETS = (
           frag_glow=True, edge_glow_strength=5.0, finale=True, finale_white=0.5, totem_enable=True,
           totem_shape="STAR", totem_color=(0.45, 0.6, 1.0), particle_color=(0.7, 0.8, 1.0), particle_glow=3.0,
           glow_color=(0.5, 0.65, 1.0), frag_wind_dir=(0.0, 0.3, 1.0))),
+    # --- 1.16: the ghost
+    ("GHOST", "Ghost", "She turns into a spirit, see-through from the feet up with pale light flowing up her, mist "
+                       "sinking from under her feet and a candle flickering by her; she floats while the new outfit "
+                       "comes on, then her feet come back solid and she lands (幽灵化, 以闪亮之名's 「烛魇幽歌」)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", easing="EASE", ghost_enable=True, ghost_color=(0.6, 0.78, 1.0),
+          ghost_alpha=0.45, ghost_glow=1.0, ghost_mist=True, ghost_light=True, float_up=True, float_height=0.1,
+          lights_out=True, lights_level=0.35, exit_style="FRAGMENTS", frag_glow=True, particles="STAR",
+          particle_count=300, particle_color=(0.75, 0.85, 1.0), particle_glow=2.0, glow_color=(0.6, 0.78, 1.0))),
+    ("MARIONETTE", "Marionette", "A control bar comes down over her and threads of light hook her head, wrists and "
+                                 "knees; she hangs on them dancing on twos as the old outfit turns to porcelain, the "
+                                 "strings snap one by one on the beats, the last as the outfits swap in a white flash, "
+                                 "and she lands with a shockwave (人偶, the doll on strings of the Nikki games)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, puppet_enable=True,
+          puppet_color=(1.0, 0.82, 0.55), float_up=True, float_height=0.08, time_warp="TWOS", warp_length=3.0,
+          impact_enable=True, shockwave=True, finale=True, finale_white=0.4, glow_color=(1.0, 0.9, 0.75))),
+    ("SHADOW_PLAY", "Shadow Play", "The lights go down, a glowing screen stands behind her and she is pressed onto it "
+                                   "as a shadow-play figure of dyed leather with flowers cut out of it, rods on her "
+                                   "hands, moving on twos; the outfits swap in a flash, the screen rises and she steps "
+                                   "out of it (皮影, 朱铁雄's 国风 transformation)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, shadow_enable=True,
+          shadow_color=(1.0, 0.82, 0.55), shadow_length=2.5, time_warp="TWOS", warp_length=2.5, lights_out=True,
+          lights_level=0.15, finale=True, finale_white=0.3, glow_color=(1.0, 0.85, 0.6))),
+    ("PAINTING", "Into the Painting", "She is pressed into an oil painting in a gilded frame and dances on in it, "
+                                      "painted, while the outfits swap; then the painting rises away and she steps "
+                                      "out of it in the new outfit (画中人活过来, Taylor Swift's \"The Fate of "
+                                      "Ophelia\")",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, shadow_enable=True,
+          shadow_style="PAINTING", shadow_length=2.5, finale=True, finale_white=0.3, glow_color=(1.0, 0.85, 0.55))),
+    ("MIRROR_FIRST", "Mirror First", "A tall gilded mirror stands beside her and her reflection dances along; the "
+                                     "glass flashes and the reflection is in the new outfit first, then the outfits "
+                                     "swap on her too, and the mirror goes (倒影先换, The Little Mermaid's mirror)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, mirror_enable=True,
+          mirror_length=2.8, mirror_first=0.9, finale=True, finale_white=0.3, glow_color=(0.85, 0.9, 1.0))),
+    ("POLAROID", "Photo Comes Alive", "A polaroid shows up in her hand with her in it, dancing in the new outfit "
+                                      "already; it flies at the camera, the outfits swap behind it and it tumbles "
+                                      "away (拍立得: the girl in the photo comes to life)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="POLAROID",
+          finale=True, finale_white=0.25, glow_color=(1.0, 0.9, 0.9))),
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
@@ -648,7 +687,7 @@ WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPAR
                "SOUL_DEPART", "IMPACT", "IDOL", "SOUL_RINGS", "DOMAIN", "SKY_MIRROR", "CONCERT", "VELOCITY",
                "SPLIT", "FIGURINE", "NEZHA", "HEART", "SILHOUETTE", "STARRY_VEIL", "IRIS", "CLOCK_HAND", "DHARMA",
                "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE", "COLOR_TUG", "ERAS",
-               "POWER_UP", "DIMENSION_BEATS", "SLOT_MACHINE", "TOTEM"}
+               "POWER_UP", "DIMENSION_BEATS", "SLOT_MACHINE", "TOTEM", "MARIONETTE", "SHADOW_PLAY", "PAINTING", "MIRROR_FIRST", "POLAROID"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

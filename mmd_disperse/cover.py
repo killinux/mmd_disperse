@@ -38,8 +38,8 @@ from mathutils import Matrix, Vector
 from . import materials, motion, sampling, shots
 
 STYLES = ("NONE", "SHATTER", "CLOTH", "UMBRELLA", "FAN", "EMOJI", "FRAME", "CONFETTI", "BALLOONS", "FEATHERS",
-          "CURTAIN", "SLOT")
-LENS = ("SHATTER", "CLOTH", "UMBRELLA", "FAN", "EMOJI")  # the covers in front of the camera
+          "CURTAIN", "SLOT", "POLAROID")
+LENS = ("SHATTER", "CLOTH", "UMBRELLA", "FAN", "EMOJI", "POLAROID")  # the covers in front of the camera
 MOVABLE = ("BALLOONS", "FEATHERS")  # the covers the moment moves for, to where they cover most of her
 P_COVER = "mmd_disperse_cover"  # on our objects: the mask of their effect ...
 P_KIND = "mmd_disperse_cover_kind"  # ... GLASS, CLOTH, UMBRELLA, PETALS, FAN, EMOJI, FRAME, CANVAS, FEATHERS_BURST,
@@ -1385,7 +1385,8 @@ KINDS = {"SHATTER": ("GLASS",), "CLOTH": ("CLOTH",), "UMBRELLA": ("UMBRELLA", "P
          "EMOJI": ("EMOJI",), "FRAME": ("FRAME", "CANVAS", "FEATHERS_BURST"),
          "CONFETTI": ("CONFETTI", "CANNON_0", "CANNON_1", "CANNON_2", "CANNON_3"), "BALLOONS": ("BALLOONS",),
          "FEATHERS": ("FAN_L", "FAN_R"), "CURTAIN": ("CURTAIN",),
-         "SLOT": ("SLOT", "REEL_0", "REEL_1", "REEL_2", "LEVER", "COINS")}
+         "SLOT": ("SLOT", "REEL_0", "REEL_1", "REEL_2", "LEVER", "COINS"),
+         "POLAROID": ("POLAROID", "PHOTO_TWIN", "PHOTO_ANCHOR", "PHOTO_FIGURE")}
 
 
 def sync(settings, mask, models, moment):
@@ -1436,3 +1437,7 @@ def sync(settings, mask, models, moment):
         from . import slot
 
         slot.place(settings, mask, seen, moment, stage, collection, fps, aspect, height, floor)
+    elif style == "POLAROID":
+        from . import photo
+
+        photo.place(settings, mask, seen, moment, camera, collection, fps, aspect, height, models)

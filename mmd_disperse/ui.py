@@ -879,6 +879,97 @@ class MMDDISPERSE_PT_totem(_Panel, bpy.types.Panel):
             layout.label(text="Pick a mesh", icon="ERROR")
 
 
+class MMDDISPERSE_PT_ghost(_Panel, bpy.types.Panel):
+    bl_label = "Ghost"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "ghost_enable")
+        if not s.ghost_enable:
+            return
+        col = layout.column(align=True)
+        col.prop(s, "ghost_color")
+        col.prop(s, "ghost_alpha")
+        col.prop(s, "ghost_glow")
+        col = layout.column(align=True)
+        col.prop(s, "ghost_mist")
+        col.prop(s, "ghost_light")
+        col.prop(s, "float_up")
+        if s.float_up:
+            col.prop(s, "float_height")
+
+
+class MMDDISPERSE_PT_puppet(_Panel, bpy.types.Panel):
+    bl_label = "Marionette"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "puppet_enable")
+        if not s.puppet_enable:
+            return
+        col = layout.column(align=True)
+        col.prop(s, "puppet_color")
+        col.prop(s, "float_up")
+        col.prop(s, "time_warp")
+        if s.time_warp == "TWOS":
+            col.prop(s, "warp_length")
+        if not s.beat_sync:
+            layout.label(text="On the beats: Sync to Beat (Music Beats)", icon="INFO")
+
+
+class MMDDISPERSE_PT_shadowplay(_Panel, bpy.types.Panel):
+    bl_label = "Shadow Play / Painting"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "shadow_enable")
+        if not s.shadow_enable:
+            return
+        layout.prop(s, "shadow_style")
+        col = layout.column(align=True)
+        if s.shadow_style == "SHADOW":
+            col.prop(s, "shadow_color")
+        col.prop(s, "shadow_length")
+        col.prop(s, "time_warp")
+        if s.time_warp == "TWOS":
+            col.prop(s, "warp_length")
+
+
+class MMDDISPERSE_PT_mirror(_Panel, bpy.types.Panel):
+    bl_label = "Mirror First"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "mirror_enable")
+        if not s.mirror_enable:
+            return
+        col = layout.column(align=True)
+        col.prop(s, "mirror_length")
+        col.prop(s, "mirror_first")
+        if context.scene.camera is None:
+            layout.label(text="Needs a scene camera", icon="ERROR")
+
+
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
     bl_label = "Hologram / Veil"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -1143,6 +1234,10 @@ classes = (
     MMDDISPERSE_PT_tint,
     MMDDISPERSE_PT_dimension,
     MMDDISPERSE_PT_totem,
+    MMDDISPERSE_PT_ghost,
+    MMDDISPERSE_PT_puppet,
+    MMDDISPERSE_PT_shadowplay,
+    MMDDISPERSE_PT_mirror,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

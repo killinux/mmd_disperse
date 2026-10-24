@@ -641,6 +641,27 @@ _ZH = {
     ("*", "Best with Start On: Hand to the Sky"): "最好配合「开始时机：举手向天」",
     ("*", "Pick a mesh"): "请选一个网格物体",
     ("*", "The machine comes in before the scene starts: start the effect later"): "老虎机在场景开始前就要落下：请把效果往后放",
+    # 1.16
+    ("*", "Ghost"): "幽灵化",
+    ("*", "Ghost Color"): "灵体颜色",
+    ("*", "Solid"): "实体程度",
+    ("*", "Ghost Glow"): "灵体发光",
+    ("*", "Mist"): "脚下飘雾",
+    ("*", "Candle"): "烛光",
+    ("*", "Marionette"): "人偶",
+    ("*", "String Color"): "提线颜色",
+    ("*", "Shadow Play"): "皮影",
+    ("*", "Lamp Color"): "灯光颜色",
+    ("*", "Shadow Time"): "皮影时长",
+    ("*", "Flat Figure"): "压成平面",
+    ("*", "Figure"): "样式",
+    ("*", "Into the Painting"): "画中人",
+    ("*", "Shadow Play / Painting"): "皮影 / 画中人",
+    ("*", "Mirror First"): "镜里先换",
+    ("*", "Mirror Time"): "镜子出现",
+    ("*", "Reflection Ahead"): "倒影提前",
+    ("*", "Polaroid"): "拍立得",
+    ("*", "Photo Comes Alive"): "照片活过来",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

@@ -49,8 +49,13 @@ BEAM = "MMD Disperse Laser Beam"
 CUBE = "MMD Disperse Print Cube"
 LASER_HEAD = "MMD Disperse Laser Head"
 TOTEM_GROUP = "MMDDisperse Totem Mist"
+PUPPET_STRINGS_GROUP = "MMDDisperse Puppet Strings"
+FLATTEN_GROUP = "MMDDisperse Shadow Flatten"
+RODS_GROUP = "MMDDisperse Shadow Rods"
+MIRROR_GROUP = "MMDDisperse Mirror Copy"
+PHOTO_GROUP = "MMDDisperse Photo Figure"
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 7  # bumped when one of these groups changes
+REVISION = 10  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -1235,9 +1240,10 @@ def ensure_totem_group():
 
 
 def remove_totem_assets():
-    """The totem's puff and group (totem.py), once no totem uses them."""
+    """The totem's puff and group (totem.py), once no totem uses them (and no ghost the puff: ghost.py's mist)."""
     ob = bpy.data.objects.get(PUFF)
-    if ob is not None:
+    if ob is not None and not any(o.get("mmd_disperse_totem") is not None or o.get("mmd_disperse_ghost") is not None
+                                  for o in bpy.data.objects):
         me = ob.data
         bpy.data.objects.remove(ob)
         if me is not None and me.users == 0:
@@ -1245,6 +1251,350 @@ def remove_totem_assets():
     ng = bpy.data.node_groups.get(TOTEM_GROUP)
     if ng is not None and ng.users == 0:
         bpy.data.node_groups.remove(ng)
+
+
+# --------------------------------------------------------------------------- 1.16: the marionette's strings (puppet.py)
+
+PUPPET_STRINGS = 5
+
+
+def build_puppet_strings_group():
+    """The marionette's strings: one from each Attach point of the Bar (in the bar's own space) down to its Hook. From
+    Show (a little later for each) it drops down to the hook over Grow, sagging a little as it goes taut; at its Snap
+    frame its lower end whips up to the bar over Whip, curling, and it thins away; none after Gone. Tubes of Radius."""
+    inputs = [("Bar", "NodeSocketObject")]
+    for k in range(PUPPET_STRINGS):
+        inputs += [("Hook %d" % k, "NodeSocketObject"), ("Attach %d" % k, "NodeSocketVector", (0.0, 0.0, 0.0)),
+                   ("Snap %d" % k, "NodeSocketFloat", 100.0)]
+    inputs += [("Show", "NodeSocketFloat", 0.0), ("Grow", "NodeSocketFloat", 10.0), ("Whip", "NodeSocketFloat", 6.0),
+               ("Radius", "NodeSocketFloat", 0.002), ("Sag", "NodeSocketFloat", 0.03), ("Gone", "NodeSocketFloat", 1e6),
+               ("Material", "NodeSocketMaterial")]
+    ng, b = _group(PUPPET_STRINGS_GROUP, inputs)
+    gi = b.node("NodeGroupInput", -2400, 0)
+    go = b.node("NodeGroupOutput", 1600, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -2400, -300).outputs["Frame"]
+    bar = b.node("GeometryNodeObjectInfo", -2200, 300)
+    bar.transform_space = "RELATIVE"
+    b.feed(bar.inputs["Object"], gi.outputs["Bar"])
+    alive = b.compare("LESS_THAN", frame, gi.outputs["Gone"], x=-2200, y=-450)
+    tubes = []
+    for k in range(PUPPET_STRINGS):
+        y = -900 * k
+        hook = b.node("GeometryNodeObjectInfo", -2200, y - 200)
+        hook.transform_space = "RELATIVE"
+        b.feed(hook.inputs["Object"], gi.outputs["Hook %d" % k])
+        # where it hangs from: the attach point turned and scaled with the bar
+        turned = b.node("ShaderNodeVectorRotate", -2000, y)
+        turned.rotation_type = "EULER_XYZ"
+        b.feed(turned.inputs["Vector"], b.vmath("MULTIPLY", gi.outputs["Attach %d" % k], bar.outputs["Scale"],
+                                                x=-2200, y=y + 100))
+        b.feed(turned.inputs["Rotation"], bar.outputs["Rotation"])
+        top = b.vmath("ADD", turned.outputs[0], bar.outputs["Location"], x=-1800, y=y)
+        show = b.math("ADD", gi.outputs["Show"], 2.0 * k, x=-2000, y=y - 400)
+        grow = b.map_range(frame, show, b.math("ADD", show, gi.outputs["Grow"], x=-1800, y=y - 450), x=-1600,
+                           y=y - 400, smooth=True)
+        snap = gi.outputs["Snap %d" % k]
+        snapped = b.map_range(frame, snap, b.math("ADD", snap, gi.outputs["Whip"], x=-1800, y=y - 600), x=-1600,
+                              y=y - 600, smooth=True)
+        down = b.vmath("ADD", top, b.vmath("SCALE", b.vmath("SUBTRACT", hook.outputs["Location"], top, x=-1600,
+                                                            y=y - 150), scale=grow, x=-1400, y=y - 150),
+                       x=-1200, y=y - 100)
+        end = b.vmath("ADD", down, b.vmath("SCALE", b.vmath("SUBTRACT", top, down, x=-1200, y=y - 300),
+                                           scale=b.math("POWER", snapped, 0.6, x=-1200, y=y - 600), x=-1000,
+                                           y=y - 300), x=-800, y=y - 200)
+        line = b.node("GeometryNodeCurvePrimitiveLine", -600, y)
+        b.feed(line.inputs["Start"], top)
+        b.feed(line.inputs["End"], end)
+        dense = b.node("GeometryNodeResampleCurve", -400, y)
+        b.feed(dense.inputs["Curve"], line.outputs["Curve"])
+        dense.inputs["Count"].default_value = 16
+        # a little sag while it drops, a curl while it whips up (across the picture: X of the bar)
+        t = b.node("GeometryNodeSplineParameter", -600, y - 300).outputs["Factor"]
+        arc = b.math("SINE", b.math("MULTIPLY", t, 3.14159, x=-400, y=y - 300), x=-200, y=y - 300)
+        sway = b.math("ADD", b.math("MULTIPLY", gi.outputs["Sag"], b.math("SUBTRACT", 1.0, grow, x=-400, y=y - 500),
+                                    x=-200, y=y - 500),
+                      b.math("MULTIPLY", b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY_ADD", t, 11.0, b.math(
+                          "MULTIPLY", frame, 0.7, x=-600, y=y - 750), x=-400, y=y - 700), x=-200, y=y - 700),
+                          b.math("MULTIPLY", snapped, b.math("SUBTRACT", 1.0, snapped, x=-400, y=y - 850), x=-200,
+                                 y=y - 850), x=0, y=y - 750), b.math("MULTIPLY", gi.outputs["Sag"], 4.0, x=0,
+                                                                      y=y - 900), x=200, y=y - 800),
+                      x=400, y=y - 600)
+        across = b.node("ShaderNodeVectorRotate", -200, y - 150)
+        across.rotation_type = "EULER_XYZ"
+        across.inputs["Vector"].default_value = (1.0, 0.0, 0.0)
+        b.feed(across.inputs["Rotation"], bar.outputs["Rotation"])
+        bent = b.set_position(dense.outputs["Curve"], offset=b.vmath("SCALE", across.outputs[0],
+                                                                     scale=b.math("MULTIPLY", arc, sway, x=600,
+                                                                                  y=y - 400), x=800, y=y - 300),
+                              x=800, y=y)
+        # (its own profile, as thick as the string is: Curve to Mesh does not scale by the curve radius in 5.x)
+        profile = b.node("GeometryNodeCurvePrimitiveCircle", 1000, y - 400)
+        profile.inputs["Resolution"].default_value = 5
+        b.feed(profile.inputs["Radius"], b.math("MAXIMUM", b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Radius"], b.math(
+            "SUBTRACT", 1.0, snapped, x=800, y=y - 550), x=1000, y=y - 500), alive, x=1000, y=y - 650), 0.0,
+            x=1000, y=y - 750))
+        tube = b.node("GeometryNodeCurveToMesh", 1200, y)
+        b.feed(tube.inputs["Curve"], bent)
+        b.feed(tube.inputs["Profile Curve"], profile.outputs["Curve"])
+        tubes.append(tube.outputs["Mesh"])
+    joined = b.join(tubes, x=1400, y=0)
+    _finish(b, joined, gi, go, 1500, 0)
+    return ng
+
+
+def ensure_puppet_strings_group():
+    if not _current(PUPPET_STRINGS_GROUP):
+        build_puppet_strings_group()
+    return bpy.data.node_groups[PUPPET_STRINGS_GROUP]
+
+
+def remove_puppet_assets():
+    """The marionette's strings group (puppet.py), once no marionette uses it."""
+    ng = bpy.data.node_groups.get(PUPPET_STRINGS_GROUP)
+    if ng is not None and ng.users == 0:
+        bpy.data.node_groups.remove(ng)
+
+
+# --------------------------------------------------------------------------- 1.16: the shadow play (shadowplay.py)
+
+def build_flatten_group():
+    """Pressed flat onto a Plane (an empty: through its origin, across its Y axis) as much as Flat says (0 .. 1),
+    keeping Keep of the depth (so what is in front stays in front)."""
+    ng, b = _group(FLATTEN_GROUP, (
+        ("Plane", "NodeSocketObject"),
+        ("Flat", "NodeSocketFloat", 0.0),
+        ("Keep", "NodeSocketFloat", 0.004),
+    ))
+    gi = b.node("NodeGroupInput", -1200, 0)
+    go = b.node("NodeGroupOutput", 600, 0)
+    plane = b.node("GeometryNodeObjectInfo", -1200, -300)
+    plane.transform_space = "RELATIVE"
+    b.feed(plane.inputs["Object"], gi.outputs["Plane"])
+    normal = b.node("ShaderNodeVectorRotate", -1000, -400)
+    normal.rotation_type = "EULER_XYZ"
+    normal.inputs["Vector"].default_value = (0.0, 1.0, 0.0)
+    b.feed(normal.inputs["Rotation"], plane.outputs["Rotation"])
+    position = b.node("GeometryNodeInputPosition", -1200, -600).outputs[0]
+    depth = b.vmath("DOT_PRODUCT", b.vmath("SUBTRACT", position, plane.outputs["Location"], x=-1000, y=-600),
+                    normal.outputs[0], x=-800, y=-600)
+    squeeze = b.math("MULTIPLY", gi.outputs["Flat"], b.math("SUBTRACT", 1.0, gi.outputs["Keep"], x=-800, y=-800),
+                     x=-600, y=-800)
+    moved = b.set_position(gi.outputs["Geometry"], offset=b.vmath("SCALE", normal.outputs[0], scale=b.math(
+        "MULTIPLY", b.math("MULTIPLY", depth, squeeze, x=-400, y=-700), -1.0, x=-200, y=-700), x=0, y=-500), x=200,
+                           y=0)
+    b.feed(go.inputs["Geometry"], moved)
+    return ng
+
+
+def ensure_flatten_group():
+    if not _current(FLATTEN_GROUP):
+        build_flatten_group()
+    return bpy.data.node_groups[FLATTEN_GROUP]
+
+
+def build_rods_group():
+    """The shadow play's two rods: from each Hook (her wrists), pressed onto the Plane as much as Flat says, down to
+    Floor and Spread out to her sides along the plane; tubes of Radius, only while she is flat."""
+    ng, b = _group(RODS_GROUP, (
+        ("Plane", "NodeSocketObject"),
+        ("Hook L", "NodeSocketObject"),
+        ("Hook R", "NodeSocketObject"),
+        ("Floor", "NodeSocketFloat", -1.0),
+        ("Spread", "NodeSocketFloat", 0.5),
+        ("Radius", "NodeSocketFloat", 0.005),
+        ("Flat", "NodeSocketFloat", 0.0),
+        ("Material", "NodeSocketMaterial"),
+    ))
+    gi = b.node("NodeGroupInput", -1600, 0)
+    go = b.node("NodeGroupOutput", 1200, 0)
+    plane = b.node("GeometryNodeObjectInfo", -1600, -300)
+    plane.transform_space = "RELATIVE"
+    b.feed(plane.inputs["Object"], gi.outputs["Plane"])
+    normal = b.node("ShaderNodeVectorRotate", -1400, -400)
+    normal.rotation_type = "EULER_XYZ"
+    normal.inputs["Vector"].default_value = (0.0, 1.0, 0.0)
+    b.feed(normal.inputs["Rotation"], plane.outputs["Rotation"])
+    across = b.node("ShaderNodeVectorRotate", -1400, -600)
+    across.rotation_type = "EULER_XYZ"
+    across.inputs["Vector"].default_value = (1.0, 0.0, 0.0)
+    b.feed(across.inputs["Rotation"], plane.outputs["Rotation"])
+    profile = b.node("GeometryNodeCurvePrimitiveCircle", 400, -600)  # (as thick as a rod while she is flat)
+    profile.inputs["Resolution"].default_value = 6
+    b.feed(profile.inputs["Radius"], b.math("MULTIPLY", gi.outputs["Radius"], b.compare(
+        "GREATER_THAN", gi.outputs["Flat"], 0.98, x=200, y=-700), x=300, y=-650))
+    tubes = []
+    for k, (name, way) in enumerate((("Hook L", 1.0), ("Hook R", -1.0))):
+        y = -900 * k
+        hook = b.node("GeometryNodeObjectInfo", -1400, y + 200)
+        hook.transform_space = "RELATIVE"
+        b.feed(hook.inputs["Object"], gi.outputs[name])
+        depth = b.vmath("DOT_PRODUCT", b.vmath("SUBTRACT", hook.outputs["Location"], plane.outputs["Location"],
+                                                x=-1200, y=y + 200), normal.outputs[0], x=-1000, y=y + 200)
+        top = b.vmath("SUBTRACT", hook.outputs["Location"], b.vmath("SCALE", normal.outputs[0], scale=b.math(
+            "MULTIPLY", depth, gi.outputs["Flat"], x=-800, y=y + 300), x=-600, y=y + 300), x=-400, y=y + 200)
+        tx, ty, _tz = b.split_xyz(top, x=-200, y=y + 100)
+        foot = b.vmath("ADD", b.combine(tx, ty, gi.outputs["Floor"], x=0, y=y + 100),
+                       b.vmath("SCALE", across.outputs[0], scale=b.math("MULTIPLY", gi.outputs["Spread"], way, x=-200,
+                                                                         y=y - 100), x=0, y=y - 100), x=200, y=y)
+        line = b.node("GeometryNodeCurvePrimitiveLine", 400, y)
+        b.feed(line.inputs["Start"], top)
+        b.feed(line.inputs["End"], foot)
+        tube = b.node("GeometryNodeCurveToMesh", 800, y)
+        b.feed(tube.inputs["Curve"], line.outputs["Curve"])
+        b.feed(tube.inputs["Profile Curve"], profile.outputs["Curve"])
+        tubes.append(tube.outputs["Mesh"])
+    _finish(b, b.join(tubes, x=1000, y=0), gi, go, 1100, 0)
+    return ng
+
+
+def ensure_rods_group():
+    if not _current(RODS_GROUP):
+        build_rods_group()
+    return bpy.data.node_groups[RODS_GROUP]
+
+
+def remove_shadow_assets():
+    """The shadow play's groups (shadowplay.py), once nothing uses them."""
+    for name in (FLATTEN_GROUP, RODS_GROUP):
+        ng = bpy.data.node_groups.get(name)
+        if ng is not None and ng.users == 0:
+            bpy.data.node_groups.remove(ng)
+
+
+# --------------------------------------------------------------------------- 1.16: the mirror first (mirror.py)
+
+def build_mirror_group():
+    """A reflection: the Twin (a mesh posed by its armature only) mirrored in the Mirror (an object: a plane through its
+    origin, its front at -Y), kept only where the Camera sees it through the glass (Width across X, Height up Z, round
+    the mirror's origin) and behind it; nothing while Show is off."""
+    ng, b = _group(MIRROR_GROUP, (
+        ("Twin", "NodeSocketObject"),
+        ("Mirror", "NodeSocketObject"),
+        ("Camera", "NodeSocketObject"),
+        ("Width", "NodeSocketFloat", 0.5),
+        ("Height", "NodeSocketFloat", 1.0),
+        ("Show", "NodeSocketFloat", 0.0),
+    ))
+    gi = b.node("NodeGroupInput", -2000, 0)
+    go = b.node("NodeGroupOutput", 1400, 0)
+    twin = b.node("GeometryNodeObjectInfo", -1800, 200)
+    twin.transform_space = "RELATIVE"
+    b.feed(twin.inputs["Object"], gi.outputs["Twin"])
+    glass = b.node("GeometryNodeObjectInfo", -1800, -200)
+    glass.transform_space = "RELATIVE"
+    b.feed(glass.inputs["Object"], gi.outputs["Mirror"])
+    eye = b.node("GeometryNodeObjectInfo", -1800, -500)
+    eye.transform_space = "RELATIVE"
+    b.feed(eye.inputs["Object"], gi.outputs["Camera"])
+    axes = []
+    for k, v in enumerate(((0.0, -1.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0))):
+        turned = b.node("ShaderNodeVectorRotate", -1600, -300 - 150 * k)
+        turned.rotation_type = "EULER_XYZ"
+        turned.inputs["Vector"].default_value = v
+        b.feed(turned.inputs["Rotation"], glass.outputs["Rotation"])
+        axes.append(turned.outputs[0])
+    front, across, up = axes
+    centre = glass.outputs["Location"]
+    position = b.node("GeometryNodeInputPosition", -1600, 400).outputs[0]
+    depth = b.vmath("DOT_PRODUCT", b.vmath("SUBTRACT", position, centre, x=-1400, y=400), front, x=-1200, y=400)
+    mirrored = b.set_position(twin.outputs["Geometry"], offset=b.vmath("SCALE", front, scale=b.math(
+        "MULTIPLY", depth, -2.0, x=-1000, y=400), x=-800, y=400), x=-600, y=200)
+    flipped = b.node("GeometryNodeFlipFaces", -400, 200)
+    b.feed(flipped.inputs["Mesh"], mirrored)
+    # where the ray from the camera to each point crosses the glass
+    p = b.node("GeometryNodeInputPosition", -1200, -800).outputs[0]
+    ray = b.vmath("SUBTRACT", p, eye.outputs["Location"], x=-1000, y=-800)
+    t = b.math("DIVIDE", b.vmath("DOT_PRODUCT", b.vmath("SUBTRACT", centre, eye.outputs["Location"], x=-1000,
+                                                         y=-950), front, x=-800, y=-950),
+               b.vmath("DOT_PRODUCT", ray, front, x=-800, y=-800), x=-600, y=-850)
+    cross = b.vmath("ADD", eye.outputs["Location"], b.vmath("SCALE", ray, scale=t, x=-400, y=-800), x=-200, y=-800)
+    off = b.vmath("SUBTRACT", cross, centre, x=0, y=-800)
+    qx = b.math("ABSOLUTE", b.vmath("DOT_PRODUCT", off, across, x=200, y=-750), x=400, y=-750)
+    qz = b.math("ABSOLUTE", b.vmath("DOT_PRODUCT", off, up, x=200, y=-900), x=400, y=-900)
+    ahead = b.compare("GREATER_THAN", b.vmath("DOT_PRODUCT", b.vmath("SUBTRACT", p, centre, x=0, y=-1100), front,
+                                               x=200, y=-1100), 0.0, x=400, y=-1100)
+    inside = b.boolean("AND", b.boolean("AND", b.compare("LESS_THAN", qx, b.math("MULTIPLY", gi.outputs["Width"], 0.5,
+                                                                                   x=400, y=-600), x=600, y=-700),
+                                        b.compare("LESS_THAN", qz, b.math("MULTIPLY", gi.outputs["Height"], 0.5,
+                                                                           x=400, y=-1000), x=600, y=-900),
+                                        x=800, y=-800), b.boolean("NOT", ahead, x=600, y=-1100), x=1000, y=-900)
+    shown = b.boolean("AND", inside, b.compare("GREATER_THAN", gi.outputs["Show"], 0.5, x=800, y=-1250), x=1100,
+                      y=-1000)
+    kept = b.delete(flipped.outputs["Mesh"], b.boolean("NOT", shown, x=1200, y=-900), "POINT", x=1200, y=0)
+    b.feed(go.inputs["Geometry"], kept)
+    return ng
+
+
+def ensure_mirror_group():
+    if not _current(MIRROR_GROUP):
+        build_mirror_group()
+    return bpy.data.node_groups[MIRROR_GROUP]
+
+
+def remove_mirror_assets():
+    """The mirror's group (mirror.py), once no mirror uses it."""
+    ng = bpy.data.node_groups.get(MIRROR_GROUP)
+    if ng is not None and ng.users == 0:
+        bpy.data.node_groups.remove(ng)
+
+
+# --------------------------------------------------------------------------- 1.16: the polaroid's figure (photo.py)
+
+def build_photo_group():
+    """The figure on the photo: the Twin (her new outfit posed by its armature only) moved from round the Anchor (her
+    centre) onto the photo of the card this object hangs on (Photo X / Y its middle, Photo Width / Height, in the
+    card's own space), as tall as the photo (Height: hers, in the world), pressed flat onto it, cut to its edge."""
+    ng, b = _group(PHOTO_GROUP, (
+        ("Twin", "NodeSocketObject"),
+        ("Anchor", "NodeSocketObject"),
+        ("Height", "NodeSocketFloat", 1.6),
+        ("Photo Width", "NodeSocketFloat", 0.78),
+        ("Photo Height", "NodeSocketFloat", 0.78),
+        ("Photo X", "NodeSocketFloat", 0.0),
+        ("Photo Y", "NodeSocketFloat", 0.1),
+    ))
+    gi = b.node("NodeGroupInput", -1800, 0)
+    go = b.node("NodeGroupOutput", 1400, 0)
+    twin = b.node("GeometryNodeObjectInfo", -1600, 200)
+    twin.transform_space = "RELATIVE"
+    b.feed(twin.inputs["Object"], gi.outputs["Twin"])
+    anchor = b.node("GeometryNodeObjectInfo", -1600, -200)
+    anchor.transform_space = "RELATIVE"
+    b.feed(anchor.inputs["Object"], gi.outputs["Anchor"])
+    me = b.node("GeometryNodeObjectInfo", -1600, -500)
+    b.feed(me.inputs["Object"], b.node("GeometryNodeSelfObject", -1800, -500).outputs[0])
+    sx, _sy, _sz = b.split_xyz(me.outputs["Scale"], x=-1400, y=-500)
+    # how much smaller: the photo's height over hers, both in the card's own space
+    shrink = b.math("DIVIDE", b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Photo Height"], 0.86, x=-1300,
+                                                        y=-400), sx, x=-1200, y=-450),
+                    b.math("MAXIMUM", gi.outputs["Height"], 1e-6, x=-1200, y=-600), x=-1000, y=-500)
+    position = b.node("GeometryNodeInputPosition", -1400, 300).outputs[0]
+    qx, qy, qz = b.split_xyz(b.vmath("SUBTRACT", position, anchor.outputs["Location"], x=-1200, y=300), x=-1000,
+                             y=300)
+    mx = b.math("ADD", gi.outputs["Photo X"], b.math("MULTIPLY", qx, shrink, x=-800, y=400), x=-600, y=400)
+    my = b.math("ADD", gi.outputs["Photo Y"], b.math("MULTIPLY", qy, shrink, x=-800, y=250), x=-600, y=250)
+    # (pressed onto the photo, just in front of it: what is nearer the camera a hair nearer still)
+    mz = b.math("ADD", 0.0016, b.math("MULTIPLY", b.math("MINIMUM", b.math("MAXIMUM", b.math("DIVIDE", b.math(
+        "MULTIPLY", qz, shrink, x=-900, y=100), gi.outputs["Photo Height"], x=-800, y=100), -0.5, x=-750, y=100), 0.5,
+        x=-700, y=100), 0.0016, x=-650, y=100), x=-600, y=100)
+    moved = b.set_position(twin.outputs["Geometry"], position=b.combine(mx, my, mz, x=-400, y=300), x=-200, y=200)
+    p2 = b.node("GeometryNodeInputPosition", -200, -200).outputs[0]
+    px_, py_, _pz = b.split_xyz(p2, x=0, y=-200)
+    out_x = b.compare("GREATER_THAN", b.math("ABSOLUTE", b.math("SUBTRACT", px_, gi.outputs["Photo X"], x=200, y=-150),
+                                             x=400, y=-150), b.math("MULTIPLY", gi.outputs["Photo Width"], 0.5, x=400,
+                                                                    y=-300), x=600, y=-200)
+    out_y = b.compare("GREATER_THAN", b.math("ABSOLUTE", b.math("SUBTRACT", py_, gi.outputs["Photo Y"], x=200, y=-450),
+                                             x=400, y=-450), b.math("MULTIPLY", gi.outputs["Photo Height"], 0.5, x=400,
+                                                                    y=-600), x=600, y=-500)
+    kept = b.delete(moved, b.boolean("OR", out_x, out_y, x=800, y=-300), "POINT", x=1000, y=0)
+    b.feed(go.inputs["Geometry"], kept)
+    return ng
+
+
+def ensure_photo_group():
+    if not _current(PHOTO_GROUP):
+        build_photo_group()
+    return bpy.data.node_groups[PHOTO_GROUP]
 
 
 def remove_unused():
@@ -1257,7 +1607,7 @@ def remove_unused():
             if me is not None and me.users == 0:
                 bpy.data.meshes.remove(me)
     for name in (SHATTER_GROUP, RIPPLE_GROUP, PIECES_GROUP, BALLOONS_GROUP, FAN_GROUP, CURTAIN_GROUP, ERAS_GROUP,
-                 ORIGINS_GROUP, CHAIN_GROUP):
+                 ORIGINS_GROUP, CHAIN_GROUP, PHOTO_GROUP):
         ng = bpy.data.node_groups.get(name)
         if ng is not None and ng.users == 0:
             bpy.data.node_groups.remove(ng)

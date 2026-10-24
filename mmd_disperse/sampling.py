@@ -155,6 +155,47 @@ def picture_aspect(scene):
     return (r.resolution_x * r.pixel_aspect_x) / max(r.resolution_y * r.pixel_aspect_y, 1e-9)
 
 
+def matrix_at(ob, frame):
+    """`ob`'s world matrix at `frame`, from its own keys (location, rotation, scale) and its parents', without changing
+    the scene's frame: a camera that orbits on an animated pivot. As it is now when it (or a parent) has constraints
+    or hangs on a bone."""
+    from mathutils import Euler, Matrix, Quaternion, Vector
+
+    if ob is None:
+        return None
+    if any(c.enabled if hasattr(c, "enabled") else not c.mute for c in ob.constraints) or (
+            ob.parent is not None and ob.parent_type != "OBJECT"):
+        return ob.matrix_world.copy()
+    loc, scale = Vector(ob.location), Vector(ob.scale)
+    euler = Euler(ob.rotation_euler, ob.rotation_euler.order)
+    quat = Quaternion(ob.rotation_quaternion)
+    axis = list(ob.rotation_axis_angle)
+    for fc in shots._curves(ob):
+        i, v = fc.array_index, fc.evaluate(frame)
+        if fc.data_path == "location":
+            loc[i] = v
+        elif fc.data_path == "rotation_euler":
+            euler[i] = v
+        elif fc.data_path == "rotation_quaternion":
+            quat[i] = v
+        elif fc.data_path == "rotation_axis_angle":
+            axis[i] = v
+        elif fc.data_path == "scale":
+            scale[i] = v
+    if ob.rotation_mode == "QUATERNION":
+        turn = quat.normalized().to_matrix()
+    elif ob.rotation_mode == "AXIS_ANGLE":
+        turn = Matrix.Rotation(axis[0], 3, Vector(axis[1:]).normalized() if Vector(axis[1:]).length else "Z")
+    else:
+        euler.order = ob.rotation_mode
+        turn = euler.to_matrix()
+    local = Matrix.LocRotScale(loc, turn, scale)
+    if ob.parent is None:
+        return local
+    parent = matrix_at(ob.parent, frame)
+    return parent @ ob.matrix_parent_inverse @ local
+
+
 def camera_at(scene, frame):
     """The camera that shows frame `frame`: the one the scene's own markers pick then, else the scene camera."""
     cam = shots._camera_at(scene, frame) or scene.camera

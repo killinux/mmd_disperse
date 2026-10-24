@@ -231,12 +231,12 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.14：用 Blender 几何节点给 MMD 模型做换装变身。下面一百三十七段视频都是插件生成的
+    <p>mmd_disperse 1.15：用 Blender 几何节点给 MMD 模型做换装变身。下面一百三十九段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>137</b> 段演示</span>
-      <span><b>56</b> 组效果</span>
-      <span><b>125</b> 个一键预设</span>
+      <span><b>139</b> 段演示</span>
+      <span><b>57</b> 组效果</span>
+      <span><b>127</b> 个一键预设</span>
       <span><b>23400</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
@@ -295,7 +295,7 @@
 <section id="effects">
   <div class="wrap">
     <h2>效果演示</h2>
-    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.14 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
+    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.15 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
 
     <div class="index">
       <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
@@ -435,6 +435,8 @@
       <a href="#dimension"><img src="../test_output/posters/dimension.jpg" alt="" loading="lazy">次元切换</a>
       <a href="#dimension-beats"><img src="../test_output/posters/dimension_beats.jpg" alt="" loading="lazy">次元闪切</a>
       <a href="#laser-print"><img src="../test_output/posters/laser_print.jpg" alt="" loading="lazy">激光打印</a>
+      <a href="#slot-machine"><img src="../test_output/posters/slot_machine.jpg" alt="" loading="lazy">老虎机开奖</a>
+      <a href="#totem"><img src="../test_output/posters/totem.jpg" alt="" loading="lazy">雾中图腾</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -2911,7 +2913,7 @@
     <section class="family card" id="fam-covered">
       <div class="family-head">
         <h3>遮挡</h3>
-        <p>有东西挡住人，换装在它后面一下完成。生成时把舞播一遍，看人在画面上的位置，让遮挡物正好挡住她；气球和羽扇还会把换装挪到挡得最多的那一帧（1.13）。</p>
+        <p>有东西挡住人，换装在它后面一下完成。生成时把舞播一遍，看人在画面上的位置，让遮挡物正好挡住她；气球和羽扇还会把换装挪到挡得最多的那一帧（1.13；老虎机 1.15）。</p>
         <button type="button" class="together">▶ 一起播放</button>
       </div>
       <div class="variants">
@@ -3126,6 +3128,28 @@
             <li>生成时把舞播一遍，看人在画面上的位置；改了相机或换了遮挡物要重新生成。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset FEATHER_FANS --vmd "回レ！雪月花.vmd" --wave 140:220 --view 1.4</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="slot-machine">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/slot_machine.jpg">
+              <source src="../test_output/demo_v17/tifa_slot_machine_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">老虎机 · 跳舞（有声音）</span><span class="ver">1.15</span><span class="tag">VMD 舞蹈</span><span class="tag">遮挡</span><span class="tag">老虎机</span><span class="tag">瞬间换装</span><span class="tag">卡音乐节拍</span><span class="tag">全屏闪白</span></div>
+            <h3>老虎机开奖（新预设）</h3>
+            <p class="lead">一台老虎机掉到她面前弹两下，拉杆一拉三个滚轮一起转，再踩着拍子一个接一个停下：7、7、7，机器后面一下换好，灯泡全亮着闪，金币喷出来落了一地，机器升走（偶像梦幻祭七周年 MV 的老虎机）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">老虎机开奖</span>：<span class="ui">遮挡物</span> 选 <span class="v">老虎机</span>，<span class="ui">新服装登场</span> <span class="v">瞬间换装</span>，机身漆色是 <span class="ui">遮挡物颜色</span>。</li>
+            <li><span class="ui">音乐节拍</span> 里点 <span class="ui">找节拍</span>、打开 <span class="ui">卡音乐节拍</span>，滚轮就停在歌的拍子上（不开时隔 0.45 秒停一个）。</li>
+            <li><span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>；勾上 <span class="ui">先开樱桃</span> 时第一次开出樱桃、樱桃、铃铛，再拉一次才中。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset SLOT_MACHINE --white-flash --vmd "回レ！雪月花.vmd" --wave 150:210 --music "回レ！雪月花.mp3" --set beat_sync=1</code></p>
           </div>
         </article>
       </div>
@@ -3586,6 +3610,36 @@
         </article>
       </div>
     </section>
+    <section class="family card" id="fam-totem">
+      <div class="family-head">
+        <h3>雾中图腾</h3>
+        <p>她身后打转的雾，在变身开始的一刻聚成一个巨大的图形（星形、心形、文字或自己的网格物体），停到换装完成，再被风吹散（1.15）。</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="totem">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/totem.jpg">
+              <source src="../test_output/demo_v17/tifa_totem_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">雾中图腾 · 跳舞（有声音）</span><span class="ver">1.15</span><span class="tag">VMD 舞蹈</span><span class="tag">开始时机：举手向天</span><span class="tag">雾中图腾</span><span class="tag">开场落雷</span><span class="tag">碎片飞散</span><span class="tag">全屏闪白</span></div>
+            <h3>雾中图腾（新预设）</h3>
+            <p class="lead">雾在她身后打转；她把手举过头顶的一刻，一道闪电劈在手上，雾一下子聚成身后的一颗大星，变化从那只手扫遍全身，换成 Remake 版的蒂法，之后雾从一侧被风吹散（电影《宇宙巨人希曼》里雷电中出现的灰颅堡）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">雾中图腾</span>：<span class="ui">开始时机</span> <span class="v">举手向天</span>，<span class="ui">路径</span> <span class="v">球形扩散</span>，<span class="ui">电弧闪电</span> 和 <span class="ui">开场落雷</span> 勾上，<span class="ui">雾中图腾</span> 勾上、<span class="ui">形状</span> <span class="v">星形</span>。</li>
+            <li><span class="ui">图腾大小</span> 默认 1 倍身高，<span class="ui">盘旋时长</span> 默认 2 秒；形状可以改成心形、文字（写中文要选一个字体文件）或者自己的网格物体。</li>
+            <li><span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。演示把新衣服换成了 Remake 版蒂法。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset TOTEM --white-flash --vmd "回レ！雪月花.vmd" --wave 60:120 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
   </div>
 </section>
 
@@ -3626,7 +3680,7 @@
           <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>剪纸窗花</li><li>发光纹身</li><li>LED 屏幕</li><li>电子纸</li><li>也可以不变</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>40</b></h3>
+        <h3>叠加开关 <b>41</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行（全息 / 星空纱 / 黑剪影 / 冰晶）</li><li>故障风</li><li>光剪影</li><li>光带</li>
           <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
           <li>毒液共生体（触手、蹼、黏丝；黑色黏液或液态金属）</li>
@@ -3641,10 +3695,11 @@
           <li>舞蹈绸带（光带 / 水袖 / 混天绫 / 花瓣）</li><li>步步生莲（莲花 / 光印）</li>
           <li>外壳（结界罩 / 泡泡 / 护盾 / 糖纸 / 水壳）</li><li>熄灯</li><li>相机闪光灯（可以随闪光分段换装）</li>
           <li>镜头星芒</li><li>收尾亮相（写真定格 / 抽卡出金）</li>
-          <li>遮挡（打碎画面 / 飞布 / 雨伞 / 风扇叶片 / 表情包 / 画框 / 彩带炮 / 气球 / 羽扇 / 落幕）</li><li>台口火柱</li>
+          <li>遮挡（打碎画面 / 飞布 / 雨伞 / 风扇叶片 / 表情包 / 画框 / 彩带炮 / 气球 / 羽扇 / 落幕 / 老虎机）</li><li>台口火柱</li>
           <li>换色（变脸 / 颜色拉锯 / 历代舞伴）</li><li>长高变壮</li><li>跟着音乐推进</li>
           <li>前面的几套服装（每拍 / 每小节 / 每四小节一换；白闪 / 黑场）</li>
-          <li>次元切换（随前沿变写实 / 按拍闪切；反向、胶片质感、补光）</li></ul>
+          <li>次元切换（随前沿变写实 / 按拍闪切；反向、胶片质感、补光）</li>
+          <li>雾中图腾（星形 / 心形 / 文字 / 网格物体）</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
@@ -3654,7 +3709,7 @@
       </div>
     </div>
     <p class="sum">路径 × 登场 × 退场 × 粒子 = 20 × 13 × 5 × 18 = <b>23400</b> 种基本组合，再乘旧服装表面的 13 种就是 304200 种；
-      再叠加 40 个开关（收尾闪光有两种方式，内衬有两种样式，光环有七种样式，画稿有三种，火焰有两种范围，世界有五个，运镜有七种，绸带有四种，遮挡物有十种，换色有三种，次元切换有两种）和十六种开始时机，组合多到数不过来
+      再叠加 41 个开关（收尾闪光有两种方式，内衬有两种样式，光环有七种样式，画稿有三种，火焰有两种范围，世界有五个，运镜有七种，绸带有四种，遮挡物有十一种，换色有三种，次元切换有两种，雾中图腾有四种形状）和十六种开始时机，组合多到数不过来
       （「留在原地」在碎片飞散、装甲弹开、开了粒子、零件飞入或收尾星星时起作用；光环要配平面扫描或螺旋上升）。</p>
   </div>
 </section>
@@ -3792,6 +3847,8 @@
           <tr><td>次元切换</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>次元切换：随前沿变写实，胶片质感、补光</td></tr>
           <tr><td>次元闪切</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>次元切换：按拍闪切（2.5 秒），收尾闪光、全屏闪白</td></tr>
           <tr><td>激光打印</td><td>逐层打印（48 层）</td><td>边缘生长</td><td>碎片飞散（红色光屑）</td><td>激光头 4 个、支撑柱，噪波 0</td></tr>
+          <tr><td>老虎机开奖</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>遮挡：老虎机（踩拍停轮、金币），收尾闪光、全屏闪白</td></tr>
+          <tr><td>雾中图腾</td><td>球形扩散（从举起的手）</td><td>边缘生长</td><td>碎片飞散</td><td>开始时机：举手向天，开场落雷，雾中图腾（星形），收尾闪白</td></tr>
         </tbody>
       </table>
     </div>

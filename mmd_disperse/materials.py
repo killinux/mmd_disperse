@@ -5230,12 +5230,110 @@ def _cover_laser(name):
     return mat
 
 
+def _cover_slot(name):
+    """The slot machine's cabinet and lever (SLOT, slot.py): each face's colour (Col), how metallic (Metal) and how
+    bright (Glow) it is; the bulbs (Phase 0 or 1) light in turns as the object's mmdd_blink goes 0, 1, 0 ... and all of
+    them, the sign and the buttons flash brighter with mmdd_jackpot."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    color = s.attribute("Col", -1600, 300).outputs["Color"]
+    metal = s.attribute("Metal", -1600, 0).outputs[2]
+    glow = s.attribute("Glow", -1600, -150).outputs[2]
+    phase = s.attribute("Phase", -1600, -300).outputs[2]
+    blink = s.attribute("mmdd_blink", -1600, -450, "OBJECT").outputs[2]
+    jackpot = s.attribute("mmdd_jackpot", -1600, -600, "OBJECT").outputs[2]
+    bulb = m("GREATER_THAN", phase, -0.5, x=-1400, y=-300)
+    turn = m("SUBTRACT", 1.0, m("ABSOLUTE", m("SUBTRACT", blink, phase, x=-1400, y=-450), x=-1200, y=-450),
+             x=-1000, y=-450, clamp=True)
+    lit = m("MAXIMUM", m("MULTIPLY_ADD", turn, 0.85, 0.15, x=-800, y=-450), jackpot, x=-600, y=-450)
+    share = m("ADD", 1.0, m("MULTIPLY", bulb, m("SUBTRACT", lit, 1.0, x=-400, y=-450), x=-200, y=-400), x=0, y=-400)
+    strength = m("MULTIPLY", m("MULTIPLY", glow, share, x=200, y=-300), m("MULTIPLY_ADD", jackpot, 1.2, 1.0, x=0,
+                                                                         y=-600), x=400, y=-400)
+    nt.links.new(s.principled(700, 200, color=color, roughness=m("SUBTRACT", 0.4, m("MULTIPLY", metal, 0.22, x=200,
+                                                                                        y=0), x=400, y=0),
+                              metallic=metal, emission=color, strength=strength), out.inputs["Surface"])
+    mat.diffuse_color = (0.62, 0.02, 0.03, 1.0)
+    return mat
+
+
+def _cover_coin(name):
+    """The slot machine's coins (COIN): polished gold, a little brighter where they turn their face to the light."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    facing = s.node("ShaderNodeLayerWeight", -600, -200)
+    facing.inputs["Blend"].default_value = 0.3
+    nt.links.new(s.principled(-200, 200, color=(1.0, 0.68, 0.16), roughness=0.18, metallic=1.0,
+                              emission=(1.0, 0.6, 0.12), strength=s.math("MULTIPLY_ADD", facing.outputs["Facing"],
+                                                                         0.25, 0.05, x=-400, y=-200)),
+                 out.inputs["Surface"])
+    _two_sided(mat)
+    mat.diffuse_color = (1.0, 0.68, 0.16, 1.0)
+    return mat
+
+
+def _cover_mist(name):
+    """The totem's mist (MIST, totem.py): soft puffs of light in mmdd_color (the object's), brightest in their middle
+    and fading out to their rims, ragged with a noise (its size a share of mmdd_height, the object's), as bright as
+    each puff's mmdd_fade. It adds light: a glowing mist that piles up into the shape, in any order."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    tint = s.attribute("mmdd_color", -1600, 300, "OBJECT").outputs["Color"]
+    fade = s.attribute("mmdd_fade", -1600, -500).outputs[2]
+    height = s.attribute("mmdd_height", -1600, -700, "OBJECT").outputs[2]
+    facing = s.node("ShaderNodeLayerWeight", -1600, 0)
+    facing.inputs["Blend"].default_value = 0.5
+    core = m("POWER", m("SUBTRACT", 1.0, facing.outputs["Facing"], x=-1400, y=0), 2.5, x=-1200, y=0)
+    where = s.vmath("SCALE", s.node("ShaderNodeTexCoord", -1600, -250).outputs["Object"],
+                    scale=m("DIVIDE", 3.0, m("MAXIMUM", height, 1e-3, x=-1400, y=-700), x=-1200, y=-700), x=-1200,
+                    y=-250)
+    rag = s.noise(where, 1.0, 3.0, -1000, -250)
+    density = m("MULTIPLY", m("MULTIPLY", core, m("MULTIPLY_ADD", rag, 0.9, 0.4, x=-800, y=-250), x=-600, y=-100),
+                fade, x=-400, y=-200)
+    glow = s.emission(tint, m("MULTIPLY", density, 0.3, x=-200, y=-200), 0, 100)
+    add = s.node("ShaderNodeAddShader", 300, 0)
+    nt.links.new(s.node("ShaderNodeBsdfTransparent", 0, -100).outputs[0], add.inputs[0])
+    nt.links.new(glow, add.inputs[1])
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    if hasattr(mat, "use_backface_culling"):
+        mat.use_backface_culling = True
+    mat.diffuse_color = (0.55, 0.65, 1.0, 0.3)
+    return mat
+
+
+def _cover_reel(name):
+    """A reel of the slot machine (REEL, slot.py): its symbols (Col), a little lit from within; as the object's
+    mmdd_blur nears 1 they smear into streaks along the turn (stripes across the reel in their colours)."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    color = s.attribute("Col", -1400, 300).outputs["Color"]
+    blur = s.attribute("mmdd_blur", -1400, -400, "OBJECT").outputs[2]
+    across, _y, _z = s.split(s.node("ShaderNodeTexCoord", -1600, 0).outputs["Object"], -1400, 0)
+    stripes = s.node("ShaderNodeTexNoise", -1200, 0, noise_dimensions="1D")
+    s.feed(stripes.inputs["W"], m("MULTIPLY", across, 26.0, x=-1300, y=-150))
+    stripes.inputs["Scale"].default_value = 1.0
+    stripes.inputs["Detail"].default_value = 2.0
+    streak = s.ramp(stripes.outputs["Fac"], ((0.3, (0.9, 0.86, 0.76)), (0.45, (0.8, 0.12, 0.08)),
+                                             (0.55, (0.95, 0.85, 0.5)), (0.68, (0.25, 0.2, 0.18)),
+                                             (0.8, (0.9, 0.86, 0.76))), -1000, 0)
+    seen = s.lerp(color, streak, m("MULTIPLY", blur, 0.9, x=-1000, y=-400), -700, 200)
+    nt.links.new(s.principled(-300, 200, color=seen, roughness=0.35, emission=seen, strength=0.3),
+                 out.inputs["Surface"])
+    mat.diffuse_color = (0.92, 0.88, 0.78, 1.0)
+    return mat
+
+
 _COVER_MAKERS = {"MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS": _cover_glass,
                  "CLOTH": _cover_cloth, "UMBRELLA": _cover_umbrella, "FAN": _cover_fan, "EMOJI": _cover_emoji,
                  "FRAME": _cover_frame, "CANVAS": _cover_canvas, "PETALS": _cover_pieces, "PLUMES": _cover_plumes,
                  "CONFETTI": _cover_confetti, "CANNON": _cover_cannon, "BALLOON": _cover_balloon,
                  "CURTAIN": _cover_curtain, "SPARK": _cover_spark, "SPLAT": _cover_splat, "TOKEN": _cover_token,
-                 "CUT": _cover_cut, "PRINT_ROD": _cover_print_rod, "LASER": _cover_laser}
+                 "CUT": _cover_cut, "PRINT_ROD": _cover_print_rod, "LASER": _cover_laser, "SLOT": _cover_slot,
+                 "REEL": _cover_reel, "COIN": _cover_coin, "MIST": _cover_mist}
 
 
 # --------------------------------------------------------------------------- 1.14: the print (printer.py)

@@ -17,7 +17,9 @@ On the stage:
 * CONFETTI (彩带炮): cannons at the front of the stage fire foil streamers over her;
 * BALLOONS (气球放飞): a cloud of balloons bursts out in front of her and rises (Nymphia Wind's reveal);
 * FEATHERS (羽扇遮身): a great feather fan on each hand opens in front of her body (a burlesque fan dance);
-* CURTAIN (落幕): a red curtain comes down in front of her and drops to the floor (the kabuki drop).
+* CURTAIN (落幕): a red curtain comes down in front of her and drops to the floor (the kabuki drop);
+* SLOT (老虎机开奖, 1.15): a slot machine drops in front of her, its reels stop one by one on the beats, 7 7 7 at the
+  moment, and it rises away leaving coins on the floor (slot.py).
 
 The coverage check (覆盖判定): building plays the dance round the moment (the bones only, motion.play) and sees where
 she is on the picture every frame: the ends of all her deform bones, hair and skirt too, give her outline (watch).
@@ -36,12 +38,12 @@ from mathutils import Matrix, Vector
 from . import materials, motion, sampling, shots
 
 STYLES = ("NONE", "SHATTER", "CLOTH", "UMBRELLA", "FAN", "EMOJI", "FRAME", "CONFETTI", "BALLOONS", "FEATHERS",
-          "CURTAIN")
+          "CURTAIN", "SLOT")
 LENS = ("SHATTER", "CLOTH", "UMBRELLA", "FAN", "EMOJI")  # the covers in front of the camera
 MOVABLE = ("BALLOONS", "FEATHERS")  # the covers the moment moves for, to where they cover most of her
 P_COVER = "mmd_disperse_cover"  # on our objects: the mask of their effect ...
 P_KIND = "mmd_disperse_cover_kind"  # ... GLASS, CLOTH, UMBRELLA, PETALS, FAN, EMOJI, FRAME, CANVAS, FEATHERS_BURST,
-# CANNON, CONFETTI, BALLOONS, FAN_L, FAN_R, CURTAIN
+# CANNON, CONFETTI, BALLOONS, FAN_L, FAN_R, CURTAIN, SLOT, REEL_0..2, LEVER, COINS
 P_KEY = "mmd_disperse_cover_key"  # ... what it was made for
 P_SEEN = "mmd_disperse_cover_seen"  # on the mask: what building saw of the dancer round the moment (watch)
 P_MOVED = "mmd_disperse_cover_moved"  # ... and how many frames the coverage check moved the moment
@@ -142,8 +144,9 @@ def watch(scene, armature, frames, hidden=(), style="NONE", height=1.0):
     """What the camera sees of the dancer at `frames`, playing them (the bones only): (seen, points).
 
     `seen` (kept on the mask) has a row per frame: the box round her on the picture (x0, x1, y0, y1; padded), her head's
-    and her chest's spot on the picture with their depth in front of the camera, and the world positions of her head,
-    chest, hips and palms. Picture units as sampling.project: x across (its width the aspect), y up (its height 1), 0 in
+    and her chest's spot on the picture with their depth in front of the camera, the world positions of her head,
+    chest, hips and palms, and the camera's world matrix then (camera_w: an orbiting camera is somewhere else at the
+    moment than when the effect syncs). Picture units as sampling.project: x across (its width the aspect), y up (its height 1), 0 in
     the middle. `points` (not kept) are the picture spots (x, y arrays) of the ends of all her deform bones every frame.
     For the covers that hide only part of her (MOVABLE) `seen` also has how much of her the cover `style` would cover
     if the moment were at each frame ("cover"), worked out while that frame plays (the camera as it is then)."""
@@ -182,8 +185,10 @@ def watch(scene, armature, frames, hidden=(), style="NONE", height=1.0):
             seen["box"].extend([float("nan")] * 4)
             for key in ("head", "chest", "hips"):
                 seen[key].extend(nan3)
+            seen.setdefault("camera_w", []).extend([float("nan")] * 16)
             points.append((np.zeros(0), np.zeros(0)))
             return
+        seen.setdefault("camera_w", []).extend(float(v) for line in camera.matrix_world for v in line)
         x, y, ok = sampling.project(scene, camera, ends)
         x, y = x[ok], y[ok]
         points.append((x, y))
@@ -218,7 +223,7 @@ def row(seen, frame):
     i = int(np.argmin(np.abs(np.asarray(frames) - float(frame))))
     out = {"frame": frames[i]}
     for key, size in (("box", 4), ("head", 3), ("chest", 3), ("hips", 3), ("head_w", 3), ("chest_w", 3), ("hips_w", 3),
-                      ("palm_l", 3), ("palm_r", 3)):
+                      ("palm_l", 3), ("palm_r", 3), ("camera_w", 16)):
         values = list(seen.get(key, ()))
         out[key] = tuple(values[size * i:size * i + size]) if len(values) >= size * (i + 1) else (float("nan"),) * size
     return out
@@ -226,6 +231,27 @@ def row(seen, frame):
 
 def _finite(values):
     return all(math.isfinite(v) for v in values)
+
+
+class _AtMoment:
+    """The camera as it was at the moment (its world matrix then, as watch saw it); its lens and picture as they are.
+    The covers standing on the stage are placed for it."""
+
+    def __init__(self, camera, matrix):
+        self.camera, self.data, self.type, self.name = camera, camera.data, camera.type, camera.name
+        self.matrix_world = matrix
+
+    def calc_matrix_camera(self, *args, **kwargs):
+        return self.camera.calc_matrix_camera(*args, **kwargs)
+
+
+def at_moment(seen, frame, camera):
+    """`camera` as watch saw it at `frame` (the nearest frame it played), or as it is now when it saw nothing."""
+    here = row(seen, frame) if seen else None
+    values = here.get("camera_w") if here else None
+    if not values or not _finite(values):
+        return camera
+    return _AtMoment(camera, Matrix([values[0:4], values[4:8], values[8:12], values[12:16]]))
 
 
 def _discs_cover(x, y, discs):
@@ -1358,7 +1384,8 @@ def _curtain(settings, mask, seen, moment, camera, collection, fps, aspect, heig
 KINDS = {"SHATTER": ("GLASS",), "CLOTH": ("CLOTH",), "UMBRELLA": ("UMBRELLA", "PETALS"), "FAN": ("FAN",),
          "EMOJI": ("EMOJI",), "FRAME": ("FRAME", "CANVAS", "FEATHERS_BURST"),
          "CONFETTI": ("CONFETTI", "CANNON_0", "CANNON_1", "CANNON_2", "CANNON_3"), "BALLOONS": ("BALLOONS",),
-         "FEATHERS": ("FAN_L", "FAN_R"), "CURTAIN": ("CURTAIN",)}
+         "FEATHERS": ("FAN_L", "FAN_R"), "CURTAIN": ("CURTAIN",),
+         "SLOT": ("SLOT", "REEL_0", "REEL_1", "REEL_2", "LEVER", "COINS")}
 
 
 def sync(settings, mask, models, moment):
@@ -1380,6 +1407,7 @@ def sync(settings, mask, models, moment):
     aspect = sampling.picture_aspect(scene)
     collection = mask.users_collection[0] if mask.users_collection else scene.collection
     here = row(seen, moment)
+    stage = at_moment(seen, moment, camera)  # (the covers on the stage: for the camera as it is at the moment)
     armature = next((m.armature for m in models if m.armature is not None), None)
     from .model import rest_bounds
 
@@ -1395,12 +1423,16 @@ def sync(settings, mask, models, moment):
     elif style == "EMOJI":
         _emoji(settings, mask, seen, moment, camera, collection, fps, aspect, height, armature)
     elif style == "FRAME":
-        _frame(settings, mask, seen, moment, camera, collection, fps, aspect, height)
+        _frame(settings, mask, seen, moment, stage, collection, fps, aspect, height)
     elif style == "CONFETTI":
-        _confetti(settings, mask, seen, moment, camera, collection, fps, aspect, height, floor)
+        _confetti(settings, mask, seen, moment, stage, collection, fps, aspect, height, floor)
     elif style == "BALLOONS":
-        _balloons(settings, mask, seen, moment, camera, collection, fps, height)
+        _balloons(settings, mask, seen, moment, stage, collection, fps, height)
     elif style == "FEATHERS":
         _feather_fans(settings, mask, seen, moment, camera, collection, fps, height, armature)
     elif style == "CURTAIN":
-        _curtain(settings, mask, seen, moment, camera, collection, fps, aspect, height, floor)
+        _curtain(settings, mask, seen, moment, stage, collection, fps, aspect, height, floor)
+    elif style == "SLOT":
+        from . import slot
+
+        slot.place(settings, mask, seen, moment, stage, collection, fps, aspect, height, floor)

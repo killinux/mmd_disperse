@@ -10,7 +10,7 @@ from mathutils import Matrix, Vector
 
 from . import (arrival, beats, chain, compositor, cover, dimension, domain, finish, glint, grow, impact, launch, lights,
                materials, mist, motion, origins, particles, picture, printer, pyro, replay, ribbons, rings, sampling,
-               shell, shots, spirit, timewarp, tint, toon, trails, venom)
+               shell, shots, spirit, timewarp, tint, toon, totem, trails, venom)
 from . import model as mdl
 from .node_groups import (ATTR_ARRIVAL, BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups,
                           input_identifiers)
@@ -560,6 +560,7 @@ def remove_effect(mask):
     origins.remove(mask)
     printer.remove(mask)
     dimension.remove(mask)
+    totem.remove(mask)
     grow.remove(mask)
     chain.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
@@ -1240,6 +1241,8 @@ def sync(settings):
     printer.sync(settings, mask, _models(settings), lambda radius: _frame_at(mask, radius))  # 1.14
     chain.sync(settings, mask, mdl.resolve(settings.base) if settings.base else None)
     glint.sync(settings, mask, next(iter(_models(settings)), None))  # 1.12: the star in the eyes (eye contact)
+    totem.sync(settings, mask, _models(settings), lambda radius: _frame_at(mask, radius),
+               _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.15: the totem in the mist
     # 1.11: cartoon physics at the big moment (the first frame of it: the swap, or the new outfit complete), about an
     # anchor under the old model's hips; the float lands then
     landing = _frame_at(mask, big) if wave_at > 0.0 else None

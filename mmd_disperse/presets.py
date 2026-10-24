@@ -16,7 +16,7 @@ _OFF = dict(
     soul_enable=False, domain_enable=False, shot_enable=False, time_warp="NONE", toon_style="NONE", float_up=False,
     husk_motion="STILL", trail_enable=False, step_flowers=False, look_style="NONE", holo_style="SCAN",
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
-    cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE",
+    cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -623,6 +623,20 @@ PRESETS = (
                                              "realistic (次元闪切; best with the music's beats)",
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, dim_style="BEATS", dim_length=2.5,
           dim_film=True, dim_lights=True, finale=True, finale_white=0.3, glow_color=(1.0, 1.0, 1.0))),
+    # --- 1.15: the slot machine, the totem in the mist
+    ("SLOT_MACHINE", "Slot Machine", "A slot machine drops in front of her, the lever is pulled and the reels stop "
+                                     "one by one on the beats: 7 7 7, the outfits swap behind it in a flash, coins "
+                                     "gush out and it rises away (老虎机开奖; best with the music's beats)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="SLOT",
+          cover_color=(0.62, 0.02, 0.03), slot_tease=False, finale=True, finale_white=0.25,
+          glow_color=(1.0, 0.85, 0.4))),
+    ("TOTEM", "Totem in the Mist", "Mist swirls behind her; as her hand goes up lightning strikes it, the mist is "
+                                   "drawn into a great star behind her while the change runs from her hand over her, "
+                                   "and blows away once she is done (雾中图腾, He-Man's \"I have the power!\")",
+     dict(_OFF, trigger="RAISE", path="SPHERE", arc_enable=True, arc_strike=True, exit_style="FRAGMENTS",
+          frag_glow=True, edge_glow_strength=5.0, finale=True, finale_white=0.5, totem_enable=True,
+          totem_shape="STAR", totem_color=(0.45, 0.6, 1.0), particle_color=(0.7, 0.8, 1.0), particle_glow=3.0,
+          glow_color=(0.5, 0.65, 1.0), frag_wind_dir=(0.0, 0.3, 1.0))),
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
@@ -634,7 +648,7 @@ WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPAR
                "SOUL_DEPART", "IMPACT", "IDOL", "SOUL_RINGS", "DOMAIN", "SKY_MIRROR", "CONCERT", "VELOCITY",
                "SPLIT", "FIGURINE", "NEZHA", "HEART", "SILHOUETTE", "STARRY_VEIL", "IRIS", "CLOCK_HAND", "DHARMA",
                "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE", "COLOR_TUG", "ERAS",
-               "POWER_UP", "DIMENSION_BEATS"}
+               "POWER_UP", "DIMENSION_BEATS", "SLOT_MACHINE", "TOTEM"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 
@@ -644,6 +658,12 @@ def apply(settings, key):
     values = next(values for k, _label, _description, values in PRESETS if k == key)
     rebuild = False
     height = None
+    if settings.auto_size:  # (the sizes back at their share of the model height first: one preset's own sizes, like
+        # the print's even layers without noise, do not carry over into the next preset)
+        from .effect import fit_sizes
+
+        height = _model_height(settings)
+        fit_sizes(settings, height)
     for name, value in values.items():
         if isinstance(value, Height):
             if height is None:

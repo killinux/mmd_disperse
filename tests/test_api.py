@@ -3028,6 +3028,230 @@ def run():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.14 checks")
 
+    # --- 1.15: the slot machine (a cover), the totem in the mist
+    from mmd_disperse import cover_nodes, slot, totem  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "cover_style",
+        "cover_color", "slot_tease", "beat_sync", "trigger", "finale", "totem_enable", "totem_shape", "totem_text",
+        "totem_object", "totem_size", "totem_lead", "arc_enable", "arc_strike")}
+    made_camera = None
+    if scene.camera is None:  # (the machine is fitted to its picture, the totem stands behind her from it)
+        made_camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(made_camera)
+        made_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
+        made_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        scene.camera = made_camera
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.arc_enable = "NONE", False, False, False
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end, s.slot_tease = 20, 80, False
+    s.cover_style = "SLOT"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the slot machine")
+    mask = s.mask
+    kinds = sorted({o.get(cover.P_KIND) for o in cover.objects(mask)})
+    check(kinds == ["COINS", "LEVER", "REEL_0", "REEL_1", "REEL_2", "SLOT"],
+          "slot machine: the cabinet, three reels, the lever and the coins (%s)" % kinds)
+    moment = effect._frame_at(mask, effect._finale_start(s, float(mask.get(effect.P_WAVE, 0.0)), mask))
+    rounds, when = slot.plan(moment, [], fps, False)
+    machine = cover.objects(mask, "SLOT")[0]
+    reels = [cover.objects(mask, "REEL_%d" % k)[0] for k in range(3)]
+    coins = cover.objects(mask, "COINS")[0]
+    step = 2.0 * math.pi / len(slot.SLOTS)
+
+    def showing():
+        out = []
+        for r in reels:
+            a = r.rotation_euler[0] / step
+            out.append((int(round(a)) % len(slot.SLOTS), abs(a - round(a)) < 0.02, float(r.get("mmdd_blur", 0.0))))
+        return out
+
+    from mmd_disperse.model import rest_bounds  # noqa: E402
+    floor_z = rest_bounds(base.meshes)[0].z  # (where she stands: what is left of the old outfit may be her head)
+    scene.frame_set(int(math.floor(when["start"])) - 1)
+    hidden_before = machine.hide_render
+    scene.frame_set(int(math.ceil(when["land"])) + 1)
+    landed_z = machine.matrix_world.translation.z
+    stops = rounds[-1][2]
+    scene.frame_set(int(round(0.5 * (stops[0] + stops[1]))))
+    halfway = showing()
+    scene.frame_set(int(math.ceil(moment)) + 1)
+    jackpot = showing()
+    check(hidden_before and abs(landed_z - floor_z) < 0.02 * height and halfway[0][:2] == (0, True)
+          and halfway[1][2] > 0.5 and halfway[2][2] > 0.5 and all(j[:2] == (0, True) and j[2] == 0.0 for j in jackpot),
+          "slot machine: lands on the floor, the reels stop one by one and show 7 7 7 at the moment (%s, %s)"
+          % (halfway, jackpot))
+    # it hides all of her at the moment: her box on the picture inside its front
+    here = cover.row(cover.seen_of(mask), moment)
+    xs, ys, ok = sampling.project(scene, scene.camera, [machine.matrix_world @ Vector((x, -0.5 * slot.DEPTH, z)) for x in
+                                                         (-0.5 * float(machine.get(cover.P_KEY).split(":")[1]),
+                                                          0.5 * float(machine.get(cover.P_KEY).split(":")[1]))
+                                                         for z in (0.0, 1.0)])
+    box = here["box"] if here else (0.0, 0.0, 0.0, 0.0)
+    check(ok.all() and xs.min() <= box[0] + 1e-3 and xs.max() >= box[1] - 1e-3 and ys.min() <= box[2] + 1e-3
+          and ys.max() >= box[3] - 1e-3,
+          "slot machine: its front covers all of her on the picture at the moment (%.2f..%.2f x %.2f..%.2f over "
+          "%.2f..%.2f x %.2f..%.2f)" % (xs.min(), xs.max(), ys.min(), ys.max(), box[0], box[1], box[2], box[3]))
+    blink = [d for d in (machine.animation_data.drivers if machine.animation_data else [])
+             if d.data_path == '["mmdd_blink"]']
+    check(len(blink) == 1 and blink[0].driver.is_valid and blink[0].driver.is_simple_expression,
+          "slot machine: the bulbs take turns by a simple expression of the frame (no Python)")
+    scene.frame_set(int(math.floor(moment)) - 2)
+    before_coins = evaluated_counts(coins)
+    scene.frame_set(int(math.ceil(moment + (slot.COIN_GUSH + 1.6) * fps)))
+    flying = evaluated_counts(coins)
+    lowest = None
+    if flying:
+        ev = coins.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        me = ev.to_mesh()
+        lowest = min((coins.matrix_world @ v.co).z for v in me.vertices)
+        ev.to_mesh_clear()
+    scene.frame_set(int(math.ceil(when["gone"])) + 2)
+    gone = machine.hide_render and all(r.hide_render for r in reels)
+    check(before_coins == 0 and flying > 0 and lowest is not None and lowest > floor_z - 0.01 * height and gone,
+          "slot machine: coins gush out at the moment and lie on the floor (lowest %.3f, floor %.3f), the machine "
+          "gone after it rises" % (lowest if lowest is not None else float("nan"), floor_z))
+    s.slot_tease = True
+    rounds, when = slot.plan(moment, [], fps, True)
+    lever = cover.objects(mask, "LEVER")[0]
+    scene.frame_set(int(math.ceil(rounds[0][2][2])) + 1)
+    miss = showing()
+    pulls = []
+    for f in range(int(when["start"]), int(moment)):
+        scene.frame_set(f)
+        pulls.append(lever.rotation_euler[0])
+    peaks = sum(1 for i in range(1, len(pulls) - 1) if pulls[i] > 0.8 and pulls[i] >= pulls[i - 1]
+                and pulls[i] > pulls[i + 1])
+    check([m_[0] for m_ in miss] == list(slot.MISS) and peaks == 2,
+          "cherries first: the first pull stops on cherry, cherry, bell (%s) and the lever is pulled twice (%d)"
+          % (miss, peaks))
+    # an orbiting camera (on an animated pivot): its matrix at a frame without going there; the machine is turned to
+    # the camera as it is at the moment, wherever the scene is when the effect syncs
+    pivot = bpy.data.objects.new("MMDD Test Pivot", None)
+    scene.collection.objects.link(pivot)
+    pivot.location = (float(centre_xy[0]), float(centre_xy[1]), 0.0)
+    orbiting = bpy.data.objects.new("MMDD Orbit Camera", bpy.data.cameras.new("MMDD Orbit Camera"))
+    scene.collection.objects.link(orbiting)
+    orbiting.parent = pivot
+    orbiting.location = (0.0, -2.5 * height, 0.55 * height)
+    orbiting.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+    for f_, a_ in ((1, -25.0), (100, 25.0)):
+        pivot.rotation_euler = (0.0, 0.0, math.radians(a_))
+        pivot.keyframe_insert("rotation_euler", index=2, frame=f_)
+    was_camera = scene.camera
+    scene.camera = orbiting
+    scene.frame_set(1)
+    guess = sampling.matrix_at(orbiting, 63.0)
+    scene.frame_set(63)
+    real_m = orbiting.matrix_world.copy()
+    check(max(abs(guess[i][j] - real_m[i][j]) for i in range(4) for j in range(4)) < 1e-3 * height,
+          "matrix_at: an orbiting camera's matrix at a frame without going there")
+    s.slot_tease = False
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "slot machine built for an orbiting camera")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    scene.frame_set(1)
+    effect.sync(s)  # (synced far from the moment: the camera is somewhere else then)
+    machine = cover.objects(s.mask, "SLOT")[0]
+    scene.frame_set(int(round(moment)))
+    front = machine.matrix_world.to_3x3() @ Vector((0.0, -1.0, 0.0))
+    to_cam = orbiting.matrix_world.translation - machine.matrix_world.translation
+    front.z = to_cam.z = 0.0
+    turned = math.degrees(front.angle(to_cam)) if front.length and to_cam.length else 180.0
+    check(turned < 3.0, "slot machine: faces the camera as it is at the moment though synced at frame 1 (%.1f deg off)"
+          % turned)
+    scene.camera = was_camera
+    bpy.data.objects.remove(orbiting)
+    bpy.data.objects.remove(pivot)
+    s.cover_style = "SLOT"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "slot machine built again for the test camera")
+    check(not draw_panels(bpy.context), "panels draw with the slot machine")
+    s.cover_style = "NONE"
+    check(not cover.objects(mask) and not [m_ for m_ in bpy.data.materials if m_.name.startswith(
+        materials.COVER_MATERIAL + " Slot") or m_.name.startswith(materials.COVER_MATERIAL + " Reel")],
+          "slot machine off: its pieces and materials gone")
+    # the totem in the mist: it swirls, gathers into the shape at the start of the transformation, blows away after
+    s.cover_style, s.slot_tease = "NONE", False
+    s.totem_enable, s.totem_shape, s.totem_size, s.totem_lead = True, "STAR", 1.25, 2.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the totem in the mist")
+    mask = s.mask
+    obs = totem.objects(mask)
+    mod = obs[0].modifiers[0] if obs and obs[0].modifiers else None
+    ids = input_identifiers(mod.node_group) if mod else {}
+    gather = float(mod[ids["Gather"]]) if mod else -1.0
+    release = float(mod[ids["Release"]]) if mod else -1.0
+    moment = effect._frame_at(mask, effect._finale_start(s, float(mask.get(effect.P_WAVE, 0.0)), mask))
+    check(len(obs) == 1 and len(obs[0].data.vertices) == totem.PUFFS and abs(gather - s.frame_start) < 0.5
+          and release >= moment, "totem: %d puffs gathering at the start (%.1f), blowing away after the new outfit is "
+                                  "complete (%.1f >= %.1f)" % (len(obs[0].data.vertices) if obs else 0, gather,
+                                                              release, moment))
+    if obs:
+        ob = obs[0]
+        target_at = np.empty(3 * totem.PUFFS, dtype=np.float32)
+        ob.data.attributes["mmdd_target"].data.foreach_get("vector", target_at)
+        target_at = target_at.reshape(-1, 3)
+        scene.frame_set(int(math.floor(mod[ids["Start"]])) - 2)
+        dark = evaluated_counts(ob)
+        scene.frame_set(int(math.ceil(gather + 0.8 * float(mod[ids["Gather Time"]]))) + 1)
+        deps = bpy.context.evaluated_depsgraph_get()
+        ev = ob.evaluated_get(deps)
+        me = ev.to_mesh()
+        corners = np.empty(3 * len(me.vertices), dtype=np.float32)
+        me.vertices.foreach_get("co", corners)
+        ev.to_mesh_clear()
+        per = len(corners) // (3 * totem.PUFFS) if len(corners) else 0
+        centres = corners.reshape(totem.PUFFS, per, 3).mean(axis=1) if per else np.zeros((0, 3))
+        off = np.linalg.norm(centres - target_at, axis=1) if len(centres) else np.array([np.inf])
+        scene.frame_set(int(math.ceil(release + float(mod[ids["Blow Time"]]) * 1.4)) + 2)
+        after = evaluated_counts(ob)
+        check(dark == 0 and per > 0 and float(np.median(off)) < 0.08 * height and after == 0,
+              "totem: no mist before it swirls, the puffs in their places in the star once it gathers (median %.3f "
+              "model heights off), none left once it has blown away" % (float(np.median(off)) / height))
+    sizes = {}
+    for shape in ("HEART", "TEXT"):
+        s.totem_shape = shape
+        made = totem.objects(mask)
+        sizes[shape] = len(made[0].data.vertices) if made else 0
+    s.totem_shape = "OBJECT"
+    nothing = not totem.objects(mask)
+    bpy.ops.mesh.primitive_monkey_add(size=1.0)
+    monkey = bpy.context.active_object
+    s.totem_object = monkey
+    made = totem.objects(mask)
+    check(sizes == {"HEART": totem.PUFFS, "TEXT": totem.PUFFS} and nothing and made
+          and made[0].get(totem.P_KEY, "").count(monkey.name) == 1,
+          "totem: a heart, words, nothing without a mesh, then the shape of a mesh (%s)" % sizes)
+    check(not draw_panels(bpy.context), "panels draw with the totem")
+    s.totem_object = None
+    bpy.data.objects.remove(monkey)
+    s.totem_enable = False
+    check(not totem.objects(mask) and bpy.data.node_groups.get(cover_nodes.TOTEM_GROUP) is None
+          and bpy.data.objects.get(cover_nodes.PUFF) is None,
+          "totem off: its mist, group and puff gone")
+    if made_camera is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    # a preset's own sizes (the print's even layers: no noise, no push) do not carry over into the next preset (on a
+    # stand-in for the panel: nothing to rebuild, nothing left behind)
+    from mmd_disperse import presets as presets_  # noqa: E402
+
+    class _Panel:
+        def __init__(self, size):
+            self.auto_size, self.size_reference, self.base, self.target = True, size, None, None
+
+        def __getattr__(self, name):
+            return None
+
+    stand_in = _Panel(height)
+    presets_.apply(stand_in, "LASER_PRINT")
+    printed = (stand_in.noise_amount, stand_in.edge_push)
+    presets_.apply(stand_in, "MAGICAL")
+    check(printed == (0.0, 0.0) and abs(stand_in.noise_amount - effect.SIZE_RATIOS["noise_amount"] * height) < 1e-6 * height
+          and abs(stand_in.edge_push - effect.SIZE_RATIOS["edge_push"] * height) < 1e-6 * height,
+          "presets: the next preset starts from the sizes fitted to the model (noise %.4f, push %.4f)"
+          % (stand_in.noise_amount, stand_in.edge_push))
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.15 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

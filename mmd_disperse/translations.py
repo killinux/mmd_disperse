@@ -625,6 +625,22 @@ _ZH = {
     ("*", "Studio Lights"): "补光",
     ("*", "Into the Real"): "次元切换",
     ("*", "Dimension Flicker"): "次元闪切",
+    # 1.15
+    ("*", "Slot Machine"): "老虎机开奖",
+    ("*", "Cherries First"): "先开樱桃",
+    ("*", "Totem in the Mist"): "雾中图腾",
+    ("*", "Shape"): "形状",
+    ("*", "Star"): "星形",
+    ("*", "Heart"): "心形",
+    ("*", "Words"): "文字",
+    ("*", "Mesh"): "网格物体",
+    ("*", "Font"): "字体",
+    ("*", "Totem Color"): "图腾颜色",
+    ("*", "Totem Size"): "图腾大小",
+    ("*", "Swirl Time"): "盘旋时长",
+    ("*", "Best with Start On: Hand to the Sky"): "最好配合「开始时机：举手向天」",
+    ("*", "Pick a mesh"): "请选一个网格物体",
+    ("*", "The machine comes in before the scene starts: start the effect later"): "老虎机在场景开始前就要落下：请把效果往后放",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

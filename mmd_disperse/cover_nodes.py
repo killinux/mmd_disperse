@@ -48,7 +48,9 @@ TIP = "MMD Disperse Print Tip"
 BEAM = "MMD Disperse Laser Beam"
 CUBE = "MMD Disperse Print Cube"
 LASER_HEAD = "MMD Disperse Laser Head"
-REVISION = 3  # bumped when one of these groups changes
+TOTEM_GROUP = "MMDDisperse Totem Mist"
+PUFF = "MMD Disperse Totem Puff"
+REVISION = 7  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -180,10 +182,11 @@ def build_pieces_group():
         ("Flutter", "NodeSocketFloat", 0.05),
         ("Spin", "NodeSocketFloat", 0.2),
         ("Life", "NodeSocketFloat", 60.0),
+        ("Floor", "NodeSocketFloat", -1.0e9),
         ("Material", "NodeSocketMaterial"),
     ))
     gi = b.node("NodeGroupInput", -2000, 0)
-    go = b.node("NodeGroupOutput", 2200, 0)
+    go = b.node("NodeGroupOutput", 2400, 0)
     frame = b.node("GeometryNodeInputSceneTime", -2000, -300).outputs["Frame"]
     t0 = b.named_attribute("mmdd_t0", "FLOAT", x=-2000, y=-450)[0]
     vel = b.named_attribute("mmdd_v", "FLOAT_VECTOR", x=-2000, y=-600)[0]
@@ -214,13 +217,22 @@ def build_pieces_group():
                      scale=b.math("MULTIPLY", gi.outputs["Flutter"], ramp, x=-200, y=-1650), x=0, y=-1700)
     moved = b.set_position(alive, offset=b.vmath("ADD", b.vmath("ADD", flown, fall, x=200, y=-1100), wobble, x=400,
                                                  y=-1300), x=400, y=0)
+    # what falls onto the floor (the slot machine's coins) lies there flat; nothing is below it by default
+    px, py, pz = b.split_xyz(b.node("GeometryNodeInputPosition", 400, -150).outputs[0], x=500, y=-150)
+    landed = b.compare("LESS_THAN", pz, gi.outputs["Floor"], x=600, y=-250)
+    moved = b.store(moved, "mmdd_landed", landed, data_type="BOOLEAN", x=500, y=0)  # (before it is put on it)
+    moved = b.set_position(moved, position=b.combine(px, py, b.math("MAXIMUM", pz, gi.outputs["Floor"], x=600,
+                                                                     y=-150), x=700, y=-150), x=600, y=100)
     share = b.math("DIVIDE", age, life, x=200, y=-300, clamp=True)
-    moved = b.store(moved, "mmdd_age", share, x=600, y=0)
+    moved = b.store(moved, "mmdd_age", share, x=700, y=0)
     info = b.node("GeometryNodeObjectInfo", 400, -500)
     b.feed(info.inputs["Object"], gi.outputs["Instance"])
     spin = b.vmath("SCALE", b.vmath("NORMALIZE", axis, x=400, y=-900),
                    scale=b.math("MULTIPLY", b.math("MULTIPLY", age, gi.outputs["Spin"], x=200, y=-1000),
                                 b.math("ADD", r, 0.5, x=200, y=-1150), x=400, y=-1050), x=600, y=-900)
+    flat = b.combine(0.0, 0.0, b.math("MULTIPLY", r, 6.2832, x=400, y=-750), x=600, y=-750)
+    spin = b.switch("VECTOR", b.named_attribute("mmdd_landed", "BOOLEAN", x=600, y=-600)[0], spin, flat, x=800,
+                    y=-850)
     grow = b.math("MULTIPLY", b.math("MINIMUM", b.math("DIVIDE", age, 3.0, x=400, y=-1300), 1.0, x=600, y=-1300),
                   b.map_range(share, 0.8, 1.0, 1.0, 0.0, x=600, y=-1450), x=800, y=-1350)
     pieces = b.node("GeometryNodeInstanceOnPoints", 800, 0)
@@ -1084,6 +1096,155 @@ def ensure_print_lasers_group():
     if not _current(PRINT_LASERS_GROUP):
         build_print_lasers_group()
     return bpy.data.node_groups[PRINT_LASERS_GROUP]
+
+
+# --------------------------------------------------------------------------- 1.15: the totem in the mist (totem.py)
+
+def _puff_mesh():
+    """A puff of the totem's mist: a round blob (an icosphere) of radius 1, shaded smooth."""
+    import bmesh
+
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=1, radius=1.0)
+    me = bpy.data.meshes.new(PUFF)
+    bm.to_mesh(me)
+    bm.free()
+    me.polygons.foreach_set("use_smooth", [True] * len(me.polygons))
+    me.update()
+    return me
+
+
+def ensure_puff_object(scene):
+    return _asset(PUFF, _puff_mesh, scene)
+
+
+def build_totem_group():
+    """The totem's puffs (totem.py's points) by the frame: they turn in their swirl (a vortex in the X/Z plane at
+    mmdd_depth, or round the Z axis near the floor: mmdd_ground) from Start, are drawn into their places in the shape
+    (mmdd_target) round Gather (each a little earlier or later: mmdd_delay), stir there, and from Release blow away
+    along mmdd_way and a noise, growing and fading out over Blow Time. mmdd_fade (how bright each is) for the
+    material; a Puff on each, realised."""
+    ng, b = _group(TOTEM_GROUP, (
+        ("Start", "NodeSocketFloat", 0.0),
+        ("Gather", "NodeSocketFloat", 60.0),
+        ("Gather Time", "NodeSocketFloat", 12.0),
+        ("Release", "NodeSocketFloat", 90.0),
+        ("Blow Time", "NodeSocketFloat", 36.0),
+        ("Fps", "NodeSocketFloat", 30.0),
+        ("Height", "NodeSocketFloat", 1.6),
+        ("Puff", "NodeSocketObject"),
+        ("Size", "NodeSocketFloat", 0.1),
+        ("Material", "NodeSocketMaterial"),
+    ))
+    gi = b.node("NodeGroupInput", -2600, 0)
+    go = b.node("NodeGroupOutput", 2400, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -2600, -300).outputs["Frame"]
+    height = gi.outputs["Height"]
+    r, lift, phase = b.split_xyz(b.named_attribute("mmdd_orbit", "FLOAT_VECTOR", x=-2600, y=-450)[0], x=-2400,
+                                 y=-450)
+    speed = b.named_attribute("mmdd_speed", "FLOAT", x=-2600, y=-650)[0]
+    depth = b.named_attribute("mmdd_depth", "FLOAT", x=-2600, y=-800)[0]
+    ground = b.named_attribute("mmdd_ground", "FLOAT", x=-2600, y=-950)[0]
+    delay = b.named_attribute("mmdd_delay", "FLOAT", x=-2600, y=-1100)[0]
+    seed = b.named_attribute("mmdd_seed", "FLOAT", x=-2600, y=-1250)[0]
+    way = b.named_attribute("mmdd_way", "FLOAT_VECTOR", x=-2600, y=-1400)[0]
+    target = b.named_attribute("mmdd_target", "FLOAT_VECTOR", x=-2600, y=-1550)[0]
+    gather, span = gi.outputs["Gather"], gi.outputs["Gather Time"]
+    # the swirl (mmdd_speed: radians a second), turning on through the gathering, so it spirals in
+    seconds = b.math("DIVIDE", b.math("SUBTRACT", frame, gather, x=-2200, y=-600),
+                     b.math("MAXIMUM", gi.outputs["Fps"], 1.0, x=-2200, y=-750), x=-2000, y=-600)
+    angle = b.math("ADD", phase, b.math("MULTIPLY", speed, seconds, x=-1800, y=-600), x=-1600, y=-500)
+    wobble = b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.077, b.math("MULTIPLY", phase, 3.0,
+                                                                                            x=-2000, y=-800),
+                                                      x=-1800, y=-800), x=-1600, y=-800),
+                    b.math("MULTIPLY", height, 0.04, x=-1600, y=-950), x=-1400, y=-850)
+    c, sn = b.math("COSINE", angle, x=-1400, y=-450), b.math("SINE", angle, x=-1400, y=-600)
+    rc, rs = b.math("MULTIPLY", r, c, x=-1200, y=-450), b.math("MULTIPLY", r, sn, x=-1200, y=-600)
+    vortex = b.combine(rc, depth, b.math("ADD", b.math("ADD", lift, rs, x=-1000, y=-650), wobble, x=-800, y=-650),
+                       x=-600, y=-500)
+    ring = b.combine(rc, rs, b.math("MULTIPLY_ADD", wobble, 0.3, lift, x=-1000, y=-800), x=-600, y=-750)
+    orbit = b.switch("VECTOR", b.compare("GREATER_THAN", ground, 0.5, x=-800, y=-950), vortex, ring, x=-400, y=-600)
+    # drawn into the shape round Gather, each in its turn, stirring there
+    s0 = b.math("ADD", b.math("SUBTRACT", gather, b.math("MULTIPLY", span, 0.5, x=-1400, y=-1100), x=-1200, y=-1100),
+                b.math("MULTIPLY", b.math("SUBTRACT", delay, 0.5, x=-1400, y=-1250), b.math("MULTIPLY", span, 0.6,
+                                                                                            x=-1400, y=-1400),
+                       x=-1200, y=-1300), x=-1000, y=-1200)
+    g = b.map_range(frame, s0, b.math("ADD", s0, span, x=-800, y=-1300), x=-600, y=-1200, smooth=True)
+    stir = b.node("ShaderNodeTexNoise", -1200, -1600, noise_dimensions="4D")
+    b.feed(stir.inputs["Vector"], b.vmath("SCALE", target, scale=b.math("DIVIDE", 1.5, height, x=-1400, y=-1700),
+                                          x=-1400, y=-1600))
+    b.feed(stir.inputs["W"], b.math("MULTIPLY", frame, 0.02, x=-1400, y=-1800))
+    stir.inputs["Scale"].default_value = 1.0
+    held = b.vmath("ADD", target, b.vmath("SCALE", b.vmath("SUBTRACT", stir.outputs["Color"], (0.5, 0.5, 0.5),
+                                                           x=-1000, y=-1600),
+                                          scale=b.math("MULTIPLY", height, 0.04, x=-1000, y=-1750), x=-800, y=-1600),
+                   x=-600, y=-1550)
+    here = b.vmath("ADD", orbit, b.vmath("SCALE", b.vmath("SUBTRACT", held, orbit, x=-400, y=-1300), scale=g,
+                                         x=-200, y=-1300), x=0, y=-900)
+    # blown away from Release on (one side of the shape first: mmdd_delay)
+    blow = gi.outputs["Blow Time"]
+    b0 = b.math("ADD", gi.outputs["Release"], b.math("MULTIPLY", delay, b.math("MULTIPLY", blow, 0.35, x=-400,
+                                                                                y=-2000), x=-200, y=-2000),
+                x=0, y=-2000)
+    gone = b.map_range(frame, b0, b.math("ADD", b0, blow, x=200, y=-2100), x=400, y=-2000, smooth=True)
+    wind = b.node("ShaderNodeTexNoise", 0, -2300)
+    b.feed(wind.inputs["Vector"], b.vmath("SCALE", here, scale=b.math("DIVIDE", 0.8, height, x=-200, y=-2400),
+                                          x=-200, y=-2300))
+    wind.inputs["Scale"].default_value = 1.0
+    gust = b.vmath("ADD", b.vmath("ADD", b.vmath("SCALE", way, scale=0.6, x=200, y=-2500),
+                                  b.vmath("SUBTRACT", wind.outputs["Color"], (0.5, 0.5, 0.5), x=200, y=-2300), x=400,
+                                  y=-2400), (0.7, 0.0, 0.3), x=600, y=-2400)
+    away = b.vmath("SCALE", gust, scale=b.math("MULTIPLY", b.math("POWER", gone, 1.4, x=600, y=-2100),
+                                               b.math("MULTIPLY", height, 1.3, x=600, y=-2250), x=800, y=-2150),
+                   x=1000, y=-2300)
+    moved = b.set_position(gi.outputs["Geometry"], position=b.vmath("ADD", here, away, x=1200, y=-1000), x=200, y=0)
+    # how bright: coming up from Start, brighter in the shape, fading out as it blows away
+    rise = b.map_range(frame, gi.outputs["Start"], b.math("ADD", gi.outputs["Start"], 15.0, x=200, y=-400), x=400,
+                       y=-400, smooth=True)
+    fade = b.math("MULTIPLY", b.math("MULTIPLY", rise, b.math("SUBTRACT", 1.0, gone, x=400, y=-600), x=600,
+                                     y=-500), b.math("MULTIPLY_ADD", g, 0.92, 0.08, x=600, y=-700), x=800, y=-550)
+    moved = b.store(moved, "mmdd_fade", fade, x=600, y=0)
+    moved = b.delete(moved, b.compare("LESS_THAN", fade, 0.002, x=800, y=-300), "POINT", x=800, y=0)
+    size = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Size"], b.math("MULTIPLY_ADD", seed, 0.6, 0.7, x=800,
+                                                                             y=-800), x=1000, y=-800),
+                  b.math("MULTIPLY", b.math("SUBTRACT", 1.0, b.math("MULTIPLY", g, 0.6, x=800, y=-1000), x=1000,
+                                            y=-1000),
+                         b.math("MULTIPLY_ADD", gone, 1.5, 1.0, x=1000, y=-1150), x=1200, y=-1050), x=1400, y=-900)
+    spin = b.combine(b.math("MULTIPLY", seed, 6.2832, x=1200, y=-1300),
+                     b.math("MULTIPLY", b.math("FRACT", b.math("MULTIPLY", seed, 7.13, x=1000, y=-1450), x=1100,
+                                               y=-1450), 6.2832, x=1200, y=-1450),
+                     b.math("MULTIPLY", b.math("FRACT", b.math("MULTIPLY", seed, 3.71, x=1000, y=-1600), x=1100,
+                                               y=-1600), 6.2832, x=1200, y=-1600), x=1400, y=-1400)
+    info = b.node("GeometryNodeObjectInfo", 1200, -300)
+    b.feed(info.inputs["Object"], gi.outputs["Puff"])
+    puffs = b.node("GeometryNodeInstanceOnPoints", 1600, 0)
+    b.feed(puffs.inputs["Points"], moved)
+    b.feed(puffs.inputs["Instance"], info.outputs["Geometry"])
+    b.feed(puffs.inputs["Rotation"], spin)
+    b.feed(puffs.inputs["Scale"], size)
+    real = b.node("GeometryNodeRealizeInstances", 1800, 0)
+    b.feed(real.inputs["Geometry"], puffs.outputs["Instances"])
+    _finish(b, real.outputs["Geometry"], gi, go, 2100, 0)
+    return ng
+
+
+def ensure_totem_group():
+    if not _current(TOTEM_GROUP):
+        build_totem_group()
+    return bpy.data.node_groups[TOTEM_GROUP]
+
+
+def remove_totem_assets():
+    """The totem's puff and group (totem.py), once no totem uses them."""
+    ob = bpy.data.objects.get(PUFF)
+    if ob is not None:
+        me = ob.data
+        bpy.data.objects.remove(ob)
+        if me is not None and me.users == 0:
+            bpy.data.meshes.remove(me)
+    ng = bpy.data.node_groups.get(TOTEM_GROUP)
+    if ng is not None and ng.users == 0:
+        bpy.data.node_groups.remove(ng)
 
 
 def remove_unused():

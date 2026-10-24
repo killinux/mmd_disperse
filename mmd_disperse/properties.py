@@ -543,7 +543,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                             "swap (羽扇遮身, a burlesque fan dance); the moment moves to where they "
                                             "cover most of her"),
                ("CURTAIN", "Curtain Drop", "A red curtain comes down in front of her, the outfits swap behind it, and "
-                                           "it drops to the floor (落幕, the kabuki drop)")),
+                                           "it drops to the floor (落幕, the kabuki drop)"),
+               ("SLOT", "Slot Machine", "A slot machine drops in front of her, its lever is pulled and the reels stop "
+                                        "one by one on the beats: 7 7 7 as the outfits swap behind it, coins gush "
+                                        "out and it rises away (老虎机开奖)")),
         default="NONE", update=_sync,
         description="Something covers the dancer at the big moment (the swap, or the new outfit complete) and the "
                     "change happens behind it. Building watches where she is on the picture round the moment, so "
@@ -551,7 +554,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     cover_color: FloatVectorProperty(name="Cover Color", subtype="COLOR", size=3, min=0.0, max=1.0,
                                      default=(0.85, 0.12, 0.2), update=_sync,
                                      description="Colour of the cloth, the umbrella, the confetti, the balloons, the "
-                                                 "feather fans and the curtain")
+                                                 "feather fans, the curtain and the slot machine")
+    slot_tease: BoolProperty(name="Cherries First", default=False, update=_sync,
+                             description="The first pull of the slot machine is a miss (cherry, cherry, bell) and the "
+                                         "lever is pulled again (it stands in front of her about two seconds longer)")
     cover_image: StringProperty(name="Emoji Picture", subtype="FILE_PATH", default="", update=_sync,
                                 description="A picture to use as the emoji (empty: a smiley of our own)")
     stage_flames: BoolProperty(name="Stage Flames", default=False, update=_sync,
@@ -610,6 +616,38 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     dim_lights: BoolProperty(name="Studio Lights", default=True, update=_sync,
                              description="A key light and two rim lights come up as she turns realistic (turn off "
                                          "when the scene is lit already)")
+
+    # --- 1.15: the totem in the mist (totem.py)
+    totem_enable: BoolProperty(name="Totem in the Mist", default=False, update=_sync,
+                               description="Mist swirls round and behind her; when the transformation starts (best "
+                                           "with Start On: Hand to the Sky) it is drawn into a great shape behind her, "
+                                           "holds it while she changes and blows away once the new outfit is complete "
+                                           "(雾中图腾, the castle in the storm behind He-Man)")
+    totem_shape: EnumProperty(
+        name="Shape",
+        items=(("STAR", "Star", "A five-pointed star"),
+               ("HEART", "Heart", "A heart"),
+               ("TEXT", "Words", "The words below"),
+               ("OBJECT", "Mesh", "A mesh object of yours (a castle, an emblem, a logo), its front at -Y like a "
+                                  "model's")),
+        default="STAR", update=_sync)
+    totem_text: StringProperty(name="Words", default="POWER", update=_sync,
+                               description="The words the mist writes behind her")
+    totem_font: StringProperty(name="Font", subtype="FILE_PATH", default="", update=_sync,
+                               description="A font file for the words (empty: Blender's own, which has Latin letters "
+                                           "only on Blender 3.6; for Chinese pick one such as C:\\Windows\\Fonts"
+                                           "\\msyh.ttc)")
+    totem_object: PointerProperty(name="Mesh", type=bpy.types.Object, poll=_mesh_object, update=_sync,
+                                  description="The mesh whose shape the mist takes (its own proportions, as big as "
+                                              "Totem Size says)")
+    totem_color: FloatVectorProperty(name="Totem Color", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(0.45, 0.6, 1.0), update=_sync,
+                                     description="Colour of the mist's light")
+    totem_size: FloatProperty(name="Totem Size", default=1.0, min=0.2, soft_max=4.0, update=_sync,
+                              description="How big the shape is (its height or width, whichever is more), in model "
+                                          "heights")
+    totem_lead: FloatProperty(name="Swirl Time", default=2.0, min=0.0, soft_max=6.0, update=_sync,
+                              description="Seconds the mist swirls round her before it gathers into the shape")
 
     # --- 1.11: the camera and time at the big moment
     shot_enable: BoolProperty(name="Camera Move", default=False, update=_sync,

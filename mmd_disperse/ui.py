@@ -500,10 +500,19 @@ class MMDDISPERSE_PT_cover(_Panel, bpy.types.Panel):
         layout.prop(s, "cover_style")
         col = layout.column(align=True)
         col.active = s.cover_style != "NONE"
-        if s.cover_style in ("CLOTH", "UMBRELLA", "CONFETTI", "BALLOONS", "FEATHERS", "CURTAIN"):
+        if s.cover_style in ("CLOTH", "UMBRELLA", "CONFETTI", "BALLOONS", "FEATHERS", "CURTAIN", "SLOT"):
             col.prop(s, "cover_color")
         if s.cover_style == "EMOJI":
             col.prop(s, "cover_image")
+        if s.cover_style == "SLOT":
+            col.prop(s, "slot_tease")
+            machine = next((o for o in bpy.data.objects if s.mask is not None
+                            and o.get("mmd_disperse_cover") == s.mask and o.get("mmd_disperse_cover_kind") == "SLOT"),
+                           None)
+            first = machine.get("mmdd_slot_start") if machine is not None else None
+            if first is not None and first < context.scene.frame_start:
+                layout.label(text="The machine comes in before the scene starts: start the effect later",
+                             icon="ERROR")
         layout.prop(s, "stage_flames")
         if s.cover_style != "NONE":
             if context.scene.camera is None:
@@ -840,6 +849,36 @@ class MMDDISPERSE_PT_dimension(_Panel, bpy.types.Panel):
             layout.label(text="On the beats: Sync to Beat (Music Beats)", icon="INFO")
 
 
+class MMDDISPERSE_PT_totem(_Panel, bpy.types.Panel):
+    bl_label = "Totem in the Mist"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "totem_enable")
+        if not s.totem_enable:
+            return
+        col = layout.column(align=True)
+        col.prop(s, "totem_shape")
+        if s.totem_shape == "TEXT":
+            col.prop(s, "totem_text")
+            col.prop(s, "totem_font")
+        elif s.totem_shape == "OBJECT":
+            col.prop(s, "totem_object")
+        col = layout.column(align=True)
+        col.prop(s, "totem_color")
+        col.prop(s, "totem_size")
+        col.prop(s, "totem_lead")
+        if s.trigger != "RAISE":
+            layout.label(text="Best with Start On: Hand to the Sky", icon="INFO")
+        if s.totem_shape == "OBJECT" and s.totem_object is None:
+            layout.label(text="Pick a mesh", icon="ERROR")
+
+
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
     bl_label = "Hologram / Veil"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -1103,6 +1142,7 @@ classes = (
     MMDDISPERSE_PT_surface,
     MMDDISPERSE_PT_tint,
     MMDDISPERSE_PT_dimension,
+    MMDDISPERSE_PT_totem,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

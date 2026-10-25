@@ -730,6 +730,18 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                  description="Seconds before the big moment the mirror stands up beside her")
     mirror_first: FloatProperty(name="Reflection Ahead", default=0.9, min=0.0, soft_max=4.0, update=_sync,
                                 description="Seconds before the big moment the reflection changes")
+    # --- 1.21: the talismans (talisman.py)
+    talisman_enable: BoolProperty(name="Talismans", default=False, update=_sync,
+                                  description="Paper talismans fly from her fingertip one after another, swirl round "
+                                              "her and stick to her all over, their vermilion runes glowing; at the "
+                                              "big moment they catch fire, curl and burn away, ashes rising (符箓燃尽; "
+                                              "pair it with All at Once)")
+    talisman_count: IntProperty(name="Talisman Count", default=60, min=4, soft_max=200, update=_sync,
+                                description="How many talismans")
+    talisman_time: FloatProperty(name="Talisman Time", default=2.5, min=0.8, soft_max=10.0, update=_sync,
+                                 description="Seconds before the big moment the first talisman leaves her hand")
+    talisman_burn: FloatProperty(name="Burn Time", default=0.6, min=0.1, soft_max=3.0, update=_sync,
+                                 description="Seconds a talisman takes to burn away")
     # --- 1.20: the fumble (fumble.py)
     fumble_enable: BoolProperty(name="Fumble", default=False, update=_sync,
                                 description="A little after she has changed, a few loose parts of the new outfit come "
@@ -774,6 +786,12 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     peel_thread_color: FloatVectorProperty(name="Thread Colour", subtype="COLOR", size=3, min=0.0, max=1.0,
                                            default=(1.0, 0.62, 0.74), update=_sync,
                                            description="Colour of the sticky threads (lotus-root pink)")
+    peel_layers: IntProperty(name="Layers", default=1, min=1, max=4, update=_sync,
+                             description="Layer by layer (层层撕回): this many layers of the old outfit, torn off one "
+                                         "after another, the last at the big moment; under the outer one each is in "
+                                         "the colour of an earlier age (the 70s, black and white, an old photo ...)")
+    peel_layer_gap: FloatProperty(name="Layer Gap", default=0.5, min=0.1, soft_max=3.0, update=_sync,
+                                  description="Seconds from one layer torn off to the next")
     peel_keep: StringProperty(name="Keep On", default=DEFAULT_KEEP, update=_sync,
                               description="Material name patterns that are not torn (skin and the like; face, hair, "
                                           "eyes and mouth never are): they go with the old outfit as before")

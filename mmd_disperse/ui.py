@@ -972,6 +972,26 @@ class MMDDISPERSE_PT_mirror(_Panel, bpy.types.Panel):
             layout.label(text="Needs a scene camera", icon="ERROR")
 
 
+class MMDDISPERSE_PT_talisman(_Panel, bpy.types.Panel):
+    bl_label = "Talismans"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "talisman_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.talisman_enable
+        col = layout.column(align=True)
+        col.prop(s, "talisman_count")
+        col.prop(s, "talisman_time")
+        col.prop(s, "talisman_burn")
+
+
 class MMDDISPERSE_PT_fumble(_Panel, bpy.types.Panel):
     bl_label = "Fumble"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -1013,6 +1033,10 @@ class MMDDISPERSE_PT_peel(_Panel, bpy.types.Panel):
             col.prop(s, "peel_hold")
         if s.peel_style == "STRIPS":
             col.prop(s, "peel_strips")
+        col = layout.column(align=True)
+        col.prop(s, "peel_layers")
+        if s.peel_layers > 1:
+            col.prop(s, "peel_layer_gap")
         layout.prop(s, "peel_lining")
         row = layout.row(align=True)
         row.prop(s, "peel_threads")
@@ -1362,6 +1386,7 @@ classes = (
     MMDDISPERSE_PT_sweat,
     MMDDISPERSE_PT_peel,
     MMDDISPERSE_PT_fumble,
+    MMDDISPERSE_PT_talisman,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

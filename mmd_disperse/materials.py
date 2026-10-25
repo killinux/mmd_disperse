@@ -83,6 +83,8 @@ LINING = "MMDD Lining"  # 1.19 (peel.py): the lining inside the torn cloth, on t
 P_LINING = "mmd_disperse_lining"  # on the materials it is spliced into
 LINING_ON = "mmdd_lining"  # on peel.py's twins (an object attribute the splice reads): 1 ...
 LINING_SCALE = "mmdd_lining_scale"  # ... and the crests on the lining a unit
+LINING_ERA = "mmdd_era_amount"  # 1.21, on a layer of peel.py's: how much its outside takes the colour of its age ...
+LINING_ERA_COLOR = "mmdd_era_color"  # ... which colour
 SWEAT = "MMDD Sweat"  # 1.18 (sweat.py): a wet sheen and beads of sweat on the old outfit, added on top
 P_SWEAT = "mmd_disperse_sweat"
 GHOST = "MMDD Ghost"  # 1.16 (ghost.py): she turns see-through from the feet up, a rim of light flowing up her
@@ -5975,7 +5977,101 @@ def _cover_seal_frame(name):
     return mat
 
 
-_COVER_MAKERS = {"MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS": _cover_glass,
+
+# --------------------------------------------------------------------------- 1.21: the talismans (talisman.py)
+
+def _cut_out(mat):
+    """See-through in hard-edged holes (no sorting trouble where many cards overlap): dithered in EEVEE Next, hashed
+    before."""
+    if hasattr(mat, "surface_render_method"):
+        mat.surface_render_method = "DITHERED"
+    elif hasattr(mat, "blend_method"):
+        mat.blend_method = "HASHED"
+        if hasattr(mat, "shadow_method"):
+            mat.shadow_method = "HASHED"
+
+
+def _cover_talisman(name):
+    """The talismans' paper (TALISMAN, talisman.py): yellow paper with fibres, a double frame and a column of strokes
+    in vermilion (mmdd_card across the card, mmdd_seed its own pattern), the strokes glowing red as mmdd_glow says;
+    as mmdd_burn goes 0 .. 1 the fire runs up it from its foot along a ragged front, charring the paper ahead of it, a
+    thin band of glowing embers at the front, nothing behind it."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    ux, uy, _uz = s.split(s.attribute("mmdd_card", -2600, 300).outputs["Vector"], -2400, 300)
+    burn = s.attribute("mmdd_burn", -2600, 0).outputs[2]
+    glow = s.attribute("mmdd_glow", -2600, -150).outputs[2]
+    seed = s.attribute("mmdd_seed", -2600, -300).outputs[2]
+    fibres = s.noise(s.combine(m("MULTIPLY", ux, 6.0, x=-2200, y=600), m("MULTIPLY", uy, 14.0, x=-2200, y=450),
+                               m("MULTIPLY", seed, 10.0, x=-2200, y=300), -2000, 500), 9.0, 6.0, -1800, 500)
+    paper = s.lerp((0.84, 0.62, 0.18), (0.99, 0.85, 0.38), fibres, -1600, 500)
+    # the frame: a line at 7 .. 9% in from each side (across the width and the height alike)
+    near_x = m("MINIMUM", ux, m("SUBTRACT", 1.0, ux, x=-2200, y=150), x=-2000, y=150)
+    near_y = m("MULTIPLY", m("MINIMUM", uy, m("SUBTRACT", 1.0, uy, x=-2200, y=0), x=-2000, y=0), 0.45, x=-1800,
+               y=0)
+    inset = m("MINIMUM", near_x, near_y, x=-1600, y=100)
+    frame_line = m("MULTIPLY", s.smooth(inset, 0.055, 0.065, -1400, 200),
+                   m("SUBTRACT", 1.0, s.smooth(inset, 0.085, 0.095, -1400, 50), x=-1200, y=50), x=-1000, y=150)
+    # the strokes: a column in the middle, a noise of the card cut into blots
+    column = m("MULTIPLY", m("SUBTRACT", 1.0, s.smooth(m("ABSOLUTE", m("SUBTRACT", ux, 0.5, x=-2200, y=-450),
+                                                          x=-2000, y=-450), 0.18, 0.22, -1800, -450), x=-1600,
+                             y=-450),
+                 m("MULTIPLY", s.smooth(uy, 0.12, 0.15, -1800, -600),
+                   m("SUBTRACT", 1.0, s.smooth(uy, 0.86, 0.89, -1800, -750), x=-1600, y=-750), x=-1400, y=-650),
+                 x=-1200, y=-550)
+    blots = s.smooth(s.noise(s.combine(m("MULTIPLY", ux, 4.0, x=-2200, y=-900), m("MULTIPLY", uy, 11.0, x=-2200,
+                                                                                    y=-1050),
+                                       m("MULTIPLY", seed, 31.0, x=-2200, y=-1200), -2000, -1000), 3.0, 1.0,
+                             -1800, -1000), 0.56, 0.6, -1600, -1000)
+    rune = m("MAXIMUM", frame_line, m("MULTIPLY", column, blots, x=-1200, y=-900), x=-1000, y=-600)
+    colour = s.lerp(paper, (0.72, 0.03, 0.02), rune, -800, 300)
+    # the fire: a ragged front running up from the foot
+    rag = s.noise(s.combine(m("MULTIPLY", ux, 5.0, x=-2200, y=-1400), m("MULTIPLY", uy, 5.0, x=-2200, y=-1550),
+                            seed, -2000, -1450), 4.0, 3.0, -1800, -1450)
+    f = m("ADD", uy, m("MULTIPLY", m("SUBTRACT", rag, 0.5, x=-1600, y=-1450), 0.3, x=-1400, y=-1450), x=-1200,
+          y=-1400)
+    front = m("SUBTRACT", m("MULTIPLY", burn, 1.4, x=-1600, y=-1700), 0.2, x=-1400, y=-1700)
+    lit = m("GREATER_THAN", burn, 0.0, x=-1400, y=-1850)
+    gone = m("MULTIPLY", m("LESS_THAN", f, front, x=-1000, y=-1500), lit, x=-800, y=-1600)
+    char = m("MULTIPLY", m("SUBTRACT", 1.0, s.smooth(f, front, m("ADD", front, 0.14, x=-1200, y=-1800), -1000,
+                                                     -1800), x=-800, y=-1800), lit, x=-600, y=-1800)
+    ember = m("MULTIPLY", m("SUBTRACT", 1.0, s.smooth(f, front, m("ADD", front, 0.035, x=-1200, y=-2000), -1000,
+                                                      -2000), x=-800, y=-2000), lit, x=-600, y=-2000)
+    surface = s.principled(-400, 300, color=s.scaled(colour, m("SUBTRACT", 1.0, m("MULTIPLY", char, 0.85, x=-600,
+                                                                                   y=-200), x=-400, y=-200),
+                                                     -400, 0),
+                           roughness=0.85)
+    light = s.add(s.scaled((1.0, 0.16, 0.04), m("MULTIPLY", m("MULTIPLY", rune, glow, x=-600, y=-2300), 4.0, x=-400,
+                                                                     y=-2300), -200, -2300),
+                  s.scaled((1.0, 0.45, 0.1), m("MULTIPLY", ember, 14.0, x=-400, y=-2100), -200, -2100), 0, -2200)
+    shine = s.node("ShaderNodeAddShader", 200, 0)
+    nt.links.new(surface, shine.inputs[0])
+    nt.links.new(s.emission(light, 1.0, 0, -500), shine.inputs[1])
+    shader = s.mix_shader(gone, shine.outputs[0], s.node("ShaderNodeBsdfTransparent", 200, -300).outputs[0], 400, 0)
+    nt.links.new(shader, out.inputs["Surface"])
+    _cut_out(mat)
+    _two_sided(mat)
+    mat.diffuse_color = (0.95, 0.8, 0.3, 1.0)
+    return mat
+
+
+def _cover_ash(name):
+    """The talismans' ashes (ASH, talisman.py): glowing specks, orange, fading as mmdd_fade goes to 0."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    fade = s.attribute("mmdd_fade", -800, 0).outputs[2]
+    add = s.node("ShaderNodeAddShader", 200, 0)
+    nt.links.new(s.node("ShaderNodeBsdfTransparent", 0, -200).outputs[0], add.inputs[0])
+    nt.links.new(s.emission((1.0, 0.42, 0.1), s.math("MULTIPLY", fade, 8.0, x=-600, y=-100), 0, 100), add.inputs[1])
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    mat.diffuse_color = (1.0, 0.45, 0.1, 0.6)
+    return mat
+
+
+_COVER_MAKERS = {"TALISMAN": _cover_talisman, "ASH": _cover_ash, "MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS": _cover_glass,
                  "CLOTH": _cover_cloth, "UMBRELLA": _cover_umbrella, "FAN": _cover_fan, "EMOJI": _cover_emoji,
                  "FRAME": _cover_frame, "CANVAS": _cover_canvas, "PETALS": _cover_pieces, "PLUMES": _cover_plumes,
                  "CONFETTI": _cover_confetti, "CANNON": _cover_cannon, "BALLOON": _cover_balloon,
@@ -6834,7 +6930,10 @@ def add_lining(mat, colour):
     """Splice the lining in (LINING + " Mix", after the sweat): where the cloth of one of peel.py's twins (the object
     attribute LINING_ON) is seen from its inside, a satin of `colour` strewn with small gold crests (a Voronoi of the
     object's own coordinates, LINING_SCALE cells a unit); everywhere else, and on her, it is as it was. Cut-outs stay
-    cut out. Called again, it only sets the colour."""
+    cut out. On a layer of the layered tearing (1.21) its outside takes the colour of its age, as much as the object
+    attribute LINING_ERA says: the material as it is lit (Shader to RGB, EEVEE), its brightness (shadows lifted) in
+    LINING_ERA_COLOR.
+    Called again, it only sets the colour."""
     nt = mat.node_tree
     if nt is None:
         return
@@ -6848,7 +6947,12 @@ def add_lining(mat, colour):
         on = _new(nt, "ShaderNodeAttribute", LINING + " On", x - 1600, y + 300, attribute_type="OBJECT",
                   attribute_name=LINING_ON)
         inside = _new(nt, "ShaderNodeNewGeometry", LINING + " Inside", x - 1600, y + 100)
-        fac = m("MULTIPLY", on.outputs["Fac"], inside.outputs["Backfacing"], x=x - 1400, y=y + 200)
+        era = _new(nt, "ShaderNodeAttribute", LINING + " Era", x - 1800, y + 500, attribute_type="OBJECT",
+                   attribute_name=LINING_ERA)
+        era_colour = _new(nt, "ShaderNodeAttribute", LINING + " Era Colour", x - 1800, y + 700,
+                          attribute_type="OBJECT", attribute_name=LINING_ERA_COLOR)
+        fac = m("MULTIPLY", on.outputs["Fac"], m("MAXIMUM", inside.outputs["Backfacing"], era.outputs["Fac"],
+                                                 x=x - 1600, y=y + 300), x=x - 1400, y=y + 200)
         alpha = _alpha_source(nt)
         if alpha is not None:
             fac = m("MULTIPLY", fac, alpha, x=x - 1200, y=y + 200)
@@ -6872,7 +6976,25 @@ def add_lining(mat, colour):
                        out.location.y + 1500)
             _splice(nt, out, mix)
             nt.links.new(fac, mix.inputs[0])
-            nt.links.new(satin.outputs[0], mix.inputs[2])
+            # the outside of a layer of an age: the material as lit, its brightness in the age's colour
+            side = _new(nt, "ShaderNodeMixShader", "%s Side %d" % (LINING, i), x, y + 400 + 300 * i)
+            nt.links.new(inside.outputs["Backfacing"], side.inputs[0])
+            nt.links.new(satin.outputs[0], side.inputs[2])
+            if mix.inputs[1].links:
+                lit = _new(nt, "ShaderNodeShaderToRGB", "%s Lit %d" % (LINING, i), x - 800, y + 900 + 300 * i)
+                nt.links.new(mix.inputs[1].links[0].from_socket, lit.inputs[0])
+                grey = _new(nt, "ShaderNodeRGBToBW", "%s Grey %d" % (LINING, i), x - 600, y + 900 + 300 * i)
+                nt.links.new(lit.outputs["Color"], grey.inputs[0])
+                aged = _new(nt, "ShaderNodeVectorMath", "%s Aged %d" % (LINING, i), x - 400, y + 900 + 300 * i,
+                            operation="SCALE")
+                nt.links.new(era_colour.outputs["Color"], aged.inputs[0])
+                # (its shadows lifted: a black suit takes the colour of its age too)
+                nt.links.new(m("MULTIPLY_ADD", grey.outputs[0], 1.4, 0.2, x=x - 400, y=y + 750 + 300 * i),
+                             aged.inputs[3])
+                glow = _new(nt, "ShaderNodeEmission", "%s Aged Light %d" % (LINING, i), x - 200, y + 900 + 300 * i)
+                nt.links.new(aged.outputs[0], glow.inputs["Color"])
+                nt.links.new(glow.outputs[0], side.inputs[1])
+            nt.links.new(side.outputs[0], mix.inputs[2])
         mat[P_LINING] = 1
     node = nt.nodes.get(LINING + " Colour")
     if node is not None:

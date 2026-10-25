@@ -719,6 +719,12 @@ _ZH = {
     ("*", "Loose Parts"): "会掉的部件",
     ("*", "Fumble Delay"): "翻车延迟",
     ("*", "Puff of Smoke"): "冒一团烟",
+    ("*", "Layer Gap"): "层间隔",
+    ("*", "Layer by Layer"): "层层撕回",
+    ("*", "Talismans"): "符箓燃尽",
+    ("*", "Talisman Count"): "符纸张数",
+    ("*", "Talisman Time"): "飞符时长",
+    ("*", "Burn Time"): "燃尽时长",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

@@ -85,7 +85,7 @@ def find_armature(ob):
 # its bones): these properties mark them, they are not the model's meshes.
 HELPERS = ("mmd_disperse_picture_front", "mmd_disperse_glint", "mmd_disperse_finish", "mmd_disperse_light",
            "mmd_disperse_mist", "mmd_disperse_replay", "mmd_disperse_shell", "mmd_disperse_spirit",
-           "mmd_disperse_peel", "mmd_disperse_fumble")  # (the torn cloth's twins and the fumble's render)
+           "mmd_disperse_peel", "mmd_disperse_fumble", "mmd_disperse_talisman")  # (twins of ours that render)
 
 
 def resolve(ob):

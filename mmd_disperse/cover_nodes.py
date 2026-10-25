@@ -62,11 +62,13 @@ ECHO_NUMBER = "mmdd_echo"  # on the multiple exposure's copies (instances): whic
 ECHO_FADE = "mmdd_fade"  # ... and how much it shows
 PEEL_GROUP = "MMDDisperse Peel"
 FUMBLE_GROUP = "MMDDisperse Fumble"
+TALISMAN_GROUP = "MMDDisperse Talisman"
+ATTR_STICK = "mmdd_stick"  # on the old outfit's meshes (a face attribute): 1 where talisman.py's talismans may stick
 FUMBLE_HIDE_GROUP = "MMDDisperse Fumble Hide"
 ATTR_LOOSE = "mmdd_loose"  # on the new outfit's meshes (a face attribute): 1 where fumble.py lets it fall off
 ATTR_TEAR = "mmdd_tear"  # on the old outfit's meshes (a face attribute): 1 where peel.py tears it off
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 16  # bumped when one of these groups changes
+REVISION = 17  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -1899,7 +1901,8 @@ def build_peel_group():
     3 STRIPS: it comes off in Strips strips round her, each curling down from the top in its turn and gone at the
       bottom.
     The mesh is cut between the pieces (told apart face by face), so no face stretches across two.
-    It lies a hair out along its normals (over the new outfit). With Threads (1 about one point in 250) sticky threads
+    It lies a hair out along its normals (over the new outfit; Push times that: the outer of several layers further),
+    and shows, still whole, from Show From (a layer of several waiting for its turn). With Threads (1 about one point in 250) sticky threads
     run from some points of the torn cloth back to where they were on her (藕断丝连: Ne Zha's lotus-root body),
     sagging, thinner as they stretch and gone past a quarter of her height, in the Thread Material."""
     ng, b = _group(PEEL_GROUP, (
@@ -1915,6 +1918,8 @@ def build_peel_group():
         ("Seed", "NodeSocketInt", 0),
         ("Threads", "NodeSocketFloat", 0.0),
         ("Thread Material", "NodeSocketMaterial"),
+        ("Show From", "NodeSocketFloat", 0.0),
+        ("Push", "NodeSocketFloat", 1.0),
     ))
     gi = b.node("NodeGroupInput", -3400, 0)
     go = b.node("NodeGroupOutput", 3400, 0)
@@ -1978,8 +1983,9 @@ def build_peel_group():
     normal = b.node("GeometryNodeInputNormal", -3400, -950).outputs[0]
     rel = b.vmath("SUBTRACT", rest, gi.outputs["Centre"], x=-3000, y=-1100)
     rx, ry, rz = b.split_xyz(rel, x=-2800, y=-1100)
-    pushed = b.vmath("ADD", posed, b.vmath("SCALE", normal, scale=b.math("MULTIPLY", h, 0.003, x=-2800, y=-1500),
-                                           x=-2600, y=-1500), x=-2400, y=-1500)
+    pushed = b.vmath("ADD", posed, b.vmath("SCALE", normal, scale=b.math("MULTIPLY", b.math(
+        "MULTIPLY", h, 0.003, x=-3000, y=-1500), gi.outputs["Push"], x=-2800, y=-1500), x=-2600, y=-1500),
+                     x=-2400, y=-1500)
     radial = b.vmath("NORMALIZE", b.combine(rx, ry, 0.0, x=-2600, y=-1650), x=-2400, y=-1650)
     rad_x, rad_y, _rad_z = b.split_xyz(radial, x=-2200, y=-1650)
 
@@ -2085,7 +2091,8 @@ def build_peel_group():
 
     # --- YANK: the top up and back (as her upper body faces), the bottom down, faster and faster
     y0 = -5000
-    e = b.math("MULTIPLY", t, t, x=-1600, y=y0)
+    after = b.math("MAXIMUM", t, 0.0, x=-1800, y=y0)
+    e = b.math("MULTIPLY", after, after, x=-1600, y=y0)
     back = turned((0.0, 1.0, 0.0), upper_frame, -1600, y0 - 150)
     up_off = b.vmath("ADD", b.vmath("SCALE", back, scale=b.math("MULTIPLY", e, b.math("MULTIPLY", h, 0.3, x=-1600,
                                                                                     y=y0 - 300), x=-1400, y=y0 - 300),
@@ -2153,7 +2160,8 @@ def build_peel_group():
         x=-400, y=y0 - 2650), x=-200, y=y0 - 2600), b.vmath("SCALE", along, scale=b.math(
             "MULTIPLY", b.math("SINE", beta, x=-600, y=y0 - 2900), r, x=-400, y=y0 - 2900), x=-200, y=y0 - 2900),
         x=0, y=y0 - 2750), x=600, y=y0 - 1600)
-    peeled = b.compare("GREATER_THAN", rz, front, x=400, y=y0 - 2400)
+    peeled = b.boolean("AND", b.compare("GREATER_THAN", rz, front, x=400, y=y0 - 2400),
+                       b.compare("GREATER_THAN", tau, 0.0, x=400, y=y0 - 2550), x=600, y=y0 - 2450)
     strips = b.switch("VECTOR", peeled, pushed, rolled, x=800, y=y0)
     # once the curl reaches the bottom, the roll shrinks away out from her
     gone = b.map_range(b.math("SUBTRACT", t, b.math("ADD", t0, 0.55, x=600, y=y0 - 3100), x=800, y=y0 - 3100),
@@ -2187,8 +2195,10 @@ def build_peel_group():
                                       x=tx - 400, y=ty - 200), x=tx - 200, y=ty - 200)
     m2p = b.node("GeometryNodeMeshToPoints", tx, ty)
     b.feed(m2p.inputs["Mesh"], shaped)
-    b.feed(m2p.inputs["Selection"], b.compare("LESS_THAN", pick, b.math("MULTIPLY", gi.outputs["Threads"], 0.004,
-                                                                        x=tx - 200, y=ty - 400), x=tx, y=ty - 300))
+    b.feed(m2p.inputs["Selection"], b.compare("LESS_THAN", pick, b.math("MULTIPLY", b.math(
+        "MULTIPLY", gi.outputs["Threads"], 0.004, x=tx - 400, y=ty - 400), b.compare("GREATER_THAN", t, 0.0, x=tx - 400,
+                                                                                    y=ty - 550),
+        x=tx - 200, y=ty - 400), x=tx, y=ty - 300))
     came_from = b.named_attribute("mmdd_from", "FLOAT_VECTOR", x=tx, y=ty - 500)[0]
     way = b.vmath("SUBTRACT", b.node("GeometryNodeInputPosition", tx, ty - 650).outputs[0], came_from, x=tx + 200,
                   y=ty - 550)
@@ -2245,7 +2255,7 @@ def build_peel_group():
     end = b.switch("FLOAT", b.compare("EQUAL", style, 1.0, x=2200, y=-800), 1.0,
                    b.math("ADD", gi.outputs["Hold"], 1.5, x=2200, y=-950), x=2400, y=-800)
     end = b.switch("FLOAT", b.compare("EQUAL", style, 3.0, x=2400, y=-1100), end, 1.15, x=2600, y=-1000)
-    shown = b.boolean("AND", b.compare("GREATER_EQUAL", t, 0.0, x=2600, y=-300),
+    shown = b.boolean("AND", b.compare("GREATER_EQUAL", t, gi.outputs["Show From"], x=2600, y=-300),
                       b.compare("LESS_THAN", t, end, x=2800, y=-1000), x=2800, y=-300)
     b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", shown, None, shaped, x=3000, y=0))
     return ng
@@ -2255,7 +2265,6 @@ def ensure_peel_group():
     if not _current(PEEL_GROUP):
         build_peel_group()
     return bpy.data.node_groups[PEEL_GROUP]
-
 
 # --------------------------------------------------------------------------- 1.20: the fumble (fumble.py)
 
@@ -2406,3 +2415,188 @@ def ensure_fumble_group():
     if not _current(FUMBLE_GROUP):
         build_fumble_group()
     return bpy.data.node_groups[FUMBLE_GROUP]
+
+
+# --------------------------------------------------------------------------- 1.21: the talismans (talisman.py)
+
+def build_talisman_group():
+    """The talismans burning away (talisman.py), on a twin of a mesh of the old outfit after its armature: Count paper
+    talismans, their places spread evenly over her below Top at rest (Poisson; only where ATTR_STICK marks her: not
+    her hair, face and the like), each where its place is now and facing
+    out from there. From Start, one after another over Spread frames, each flies from the Hand (an object at her
+    fingertip) to its place in Fly frames, swirling round it and tumbling, and lies there upright on her, a little out;
+    from Burn (a few frames apart) it burns in Burn Time frames, curling as it goes, ashes rising from it. On the cards:
+    mmdd_card (x, y across it 0 .. 1), mmdd_burn (0 .. 1), mmdd_glow (its runes, 0 .. 1), mmdd_seed; on the ashes
+    mmdd_fade. Size is a card's height; Height hers."""
+    ng, b = _group(TALISMAN_GROUP, (
+        ("Start", "NodeSocketFloat", 0.0),
+        ("Spread", "NodeSocketFloat", 30.0),
+        ("Fly", "NodeSocketFloat", 12.0),
+        ("Burn", "NodeSocketFloat", 60.0),
+        ("Burn Time", "NodeSocketFloat", 18.0),
+        ("Count", "NodeSocketInt", 40),
+        ("Hand", "NodeSocketObject"),
+        ("Size", "NodeSocketFloat", 0.12),
+        ("Height", "NodeSocketFloat", 1.6),
+        ("Top", "NodeSocketFloat", 1.4),
+        ("Seed", "NodeSocketInt", 0),
+        ("Paper Material", "NodeSocketMaterial"),
+        ("Ash Material", "NodeSocketMaterial"),
+    ))
+    gi = b.node("NodeGroupInput", -3600, 0)
+    go = b.node("NodeGroupOutput", 3600, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -3600, -300).outputs["Frame"]
+    size = gi.outputs["Size"]
+    count = b.math("MAXIMUM", gi.outputs["Count"], 1.0, x=-3400, y=-500)
+    # her as she is now, kept on her at rest; the part of her below Top
+    held = b.store(b.store(gi.outputs["Geometry"], "mmdd_posed", b.node("GeometryNodeInputPosition", -3600, -700)
+                           .outputs[0], "FLOAT_VECTOR", x=-3400, y=0),
+                   "mmdd_posed_normal", b.node("GeometryNodeInputNormal", -3600, -850).outputs[0], "FLOAT_VECTOR",
+                   x=-3200, y=0)
+    rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=-3400, y=-1000)[0]
+    at_rest = b.set_position(held, position=rest, x=-3000, y=0)
+    _rx, _ry, rz = b.split_xyz(b.node("GeometryNodeInputPosition", -3200, -1200).outputs[0], x=-3000, y=-1200)
+    body = b.delete(at_rest, b.boolean("OR", b.compare("GREATER_THAN", b.on_domain(rz, "FACE", x=-2800, y=-1200),
+                                                       gi.outputs["Top"], x=-2600, y=-1200),
+                                       b.boolean("NOT", b.named_attribute(ATTR_STICK, "BOOLEAN", x=-2800,
+                                                                          y=-1400)[0], x=-2600, y=-1400),
+                                       x=-2400, y=-1300), "FACE", x=-2600, y=0)
+    stat = b.node("GeometryNodeAttributeStatistic", -2400, -400, data_type="FLOAT", domain="FACE")
+    b.feed(stat.inputs["Geometry"], body)
+    b.feed(_enabled(stat.inputs, "Attribute")[0], b.node("GeometryNodeInputMeshFaceArea", -2600, -500).outputs[0])
+    area = b.math("MAXIMUM", stat.outputs["Sum"], 1e-6, x=-2200, y=-400)
+    spots = b.node("GeometryNodeDistributePointsOnFaces", -2000, 0, distribute_method="POISSON")
+    b.feed(spots.inputs["Mesh"], body)
+    b.feed(spots.inputs["Distance Min"], b.math("MULTIPLY", b.math("SQRT", b.math("DIVIDE", area, count, x=-2200,
+                                                                                  y=-600), x=-2000, y=-600), 0.5,
+                                                x=-1800, y=-600))
+    b.feed(spots.inputs["Density Max"], b.math("DIVIDE", b.math("MULTIPLY", count, 10.0, x=-2200, y=-800), area,
+                                               x=-2000, y=-800))
+    b.feed(spots.inputs["Seed"], gi.outputs["Seed"])
+    index = b.node("GeometryNodeInputIndex", -2000, -1000).outputs[0]
+    places = b.delete(spots.outputs["Points"], b.compare("GREATER_EQUAL", index, count, x=-1800, y=-1000), "POINT",
+                      x=-1800, y=0)
+    # each talisman: when it leaves the hand, arrives, catches fire
+    k = b.node("GeometryNodeInputIndex", -1600, -1200).outputs[0]
+    rnd, rnd_c = b.white_noise(b.combine(k, gi.outputs["Seed"], 0.53, x=-1600, y=-1400), x=-1400, y=-1400)
+    r1, r2, r3 = b.split_xyz(rnd_c, x=-1200, y=-1500)
+    leave = b.math("ADD", gi.outputs["Start"], b.math("MULTIPLY", gi.outputs["Spread"], b.math(
+        "DIVIDE", b.math("ADD", k, b.math("MULTIPLY", rnd, 0.8, x=-1400, y=-1700), x=-1200, y=-1700), count,
+        x=-1000, y=-1700), x=-800, y=-1700), x=-600, y=-1650)
+    u = b.map_range(frame, leave, b.math("ADD", leave, gi.outputs["Fly"], x=-400, y=-1700), x=-200, y=-1650)
+    s = b.map_range(u, 0.0, 1.0, x=0, y=-1650, smooth=True)
+    burn = b.math("ADD", gi.outputs["Burn"], b.math("MULTIPLY", r2, 6.0, x=-600, y=-1900), x=-400, y=-1900)
+    burnt = b.map_range(frame, burn, b.math("ADD", burn, gi.outputs["Burn Time"], x=-200, y=-1950), x=0, y=-1900)
+    target = b.named_attribute("mmdd_posed", "FLOAT_VECTOR", x=-1600, y=-2200)[0]
+    facing = b.vmath("NORMALIZE", b.named_attribute("mmdd_posed_normal", "FLOAT_VECTOR", x=-1600, y=-2400)[0],
+                     x=-1400, y=-2400)
+    hand = b.node("GeometryNodeObjectInfo", -1600, -2600, transform_space="RELATIVE")
+    b.feed(hand.inputs["Object"], gi.outputs["Hand"])
+    # the flight: from the hand to the place, swirling round the place (about the up) and up in an arc
+    straight = b.vmath("ADD", hand.outputs["Location"], b.vmath("SCALE", b.vmath(
+        "SUBTRACT", target, hand.outputs["Location"], x=-1200, y=-2600), scale=s, x=-1000, y=-2600), x=-800, y=-2600)
+    swirl = b.math("MULTIPLY", b.math("MULTIPLY_ADD", r1, 6.2832, 6.2832, x=-1000, y=-2800),
+                   b.math("SUBTRACT", 1.0, s, x=-1000, y=-2950), x=-800, y=-2850)
+    swirled = b.rotate(straight, target, (0.0, 0.0, 1.0), swirl, x=-600, y=-2600)
+    lift = b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY", s, 3.1416, x=-600, y=-3100), x=-400, y=-3100),
+                  b.math("MULTIPLY", gi.outputs["Height"], 0.12, x=-400, y=-3250), x=-200, y=-3100)
+    out = b.math("MULTIPLY", size, 0.05, x=-400, y=-2450)  # (a little out from her)
+    where = b.vmath("ADD", b.vmath("ADD", swirled, b.combine(0.0, 0.0, lift, x=0, y=-3100), x=200, y=-2700),
+                    b.vmath("SCALE", facing, scale=b.math("MULTIPLY", out, s, x=-200, y=-2450), x=0, y=-2450),
+                    x=400, y=-2600)
+    flying = b.set_position(places, position=where, x=600, y=0)
+    # facing out from her, upright, a little askew; tumbling while it flies
+    tumble_axis = b.vmath("NORMALIZE", b.vmath("SUBTRACT", rnd_c, (0.5, 0.5, 0.5), x=-400, y=-3500), x=-200, y=-3500)
+    tumble = b.math("MULTIPLY", b.math("SUBTRACT", 1.0, s, x=-400, y=-3700), b.math("MULTIPLY_ADD", r3, 9.0, 6.0,
+                                                                                    x=-400, y=-3850),
+                    x=-200, y=-3700)
+    askew = b.rotate((0.0, 0.0, 1.0), (0.0, 0.0, 0.0), facing, b.math("MULTIPLY", b.math("SUBTRACT", r3, 0.5,
+                                                                                          x=-400, y=-4000),
+                                                                      0.5, x=-200, y=-4000), x=0, y=-3900)
+    face_t = b.rotate(facing, (0.0, 0.0, 0.0), tumble_axis, tumble, x=200, y=-3600)
+    up_t = b.rotate(askew, (0.0, 0.0, 0.0), tumble_axis, tumble, x=200, y=-3800)
+    first = b.node("FunctionNodeAlignEulerToVector", 400, -3600, axis="Z")
+    b.feed(first.inputs["Vector"], face_t)
+    turned = b.node("FunctionNodeAlignEulerToVector", 600, -3700, axis="Y", pivot_axis="Z")
+    b.feed(turned.inputs["Rotation"], first.outputs[0])
+    b.feed(turned.inputs["Vector"], up_t)
+    # the card (1 wide, 2 tall in its own units; mmdd_card across it)
+    card = b.node("GeometryNodeMeshGrid", 400, -4200)
+    for name, value in (("Size X", 0.45), ("Size Y", 1.0), ("Vertices X", 3), ("Vertices Y", 6)):
+        card.inputs[name].default_value = value
+    cx, cy, _cz = b.split_xyz(b.node("GeometryNodeInputPosition", 400, -4400).outputs[0], x=600, y=-4400)
+    card_uv = b.combine(b.math("ADD", b.math("DIVIDE", cx, 0.45, x=800, y=-4400), 0.5, x=1000, y=-4400),
+                        b.math("ADD", cy, 0.5, x=800, y=-4550), 0.0, x=1200, y=-4450)
+    card_mesh = b.store(card.outputs["Mesh"], "mmdd_card", card_uv, "FLOAT_VECTOR", x=1400, y=-4200)
+    shown = b.boolean("AND", b.compare("GREATER_THAN", u, 0.0, x=800, y=-1600),
+                      b.compare("LESS_THAN", burnt, 0.999, x=800, y=-1800), x=1000, y=-1700)
+    cards = b.node("GeometryNodeInstanceOnPoints", 1000, 0)
+    b.feed(cards.inputs["Points"], flying)
+    b.feed(cards.inputs["Selection"], shown)
+    b.feed(cards.inputs["Instance"], card_mesh)
+    b.feed(cards.inputs["Rotation"], turned.outputs[0])
+    b.feed(cards.inputs["Scale"], b.combine(size, size, size, x=800, y=-2000))
+    glow = b.math("MULTIPLY", s, b.map_range(frame, b.math("ADD", leave, gi.outputs["Fly"], x=600, y=-2200),
+                                              gi.outputs["Burn"], 0.3, 1.0, x=800, y=-2200), x=1000, y=-2200)
+    tagged = cards.outputs["Instances"]
+    for name, value in (("mmdd_burn", burnt), ("mmdd_glow", glow), ("mmdd_seed", rnd)):
+        tagged = b.store(tagged, name, value, "FLOAT", "INSTANCE", x=1200, y=0)
+    real = b.node("GeometryNodeRealizeInstances", 1400, 0)
+    b.feed(real.inputs["Geometry"], tagged)
+    # curling as it burns: its top bends away from her
+    burning = b.named_attribute("mmdd_burn", "FLOAT", x=1400, y=-400)[0]
+    _ux, uy, _uz = b.split_xyz(b.named_attribute("mmdd_card", "FLOAT_VECTOR", x=1400, y=-600)[0], x=1600, y=-600)
+    bend = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", uy, uy, x=1800, y=-600), burning, x=2000,
+                                     y=-550), b.math("MULTIPLY", size, 0.5, x=1800, y=-750), x=2200, y=-600)
+    curled = b.set_position(real.outputs["Geometry"], offset=b.vmath("SCALE", b.node(
+        "GeometryNodeInputNormal", 2000, -800).outputs[0], scale=bend, x=2400, y=-700), x=2400, y=0)
+    paper = b.node("GeometryNodeSetMaterial", 2600, 0)
+    b.feed(paper.inputs["Geometry"], curled)
+    b.feed(paper.inputs["Material"], gi.outputs["Paper Material"])
+    # the ashes: specks of the burning cards, each lifting off when the fire reaches it and rising, fading
+    specks = b.node("GeometryNodeDistributePointsOnFaces", 2400, -1400, distribute_method="RANDOM")
+    b.feed(specks.inputs["Mesh"], curled)
+    b.feed(specks.inputs["Selection"], b.compare("GREATER_THAN", b.on_domain(burning, "FACE", x=2200, y=-1500), 0.02,
+                                                 x=2200, y=-1600))
+    b.feed(specks.inputs["Density"], b.math("DIVIDE", 60.0, b.math("MAXIMUM", b.math("MULTIPLY", size, size, x=2000,
+                                                                                     y=-1800), 1e-6, x=2200,
+                                                                   y=-1800), x=2200, y=-1700))
+    spec_rnd, spec_c = b.white_noise(b.node("GeometryNodeInputPosition", 2400, -2000).outputs[0], x=2600, y=-2000)
+    _sx, spec_y, _sz = b.split_xyz(b.named_attribute("mmdd_card", "FLOAT_VECTOR", x=2400, y=-2200)[0], x=2600,
+                                   y=-2200)
+    since = b.math("SUBTRACT", burning, spec_y, x=2800, y=-2100)  # (the fire runs up the card)
+    rise = b.math("MULTIPLY", b.math("MAXIMUM", since, 0.0, x=3000, y=-2100), b.math(
+        "MULTIPLY", gi.outputs["Height"], 0.35, x=2800, y=-2300), x=3200, y=-2100)
+    ash_pos = b.vmath("ADD", b.node("GeometryNodeInputPosition", 2800, -1900).outputs[0], b.vmath(
+        "ADD", b.combine(0.0, 0.0, rise, x=3000, y=-2300), b.vmath("SCALE", b.vmath(
+            "SUBTRACT", spec_c, (0.5, 0.5, 0.5), x=2800, y=-2500), scale=b.math("MULTIPLY", rise, 0.4, x=3000,
+                                                                                 y=-2500), x=3200, y=-2500),
+        x=3400, y=-2300), x=3400, y=-2000)
+    flying_ash = b.set_position(specks.outputs["Points"], position=ash_pos, x=2800, y=-1400)
+    flying_ash = b.delete(flying_ash, b.boolean("OR", b.compare("LESS_THAN", since, 0.0, x=3000, y=-1600),
+                                                b.compare("GREATER_THAN", since, 0.6, x=3000, y=-1750), x=3200,
+                                                y=-1650), "POINT", x=3000, y=-1400)
+    flake = b.node("GeometryNodeMeshIcoSphere", 2800, -2700)
+    flake.inputs["Subdivisions"].default_value = 1
+    flake.inputs["Radius"].default_value = 1.0
+    flakes = b.node("GeometryNodeInstanceOnPoints", 3200, -1400)
+    b.feed(flakes.inputs["Points"], flying_ash)
+    b.feed(flakes.inputs["Instance"], flake.outputs["Mesh"])
+    flake_size = b.math("MULTIPLY", size, b.math("MULTIPLY_ADD", spec_rnd, 0.02, 0.008, x=3000, y=-2900), x=3200,
+                        y=-2900)
+    b.feed(flakes.inputs["Scale"], b.combine(flake_size, flake_size, flake_size, x=3200, y=-3000))
+    faded = b.store(flakes.outputs["Instances"], "mmdd_fade", b.math("SUBTRACT", 1.0, b.math(
+        "DIVIDE", since, 0.6, x=3200, y=-3200, clamp=True), x=3400, y=-3200), "FLOAT", "INSTANCE", x=3400, y=-1400)
+    ash_mesh = b.node("GeometryNodeRealizeInstances", 3400, -1200)
+    b.feed(ash_mesh.inputs["Geometry"], faded)
+    ash = b.node("GeometryNodeSetMaterial", 3500, -1000)
+    b.feed(ash.inputs["Geometry"], ash_mesh.outputs["Geometry"])
+    b.feed(ash.inputs["Material"], gi.outputs["Ash Material"])
+    b.feed(go.inputs["Geometry"], b.join([paper.outputs["Geometry"], ash.outputs["Geometry"]], x=3500, y=0))
+    return ng
+
+
+def ensure_talisman_group():
+    if not _current(TALISMAN_GROUP):
+        build_talisman_group()
+    return bpy.data.node_groups[TALISMAN_GROUP]

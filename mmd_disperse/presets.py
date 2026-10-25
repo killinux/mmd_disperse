@@ -18,7 +18,7 @@ _OFF = dict(
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
     cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
     ghost_enable=False, puppet_enable=False, shadow_enable=False, shadow_style="SHADOW", mirror_enable=False,
-    echo_enable=False, title_enable=False, sweat_enable=False, peel_enable=False, peel_threads=0.0, fumble_enable=False,
+    echo_enable=False, title_enable=False, sweat_enable=False, peel_enable=False, peel_threads=0.0, peel_layers=1, fumble_enable=False, talisman_enable=False,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -750,6 +750,18 @@ PRESETS = (
      dict(_OFF, path="SPHERE", exit_style="FRAGMENTS", frag_glow=True, particles="STAR", particle_count=300,
           finale=True, finale_white=0.4, fumble_enable=True, fumble_delay=0.8, fumble_smoke=True,
           particle_color=(1.0, 0.9, 0.6), glow_color=(1.0, 0.85, 0.5))),
+    ("LAYER_BY_LAYER", "Layer by Layer", "The old outfit is ripped off layer after layer on the way to the big "
+                                         "moment, each one under it in the colour of an earlier age (the 70s, black "
+                                         "and white, an old photo), the last showing the new outfit (层层撕回, "
+                                         "Agatha All Along)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
+          peel_style="RIP", peel_time=0.45, peel_layers=4, peel_layer_gap=0.55, peel_lining=(0.7, 0.04, 0.06),
+          glow_color=(1.0, 0.8, 0.5))),
+    ("TALISMANS", "Talismans", "Paper talismans fly from her fingertip, swirl round her and cover her, their "
+                               "vermilion runes glowing; at the moment they all catch fire and burn away, ashes "
+                               "rising, and she stands there changed (符箓燃尽)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, talisman_enable=True,
+          talisman_count=70, talisman_time=2.5, talisman_burn=0.6, glow_color=(1.0, 0.5, 0.15))),
     ("DREAM_WORLD", "Dream World", "She blinks and the stage is a dream: a violet night, a great red moon, gouged and "
                                    "twisting, over a black mirror; she changes there and blinks awake on the stage in "
                                    "the new outfit (梦境领域, Kamen Rider Zeztz)",

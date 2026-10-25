@@ -3987,6 +3987,72 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.20 checks")
+    # --- 1.21: the tearing layer by layer; the talismans burning away
+    from mmd_disperse import peel, talisman  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "peel_enable", "peel_style", "peel_time", "peel_layers", "peel_layer_gap",
+        "talisman_enable", "talisman_count", "talisman_time", "talisman_burn")}
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+
+    def faces_of(objs_, f_):
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        return sum(len(o_.evaluated_get(deps_).data.polygons) for o_ in objs_)
+
+    # layer by layer: three layers torn off one after another, the inner two in the colours of earlier ages
+    s.peel_enable, s.peel_style, s.peel_time, s.peel_layers, s.peel_layer_gap = True, "YANK", 0.3, 3, 0.4
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the tearing in three layers")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    gap_ = 0.4 * fps
+    twins_ = peel.objects(s.mask, "TWIN")
+    one_ = [t_ for t_ in twins_ if t_.get(peel.P_LAYER, 0) == 0]
+    whole_ = faces_of(one_, moment - 2.0 * gap_ + 1)
+    seen_ = (faces_of(twins_, moment - 2.0 * gap_ - 2), faces_of(twins_, moment - 2.0 * gap_ + 1),
+             faces_of(twins_, moment - 2), faces_of(twins_, moment + 0.6 * fps))
+    ages_ = [(t_.get(peel.P_LAYER, 0), t_.get(materials.LINING_ERA), tuple(t_.get(materials.LINING_ERA_COLOR, ())))
+             for t_ in twins_]
+    parts_ = {"three layers": sorted({a_[0] for a_ in ages_}) == [0, 1, 2],
+              "nothing before, all three, then the inner one, then none": whole_ > 0 and seen_[0] == 0
+              and seen_[1] == 3 * whole_ and seen_[2] == whole_ and seen_[3] == 0,
+              "ages under the outer one": all((a_[1] == 0.0) == (a_[0] == 0) for a_ in ages_)
+              and len({a_[2] for a_ in ages_ if a_[0]}) == 2}
+    check(all(parts_.values()), "layer by layer: three layers of the old outfit torn off in turn, the inner ones in "
+                                "the colours of earlier ages (%s; %s %s)" % ([k_ for k_, ok_ in parts_.items()
+                                                                               if not ok_] or "all", seen_, ages_))
+    s.peel_layers = 1
+    s.peel_enable = False
+    check(not peel.objects(s.mask), "layer by layer off with the tearing: the twins gone")
+    # the talismans: from her fingertip onto her before the moment, burning away after it
+    s.talisman_enable, s.talisman_count, s.talisman_time, s.talisman_burn = True, 30, 1.5, 0.4
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the talismans")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    twins_ = talisman.objects(s.mask, "TWIN")
+    marked_ = [o_ for o_ in base.meshes if o_.data.attributes.get(cover_nodes.ATTR_STICK) is not None]
+    seen_ = (faces_of(twins_, moment - 1.5 * fps - 2), faces_of(twins_, moment - 2),
+             faces_of(twins_, moment + (0.4 + 1.0) * fps))
+    scene.frame_set(int(round(moment - 2)))
+    deps_ = bpy.context.evaluated_depsgraph_get()
+    pts_ = np.array([tuple(t_.matrix_world @ v_.co) for t_ in twins_ for v_ in t_.evaluated_get(deps_).data.vertices])
+    her_ = np.concatenate([rest_points_world(o_) for o_ in base.meshes])
+    near_ = bool(len(pts_)) and float(np.abs(pts_[:, 2].mean() - her_[:, 2].mean())) < 0.3 * height
+    parts_ = {"objects": len(twins_) >= 1 and len(talisman.objects(s.mask, "HAND")) == 1 and bool(marked_),
+              "none before, on her before the moment, gone after": seen_[0] == 0 and seen_[1] >= 10 * 15
+              and seen_[2] == 0,
+              "on her": near_}
+    check(all(parts_.values()), "talismans: from her fingertip onto her before the moment, burnt away after it "
+                                "(%s; %s)" % ([k_ for k_, ok_ in parts_.items() if not ok_] or "all", seen_))
+    check(not draw_panels(bpy.context), "panels draw with the talismans")
+    s.talisman_enable = False
+    check(not talisman.objects(s.mask) and bpy.data.node_groups.get(cover_nodes.TALISMAN_GROUP) is None
+          and not [o_ for o_ in base.meshes if o_.data.attributes.get(cover_nodes.ATTR_STICK) is not None],
+          "talismans off: the twins, the hand, the group and the marks gone")
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.21 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along

@@ -5491,6 +5491,201 @@ def _cover_reel(name):
     return mat
 
 
+# --------------------------------------------------------------------------- 1.17: the journeys (voyage.py)
+
+EARTH_SUN = (0.85, -0.35, 0.4)  # where the Earth's sun is, in its own space (its top, Z, is where she dances)
+VOYAGE_KINDS = ("EARTH", "EARTH_CLOUDS", "EARTH_AIR", "SPACE", "CLOUD_SHEET", "IRIS")
+
+
+def _earth_day(s, n, x, y):
+    """How much sun the Earth gets in the direction `n` (its own space): 0 at night .. 1 at noon, a soft dusk line."""
+    length = math.sqrt(sum(c * c for c in EARTH_SUN))
+    sun = tuple(c / length for c in EARTH_SUN)
+    return s.smooth(s.vmath("DOT_PRODUCT", n, sun, x=x, y=y), -0.08, 0.3, x + 200, y)
+
+
+def _cover_earth(name):
+    """The Earth seen from space (EARTH, voyage.py) in its own light: seas and continents (a noise), ice at its poles
+    (along Y: its top, Z, is where she dances), lit by a sun in the shader (EARTH_SUN) with a soft line between day and
+    night, and the lights of towns on the night side."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    p = s.node("ShaderNodeTexCoord", -2600, 0).outputs["Object"]
+    n = s.vmath("NORMALIZE", p, x=-2400, y=0)
+    land_noise = s.node("ShaderNodeTexNoise", -2200, 300)
+    s.feed(land_noise.inputs["Vector"], n)
+    land_noise.inputs["Scale"].default_value = 1.6
+    land_noise.inputs["Detail"].default_value = 10.0
+    land_noise.inputs["Roughness"].default_value = 0.62
+    shape = land_noise.outputs["Fac"]
+    land = s.smooth(shape, 0.52, 0.55, -1900, 300)
+    ground = s.ramp(shape, ((0.55, (0.05, 0.16, 0.04)), (0.62, (0.12, 0.2, 0.06)), (0.7, (0.35, 0.28, 0.13))), -1900,
+                    500)
+    ocean = s.lerp((0.006, 0.03, 0.11), (0.015, 0.07, 0.2), s.noise(n, 4.0, 4.0, -2200, -200), -1900, -100)
+    color = s.lerp(ocean, ground, land, -1600, 300)
+    _nx, ny, _nz = s.split(n, -2200, -500)
+    ice = s.smooth(m("ABSOLUTE", ny, x=-2000, y=-500), 0.8, 0.86, -1800, -500)
+    color = s.lerp(color, (0.8, 0.84, 0.9), ice, -1300, 300)
+    day = _earth_day(s, n, -1800, -800)
+    lit = s.scaled(color, m("MULTIPLY_ADD", day, 1.5, 0.02, x=-1300, y=-800), -1000, 300)
+    # towns at night: a few cells of a fine pattern on the land, warm
+    towns = s.voronoi(n, 120.0, -2200, -1100)
+    tr, _tg, _tb = s.split(towns.outputs["Color"], -2000, -1300)
+    dots = m("SUBTRACT", 1.0, s.smooth(towns.outputs["Distance"], 0.05, 0.3, -1800, -1100), x=-1600, y=-1100)
+    town = m("MULTIPLY", m("MULTIPLY", dots, m("GREATER_THAN", tr, 0.7, x=-1800, y=-1300), x=-1400, y=-1150),
+             m("MULTIPLY", land, m("SUBTRACT", 1.0, s.smooth(day, 0.0, 0.2, -1600, -900), x=-1400, y=-900),
+               x=-1200, y=-1000), x=-1000, y=-1100)
+    town = m("MULTIPLY", town, m("SUBTRACT", 1.0, ice, x=-1000, y=-1300), x=-800, y=-1150)
+    light = s.add(lit, s.scaled((1.0, 0.62, 0.28), m("MULTIPLY", town, 0.9, x=-600, y=-1150), -400, -1000), -200, 300)
+    nt.links.new(s.emission(light, 1.0, 100, 300), out.inputs["Surface"])
+    _no_shadow(mat)
+    mat.diffuse_color = (0.05, 0.2, 0.45, 1.0)
+    return mat
+
+
+def _cover_earth_clouds(name):
+    """The Earth's clouds (EARTH_CLOUDS): white where a noise says, clear elsewhere, swirled round her spot (the top)
+    into a storm that closes right over it (no stage to be seen from up there); lit by the Earth's sun."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    n = s.vmath("NORMALIZE", s.node("ShaderNodeTexCoord", -2400, 0).outputs["Object"], x=-2200, y=0)
+    nx, ny, nz = s.split(n, -2000, -300)
+    off = s.vmath("LENGTH", s.combine(nx, ny, 0.0, -1800, -300), x=-1600, y=-300)
+    swirl = m("MULTIPLY", m("POWER", m("MAXIMUM", m("SUBTRACT", 1.0, m("DIVIDE", off, 0.25, x=-1400, y=-300),
+                                                    x=-1200, y=-300), 0.0, x=-1000, y=-300), 2.0, x=-800, y=-300),
+              7.0, x=-600, y=-300)
+    turn = s.node("ShaderNodeVectorRotate", -400, 0, rotation_type="Z_AXIS")
+    s.feed(turn.inputs["Vector"], n)
+    s.feed(turn.inputs["Angle"], swirl)
+    raw = s.noise(turn.outputs["Vector"], 3.5, 8.0, -200, 0)
+    puffs = s.smooth(raw, 0.5, 0.68, 0, 0)
+    storm = s.smooth(nz, 0.999, 0.99985, 0, -300)  # (a small deck right over her spot: no stage seen from up there)
+    cloud = m("MAXIMUM", puffs, storm, x=200, y=-100)
+    day = _earth_day(s, n, 0, -600)
+    # (not one flat white: brighter tops and greyer folds, as the swirled noise goes, and small puffs that show
+    # when the camera is close above them)
+    fine = s.noise(turn.outputs["Vector"], 900.0, 4.0, -200, -600)
+    shade = m("MULTIPLY", m("MULTIPLY_ADD", raw, 0.6, 0.62, x=200, y=-400),
+              m("MULTIPLY_ADD", fine, 0.5, 0.75, x=200, y=-600), x=400, y=-500)
+    white = s.emission(s.scaled((0.95, 0.96, 1.0), shade, 400, -400), m("MULTIPLY_ADD", day, 1.2, 0.04, x=400, y=-600),
+                       600, -400)
+    nt.links.new(s.mix_shader(cloud, s.node("ShaderNodeBsdfTransparent", 600, -200).outputs[0], white, 900, 0),
+                 out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    if hasattr(mat, "use_backface_culling"):
+        mat.use_backface_culling = True
+    mat.diffuse_color = (0.95, 0.96, 1.0, 0.5)
+    return mat
+
+
+def _cover_earth_air(name):
+    """The glow of the Earth's air (EARTH_AIR): a rim of blue light round its edge, brighter on the day side."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    facing = s.node("ShaderNodeLayerWeight", -1200, 200)
+    facing.inputs["Blend"].default_value = 0.2
+    rim = m("POWER", facing.outputs["Facing"], 3.0, x=-1000, y=200)
+    n = s.vmath("NORMALIZE", s.node("ShaderNodeTexCoord", -1400, -200).outputs["Object"], x=-1200, y=-200)
+    day = _earth_day(s, n, -1000, -200)
+    glow = s.emission((0.3, 0.55, 1.0), m("MULTIPLY", rim, m("MULTIPLY_ADD", day, 2.6, 0.4, x=-600, y=-200),
+                                          x=-400, y=0), -200, 0)
+    add = s.node("ShaderNodeAddShader", 200, 0)
+    nt.links.new(s.node("ShaderNodeBsdfTransparent", 0, -200).outputs[0], add.inputs[0])
+    nt.links.new(glow, add.inputs[1])
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    if hasattr(mat, "use_backface_culling"):
+        mat.use_backface_culling = True
+    mat.diffuse_color = (0.3, 0.55, 1.0, 0.3)
+    return mat
+
+
+def _cover_space(name):
+    """The sky round the Earth (SPACE), seen from inside: black, stars, a faint band of the galaxy."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    d = s.vmath("NORMALIZE", s.node("ShaderNodeTexCoord", -2400, 0).outputs["Object"], x=-2200, y=0)
+    stars = m("ADD", _star_field(s, d, 60.0, 0.35, 0.09, 3.0, 0.0, -2000, 0),
+              _star_field(s, d, 180.0, 0.5, 0.1, 1.2, 0.0, -2000, -800), x=-400, y=0)
+    dx, _dy, dz = s.split(d, -2000, -1600)
+    band = m("SUBTRACT", 1.0, s.smooth(m("ABSOLUTE", m("ADD", dz, m("MULTIPLY", dx, 0.4, x=-1800, y=-1700),
+                                                       x=-1600, y=-1600), x=-1400, y=-1600), 0.0, 0.3, -1200, -1600),
+                  x=-1000, y=-1600)
+    haze = m("MULTIPLY", band, s.noise(d, 3.0, 6.0, -1200, -1900), x=-800, y=-1700)
+    glow = s.add(s.combine(stars, stars, stars, -200, 0),
+                 s.scaled((0.35, 0.3, 0.55), m("MULTIPLY", haze, 0.25, x=-600, y=-1700), -400, -1700), 0, -200)
+    nt.links.new(s.emission(glow, 1.0, 200, 0), out.inputs["Surface"])
+    _no_shadow(mat)
+    mat.diffuse_color = (0.0, 0.0, 0.02, 1.0)
+    return mat
+
+
+def _cover_cloud_sheet(name):
+    """The clouds' sheet in front of the lens (CLOUD_SHEET): as the object's mmdd_white goes 0 .. 1 billows of cloud
+    close in until the picture is all white, and clear the other way; they swell out from the middle as its mmdd_zoom
+    grows (the camera flying through them), drifting with its mmdd_drift."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    white = s.attribute("mmdd_white", -1600, 200, "OBJECT").outputs[2]
+    drift = s.attribute("mmdd_drift", -1600, 0, "OBJECT").outputs[2]
+    zoom = s.attribute("mmdd_zoom", -1600, -500, "OBJECT").outputs[2]
+    u, v, _w = s.split(s.node("ShaderNodeTexCoord", -1800, -200).outputs["UV"], -1600, -200)
+    scale = m("DIVIDE", 3.0, m("MAXIMUM", zoom, 0.05, x=-1400, y=-500), x=-1200, y=-500)
+    where = s.combine(m("MULTIPLY", m("SUBTRACT", u, 0.5, x=-1400, y=-200), scale, x=-1200, y=-200),
+                      m("MULTIPLY", m("SUBTRACT", v, 0.5, x=-1400, y=-350), scale, x=-1200, y=-350), 0.0, -1000,
+                      -250)
+    billow = s.noise(where, 2.0, 6.0, -800, -250, w=drift)
+    cover = m("MULTIPLY_ADD", billow, 1.6, m("MULTIPLY_ADD", white, 2.6, -1.6, x=-800, y=200), x=-600, y=0,
+              clamp=True)
+    color = s.scaled((0.93, 0.95, 1.0), m("MULTIPLY_ADD", billow, 0.8, 0.55, x=-600, y=-300), -400, -300)
+    nt.links.new(s.mix_shader(cover, s.node("ShaderNodeBsdfTransparent", -200, -100).outputs[0],
+                              s.emission(color, 1.0, -200, -300), 0, 0), out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    _two_sided(mat)
+    mat.diffuse_color = (0.93, 0.95, 1.0, 0.5)
+    return mat
+
+
+def _cover_iris(name):
+    """The iris closing over the picture (IRIS): black outside a circle round the middle as big as the object's
+    mmdd_iris says (1: the whole picture clear .. 0: all black), the picture as wide as its mmdd_aspect."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    iris = s.attribute("mmdd_iris", -1400, 200, "OBJECT").outputs[2]
+    aspect = s.attribute("mmdd_aspect", -1400, 0, "OBJECT").outputs[2]
+    u, v, _w = s.split(s.node("ShaderNodeTexCoord", -1600, -200).outputs["UV"], -1400, -200)
+    x = m("MULTIPLY", m("SUBTRACT", u, 0.5, x=-1200, y=-200), aspect, x=-1000, y=-200)
+    y = m("SUBTRACT", v, 0.5, x=-1200, y=-350)
+    corner = m("MULTIPLY", m("SQRT", m("MULTIPLY_ADD", aspect, aspect, 1.0, x=-1200, y=0), x=-1000, y=0), 0.5,
+               x=-800, y=0)
+    r = m("DIVIDE", s.vmath("LENGTH", s.combine(x, y, 0.0, -800, -250), x=-600, y=-250), corner, x=-400, y=-150)
+    black = s.smooth(r, m("SUBTRACT", iris, 0.04, x=-400, y=200), m("ADD", iris, 0.01, x=-400, y=50), -200, 0)
+    nt.links.new(s.mix_shader(black, s.node("ShaderNodeBsdfTransparent", 0, -100).outputs[0],
+                              s.emission((0.0, 0.0, 0.0), 1.0, 0, -300), 300, 0), out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    _two_sided(mat)
+    mat.diffuse_color = (0.0, 0.0, 0.0, 0.5)
+    return mat
+
+
+def remove_voyage_materials():
+    """The journeys' materials no object uses any more."""
+    for kind in VOYAGE_KINDS:
+        mat = bpy.data.materials.get(_cover_name(kind))
+        if mat is not None and mat.users == 0:
+            bpy.data.materials.remove(mat)
+
+
 _COVER_MAKERS = {"MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS": _cover_glass,
                  "CLOTH": _cover_cloth, "UMBRELLA": _cover_umbrella, "FAN": _cover_fan, "EMOJI": _cover_emoji,
                  "FRAME": _cover_frame, "CANVAS": _cover_canvas, "PETALS": _cover_pieces, "PLUMES": _cover_plumes,
@@ -5501,7 +5696,9 @@ _COVER_MAKERS = {"MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS"
                  "GHOST_MIST": _cover_ghost_mist, "PUPPET_BAR": _cover_puppet_bar,
                  "PUPPET_STRING": _cover_puppet_string, "SCREEN": _cover_screen, "ROD": _cover_rod,
                  "OIL_CANVAS": _cover_oil_canvas, "MIRROR_GLASS": _cover_mirror_glass,
-                 "POLAROID": _cover_polaroid}
+                 "POLAROID": _cover_polaroid, "EARTH": _cover_earth, "EARTH_CLOUDS": _cover_earth_clouds,
+                 "EARTH_AIR": _cover_earth_air, "SPACE": _cover_space, "CLOUD_SHEET": _cover_cloud_sheet,
+                 "IRIS": _cover_iris}
 
 
 # --------------------------------------------------------------------------- 1.14: the print (printer.py)

@@ -3431,6 +3431,178 @@ def run():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.16 checks")
 
+    # --- 1.17: the journeys out to the Earth and into the eye, the world folding round her
+    from mmd_disperse import voyage  # noqa: E402
+    from mmd_disperse.cover_nodes import FOLD_WAY  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "shot_enable", "shot_style", "shot_length", "domain_enable", "domain_style",
+        "domain_arrive", "domain_open", "domain_hold", "domain_close")}
+    made_camera = None
+    if scene.camera is None:  # (the journeys start and end where the scene camera is; the ball holds it)
+        made_camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(made_camera)
+        made_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
+        made_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        scene.camera = made_camera
+    scene_cam = scene.camera
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+    s.domain_enable = False
+
+    def moment_of():
+        return effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+
+    def journey_span(cam_):
+        """(first, last) frames our camera `cam_` shows, from the markers."""
+        marks_ = sorted((m.frame, m.camera) for m in scene.timeline_markers if m.name.startswith(camera_moves.MARKER))
+        ours_ = [f_ for f_, c_ in marks_ if c_ == cam_]
+        after_ = [f_ for f_, c_ in marks_ if ours_ and f_ > ours_[0] and c_ != cam_]
+        return (ours_[0] if ours_ else None), ((after_[0] - 1) if after_ else None)
+
+    def role_of(name_):
+        return next((o for o in camera_moves.shot_objects(s.mask) if o.get(camera_moves.P_ROLE) == name_), None)
+
+    # the cuts (1.11): their focal length keys redone when the moment moves (they piled up before 1.17)
+    s.shot_enable, s.shot_style, s.shot_length = True, "CUTS", 2.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the ultimate cuts")
+    moment = moment_of()
+    camera_moves.sync(s, s.mask, moment + 9, effect._focus(s.mask), base.armature, max(s.size_reference, 1e-3))
+    cut_keys = []
+    for role_ in ("LOW", "EYES", "WIDE"):
+        cam_ = next((o for o in camera_moves.shot_objects(s.mask) if o.get(camera_moves.P_ROLE) == role_), None)
+        ad_ = cam_.data.animation_data if cam_ is not None else None
+        curves_ = camera_moves._curves(cam_.data) if ad_ is not None else []
+        cut_keys.append(sum(len(fc.keyframe_points) for fc in curves_ if fc.data_path == "lens"))
+    check(cut_keys == [2, 2, 2], "ultimate cuts: two focal length keys a camera after the moment moved (%s)" % cut_keys)
+    # out to the Earth: from the scene camera up over her to where the whole Earth fills the picture, and back
+    s.shot_enable, s.shot_style, s.shot_length = True, "EARTH", 2.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the journey out to the Earth")
+    moment = moment_of()
+    earth_cam, globe = role_of("EARTH_CAM"), role_of("EARTH")
+    span_ = journey_span(earth_cam)
+    parts_ = {"objects": sorted(o.get(camera_moves.P_ROLE) for o in camera_moves.shot_objects(s.mask))
+              == sorted(voyage.EARTH_ROLES), "span": None not in span_}
+    if parts_["span"]:
+        scene.frame_set(span_[0])
+        parts_["starts at the scene camera"] = (earth_cam.matrix_world.translation
+                                                - scene_cam.matrix_world.translation).length < 1e-3 * height
+        parts_["no Earth below the clouds"] = globe.hide_render
+        scene.frame_set(int(round(moment)))
+        spot_ = earth_cam.matrix_world.translation
+        look_ = (earth_cam.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized()
+        middle_ = globe.matrix_world.translation
+        radius_ = globe.matrix_world.to_scale().x
+        off_ = math.degrees(look_.angle(middle_ - spot_))
+        seen_ = math.degrees(math.asin(min(radius_ / max((middle_ - spot_).length, 1e-9), 1.0)))
+        parts_["the whole Earth below at the moment"] = (not globe.hide_render and off_ < 1.0
+                                                         and spot_.z - middle_.z > 1.5 * radius_
+                                                         and 2.0 * seen_ < math.degrees(
+                                                             camera_moves._width_angle(scene, earth_cam)))
+        scene.frame_set(span_[1])
+        parts_["ends at the scene camera"] = (earth_cam.matrix_world.translation
+                                              - scene_cam.matrix_world.translation).length < 0.05 * height
+    check(all(parts_.values()), "out to the Earth: from the scene camera, over her and out to the whole Earth below "
+                                "at the moment (hidden below the clouds), back to the scene camera (%s)"
+          % ([k_ for k_, ok_ in parts_.items() if not ok_] or "all"))
+    check(not draw_panels(bpy.context), "panels draw with the journey out to the Earth")
+    # into the eye: at the moment right at one of her pupils, looking into it, the iris shut; the eyes kept
+    s.shot_style, s.shot_length = "PUPIL", 2.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the journey into the eye")
+    moment = moment_of()
+    eye_cam, iris_ = role_of("PUPIL_CAM"), role_of("IRIS")
+    span_ = journey_span(eye_cam)
+    record_ = s.mask.get(voyage.P_EYES)
+    parts_ = {"objects": eye_cam is not None and iris_ is not None, "span": None not in span_,
+              "eyes kept": record_ is not None}
+    if all(parts_.values()):
+        frames_ = [int(round(f_)) for f_ in record_["frames"]]
+        at_ = frames_.index(int(round(moment)))
+        pupils_ = [Vector(tuple(record_["eye%d" % k_])[3 * at_:3 * at_ + 3]) for k_ in range(2) if "eye%d" % k_ in record_]
+        scene.frame_set(int(round(moment)))
+        spot_ = eye_cam.matrix_world.translation
+        look_ = (eye_cam.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0))).normalized()
+        near_ = min(pupils_, key=lambda p_: (p_ - spot_).length)
+        parts_["at the pupil"] = (near_ - spot_).length < 2.0 * voyage.NEAR * height
+        parts_["looking into it"] = math.degrees(look_.angle(near_ - spot_)) < 2.0
+        parts_["iris shut"] = iris_["mmdd_iris"] < 1e-3 and not iris_.hide_render
+        scene.frame_set(span_[0])
+        parts_["iris open at the start"] = iris_["mmdd_iris"] > 0.999
+        parts_["starts at the scene camera"] = (eye_cam.matrix_world.translation
+                                                - scene_cam.matrix_world.translation).length < 1e-3 * height
+    check(all(parts_.values()), "into the eye: from the scene camera to right in front of a pupil at the moment, "
+                                "looking into it, the iris shut (%s)" % ([k_ for k_, ok_ in parts_.items() if not ok_]
+                                                                          or "all"))
+    check(not draw_panels(bpy.context), "panels draw with the journey into the eye")
+    s.shot_enable = False
+    check(not camera_moves.shot_objects(s.mask) and voyage.P_EYES not in s.mask
+          and not [m for m in scene.timeline_markers if m.name.startswith(camera_moves.MARKER)]
+          and not [mm for mm in bpy.data.materials if mm.name in [materials._cover_name(k_)
+                                                                 for k_ in materials.VOYAGE_KINDS]],
+          "journeys off: the cameras, the Earth, the sheets, the markers, the kept eyes and the materials gone")
+    # the world folding round her: the ground rolls in (nothing under her yet), closes into a ball over her at the
+    # moment, opens out flat; the sky only after the moment
+    s.domain_enable, s.domain_style, s.domain_arrive = True, "FLOWERS", "FOLD"
+    s.domain_open, s.domain_hold, s.domain_close = 0.8, 0.3, "SHATTER"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the world folding round her")
+    wave_ = float(s.mask.get(effect.P_WAVE, 0.0))
+    big_ = effect._finale_start(s, wave_, s.mask)
+    times_ = effect._fold_times(s, wave_, big_)
+    world_ = domain.world_objects(s.mask)[0]
+    fold_mod = world_.modifiers.get(domain.FOLD)
+    ids_ = node_groups.input_identifiers(fold_mod.node_group) if fold_mod else {}
+    shell_ = fold_mod[ids_["Shell"]] if fold_mod else 0.0
+    floor_ = fold_mod[ids_["Floor"]] if fold_mod else 0.0
+    mid_ = Vector(fold_mod[ids_["Center"]]) if fold_mod else Vector()
+
+    def world_points(radius_at):
+        """(sheet points, other points) of the world at the frame where the mask radius is `radius_at`."""
+        at_ = effect._frame_at(s.mask, radius_at)  # (to a quarter frame)
+        scene.frame_set(int(math.floor(at_)), subframe=float(at_ - math.floor(at_)))
+        ev = world_.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        me_ = ev.to_mesh()
+        co_ = np.empty(len(me_.vertices) * 3)
+        me_.vertices.foreach_get("co", co_)
+        way_ = np.zeros(len(me_.vertices) * 3)
+        if FOLD_WAY in me_.attributes:
+            me_.attributes[FOLD_WAY].data.foreach_get("vector", way_)
+        ev.to_mesh_clear()
+        co_ = co_.reshape(-1, 3) @ np.array(world_.matrix_world)[:3, :3].T + np.array(world_.matrix_world)[:3, 3]
+        on_ = np.linalg.norm(way_.reshape(-1, 3), axis=1) > 0.5
+        return co_[on_], co_[~on_]
+
+    rolling_at = times_["start"] + 0.5 * (times_["close"] - times_["start"])
+    sheet_, other_ = world_points(rolling_at)
+    out_ = np.hypot(sheet_[:, 0] - mid_.x, sheet_[:, 1] - mid_.y) if len(sheet_) else np.zeros(1)
+    closing_at = times_["close"] - 1e-3 * wave_
+    ball_, _other = world_points(closing_at)
+    gap_ = (np.linalg.norm(ball_ - np.array((mid_.x, mid_.y, floor_ + shell_)), axis=1) / shell_
+            if len(ball_) else np.zeros(1))
+    flat_, sky_ = world_points(times_["end"] + 0.01 * wave_)
+    parts_ = {"modifier": fold_mod is not None and world_.modifiers[-1] == fold_mod,
+              "rolling, nothing under her": len(sheet_) > 0 and not len(other_) and out_.min() > 0.3 * shell_,
+              "a ball round her": len(ball_) > 0 and float(np.percentile(np.abs(gap_ - 1.0), 95)) < 0.05,
+              "flat after": len(flat_) > 0 and float(np.abs(flat_[:, 2] - floor_).max()) < 0.01 * height,
+              "the sky after": len(sky_) > 0}
+    check(all(parts_.values()), "world fold: the ground rolls in with nothing under her yet (%.2f of the ball's "
+                                "radius clear), closes into a ball round her at the moment, opens out flat, the sky "
+                                "only after (%s)" % (float(out_.min()) / max(shell_, 1e-9),
+                                                     [k_ for k_, ok_ in parts_.items() if not ok_] or "all"))
+    check(not draw_panels(bpy.context), "panels draw with the world fold")
+    s.domain_arrive = "OPEN"
+    check(world_.modifiers.get(domain.FOLD) is None, "world opening out of her again: the fold modifier gone")
+    s.domain_enable = False
+    check(not domain.world_objects(s.mask) and bpy.data.node_groups.get(cover_nodes.FOLD_GROUP) is None,
+          "world change off: the world and the fold group gone")
+    if made_camera is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.17 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

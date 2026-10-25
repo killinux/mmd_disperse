@@ -13,7 +13,7 @@ _OFF = dict(
     finale_length=0.15, finale_white=0.8, layer_enable=False, layer_style="NANO", inner_glow=False, venom_enable=False,
     venom_metallic=0.0, old_surface="NONE", particle_count=600, easing="EASE", ring_enable=False, paint_style="NONE",
     reactor=False, plates=False, arc_enable=False, trigger="NONE", flame_enable=False, impact_enable=False,
-    soul_enable=False, domain_enable=False, shot_enable=False, time_warp="NONE", toon_style="NONE", float_up=False,
+    soul_enable=False, domain_enable=False, domain_arrive="OPEN", shot_enable=False, time_warp="NONE", toon_style="NONE", float_up=False,
     husk_motion="STILL", trail_enable=False, step_flowers=False, look_style="NONE", holo_style="SCAN",
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
     cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
@@ -676,6 +676,22 @@ PRESETS = (
                                       "away (拍立得: the girl in the photo comes to life)",
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, cover_style="POLAROID",
           finale=True, finale_white=0.25, glow_color=(1.0, 0.9, 0.9))),
+    # --- 1.17: the journeys out to the Earth and into the eye, the world folding round her
+    ("EARTH_ZOOM", "Out to the Earth", "The camera rises over her faster and faster, bursts through the clouds and "
+                                       "out into space where the whole Earth lies below; the outfits swap out there "
+                                       "and it dives back down to her in the new one (地球拉远)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, shot_enable=True,
+          shot_style="EARTH", shot_length=3.0, glow_color=(0.75, 0.88, 1.0))),
+    ("INTO_EYE", "Into the Eye", "The camera flies into her eye, a black iris closing over the picture; the outfits "
+                                 "swap in the dark and it comes back out with her in the new one (钻进瞳孔)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, shot_enable=True,
+          shot_style="PUPIL", shot_length=2.4, glow_color=(1.0, 0.92, 0.85))),
+    ("WORLD_FOLD", "World Fold", "A meadow of flowers rises all round at the horizon and rolls in over her head "
+                                 "into a closed ball; the outfits swap in a flash as it closes and it opens out flat, "
+                                 "a new world under a pastel sky (世界折叠, Inception)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, domain_enable=True,
+          domain_style="FLOWERS", domain_arrive="FOLD", domain_open=0.85, domain_hold=0.5, domain_close="SHATTER",
+          finale=True, finale_white=0.35, particle_color=(1.0, 0.75, 0.85), glow_color=(1.0, 0.7, 0.85))),
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
@@ -687,7 +703,8 @@ WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPAR
                "SOUL_DEPART", "IMPACT", "IDOL", "SOUL_RINGS", "DOMAIN", "SKY_MIRROR", "CONCERT", "VELOCITY",
                "SPLIT", "FIGURINE", "NEZHA", "HEART", "SILHOUETTE", "STARRY_VEIL", "IRIS", "CLOCK_HAND", "DHARMA",
                "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE", "COLOR_TUG", "ERAS",
-               "POWER_UP", "DIMENSION_BEATS", "SLOT_MACHINE", "TOTEM", "MARIONETTE", "SHADOW_PLAY", "PAINTING", "MIRROR_FIRST", "POLAROID"}
+               "POWER_UP", "DIMENSION_BEATS", "SLOT_MACHINE", "TOTEM", "MARIONETTE", "SHADOW_PLAY", "PAINTING", "MIRROR_FIRST", "POLAROID",
+               "WORLD_FOLD"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

@@ -1,6 +1,6 @@
 """Camera moves at the big moment (变身镜头): a whip pan, a roll, a zoom punch, a dolly zoom, an orbit round the dancer
 (with the dance frozen: bullet time) or the cuts of a game's ultimate; or a camera rising with the change from the
-feet to the head (1.13, the rising reveal).
+feet to the head (1.13, the rising reveal); or a journey out to the Earth or into her eye (1.17, voyage.py).
 
 The scene camera's own animation is never touched. A camera of ours rides on it (Child Of: where it is when its own
 transform is zero) and makes the whip, the roll, the punch and the dolly on its own keys; the orbit and the cuts have
@@ -14,7 +14,7 @@ import bpy
 from bpy_extras.object_utils import world_to_camera_view
 from mathutils import Euler, Matrix, Vector
 
-from . import compositor
+from . import compositor, voyage
 
 NAME = "MMD Disperse Camera"
 PIVOT = "MMD Disperse Camera Pivot"
@@ -24,7 +24,7 @@ P_USER = "mmd_disperse_user_camera"  # on the mask: the scene camera the moves r
 P_KEY = "mmd_disperse_shot_key"  # on the mask: the orbit and the cuts as they were set up (redone when it changes)
 ZOOM = "mmdd_zoom"  # on the riding camera: its focal length as a share of the scene camera's (keyed)
 MARKER = "MMD Disperse Shot"  # our timeline markers' names start with it
-STYLES = ("WHIP", "ROLL", "PUNCH", "DOLLY", "ORBIT", "CUTS", "RISE")
+STYLES = ("WHIP", "ROLL", "PUNCH", "DOLLY", "ORBIT", "CUTS", "RISE", "EARTH", "PUPIL")
 RIDING = ("WHIP", "ROLL", "PUNCH", "DOLLY", "RISE")
 SWING = 2.5  # how far a whip pan swings each way, in the picture's widths (between ...
 SWING_RANGE = (math.radians(20.0), math.radians(75.0))  # ... these angles)
@@ -284,6 +284,7 @@ def _cuts(scene, mask, user, collection, armature, frame, length, focus, height)
     for role, start, _end, lens in CUTS:
         cam = _ours(mask, role) or _new_camera("%s %s" % (NAME, role.title()), user, collection, mask, role)
         _clear_keys(cam)
+        _clear_keys(cam.data)  # (its focal length keys too: the moment may have moved)
         cam.data.sensor_fit = user.data.sensor_fit
         if role == "LOW":  # from the front, low, close: looking up at the dancer
             _aim(cam, focus - back * (0.75 * height) - up * (focus.z - floor - 0.12 * height) + side * (0.15 * height),
@@ -331,10 +332,11 @@ def _rise(ride, user, rise, focus, height, fps):
     return [(first, ride), (end + back + 1, None)]
 
 
-def sync(settings, mask, moment, focus, armature=None, height=1.0, rise=None):
+def sync(settings, mask, moment, focus, armature=None, height=1.0, rise=None, hidden=(), meshes=()):
     """Set up the camera move of the panel round the big moment (frame `moment`) at `focus` (a world point, the
     chest): our cameras, their keys, the markers and the compositor's smear; or remove it when it is off. The rising
-    reveal follows `rise` ((frame, height of the top of the change) from the start of the wave to its end)."""
+    reveal follows `rise` ((frame, height of the top of the change) from the start of the wave to its end). The journey
+    into the pupil finds the eyes on `meshes` (the dancing model's) and plays the dance with `hidden` switched off."""
     scene = settings.id_data
     user = user_camera(scene, mask)
     style = settings.shot_style
@@ -347,7 +349,9 @@ def sync(settings, mask, moment, focus, armature=None, height=1.0, rise=None):
     fps = scene.render.fps / scene.render.fps_base
     frame = int(moment) if moment is not None else 0
     collection = mask.users_collection[0] if mask.users_collection else scene.collection
-    keep = ("RIDE",) if style in RIDING else ("ORBIT", "PIVOT") if style == "ORBIT" else tuple(c[0] for c in CUTS)
+    keep = (("RIDE",) if style in RIDING else ("ORBIT", "PIVOT") if style == "ORBIT"
+            else voyage.EARTH_ROLES if style == "EARTH" else voyage.PUPIL_ROLES if style == "PUPIL"
+            else tuple(c[0] for c in CUTS))
     for ob in [o for o in shot_objects(mask) if o.get(P_ROLE) not in keep]:
         _delete(ob)
     blur, center = {}, (0.5, 0.5)
@@ -389,6 +393,11 @@ def sync(settings, mask, moment, focus, armature=None, height=1.0, rise=None):
     elif style == "CUTS":
         cuts = _cuts(scene, mask, user, collection, armature, frame, settings.shot_length, focus, height)
         cuts.append((int(round(frame + CUTS[-1][2] * settings.shot_length * fps)) + 1, None))
+    elif style == "EARTH":
+        cuts = voyage.earth(scene, mask, user, collection, frame, settings.shot_length, focus, height)
+    elif style == "PUPIL":
+        cuts = voyage.pupil(scene, mask, user, collection, armature, frame, settings.shot_length, focus, height,
+                            hidden, meshes)
     else:
         cuts = []
     _set_markers(scene, user, cuts)
@@ -401,7 +410,10 @@ def _delete(ob):
     data = ob.data
     bpy.data.objects.remove(ob)
     if data is not None and data.users == 0:
-        bpy.data.cameras.remove(data)
+        if isinstance(data, bpy.types.Camera):
+            bpy.data.cameras.remove(data)
+        elif isinstance(data, bpy.types.Mesh):
+            bpy.data.meshes.remove(data)
 
 
 def remove(mask, scene=None):
@@ -421,3 +433,7 @@ def remove(mask, scene=None):
     for key in (P_USER, P_KEY):
         if mask is not None and key in mask:
             del mask[key]
+    voyage.forget(mask)
+    from . import materials
+
+    materials.remove_voyage_materials()

@@ -24,7 +24,8 @@ import math
 import bpy
 
 from . import cover
-from .node_groups import ATTR_REST, _add_socket, _Builder, _enabled, _new_group, VERSION
+from .node_groups import (ATTR_AXIS, ATTR_DOMAIN, ATTR_GROUND, ATTR_REST, _add_socket, _Builder, _enabled,
+                          _new_group, VERSION)
 
 SHATTER_GROUP = "MMDDisperse Cover Shatter"
 RIPPLE_GROUP = "MMDDisperse Cover Ripple"
@@ -54,8 +55,10 @@ FLATTEN_GROUP = "MMDDisperse Shadow Flatten"
 RODS_GROUP = "MMDDisperse Shadow Rods"
 MIRROR_GROUP = "MMDDisperse Mirror Copy"
 PHOTO_GROUP = "MMDDisperse Photo Figure"
+FOLD_GROUP = "MMDDisperse World Fold"
+FOLD_WAY = "mmdd_fold_way"  # on the folding sheet: each point's way out from the middle (its ring's angle)
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 10  # bumped when one of these groups changes
+REVISION = 11  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -1607,7 +1610,7 @@ def remove_unused():
             if me is not None and me.users == 0:
                 bpy.data.meshes.remove(me)
     for name in (SHATTER_GROUP, RIPPLE_GROUP, PIECES_GROUP, BALLOONS_GROUP, FAN_GROUP, CURTAIN_GROUP, ERAS_GROUP,
-                 ORIGINS_GROUP, CHAIN_GROUP, PHOTO_GROUP):
+                 ORIGINS_GROUP, CHAIN_GROUP, PHOTO_GROUP, FOLD_GROUP):
         ng = bpy.data.node_groups.get(name)
         if ng is not None and ng.users == 0:
             bpy.data.node_groups.remove(ng)
@@ -1626,3 +1629,178 @@ def remove_print_assets():
         ng = bpy.data.node_groups.get(name)
         if ng is not None and ng.users == 0:
             bpy.data.node_groups.remove(ng)
+
+
+# --------------------------------------------------------------------------- 1.17: the world folding round her
+
+def build_fold_group():
+    """The world folding round her (世界折叠, domain.py: a second modifier on the world object, after its own): the
+    new world comes by folding in round her instead of opening out of her. Its ground is a sheet, a disc of rings round
+    Center pi Shell in radius, that from Fold Start of the mask radius rolls in from the horizon all round: each ring
+    comes up off the floor at the foot of the roll and curls up and over towards her, the foot drawing in, until at
+    Fold Close it is a closed ball round her, Shell in radius, standing on the floor under her feet; from Fold Close to
+    Fold End it opens out from the top like a flower and lies flat, the new world's floor. Until Fold Close the
+    world's sky and its props are not there (the scene's own world shows round the rolling ground); after it the sky is
+    as large as Sky says (a share of its size: outside the ball) and the props stand on the sheet, bent with it. The
+    world's own floor disc and the rim of its window are always gone (the sheet is its floor); the sheet draws in like
+    that disc as the world closes (Close Start .. Close End).
+
+    The bend: a point at arc length s from the middle and z over the floor goes onto the circle that leaves the floor
+    at the foot of the roll (s0) with curvature k (1 / Shell while rolling in, then down to 0 as it opens): at the
+    angle a = k (s - s0) round it, s0 + sin(a) / k out and (1 - cos(a)) / k up, z along its normal (turned by a towards
+    the middle); the sheet before the foot is gathered at it."""
+    ng, b = _group(FOLD_GROUP, (
+        ("Mask", "NodeSocketObject"),
+        ("Center", "NodeSocketVector", (0.0, 0.0, 0.0)),
+        ("Floor", "NodeSocketFloat", 0.0),
+        ("Height", "NodeSocketFloat", 1.0),
+        ("Reach", "NodeSocketFloat", 10.0),
+        ("Shell", "NodeSocketFloat", 5.0),
+        ("Sky", "NodeSocketFloat", 1.0),
+        ("Fold Start", "NodeSocketFloat", 0.0),
+        ("Fold Close", "NodeSocketFloat", 1.0),
+        ("Fold End", "NodeSocketFloat", 2.0),
+        ("Close Start", "NodeSocketFloat", 10.0),
+        ("Close End", "NodeSocketFloat", 11.0),
+        ("Follow", "NodeSocketObject"),
+        ("Ground Material", "NodeSocketMaterial"),
+        ("Sky Material", "NodeSocketMaterial"),
+        ("Rim Material", "NodeSocketMaterial"),
+    ))
+    gi = b.node("NodeGroupInput", -3400, 0)
+    go = b.node("NodeGroupOutput", 4200, 0)
+    info = b.node("GeometryNodeObjectInfo", -3200, 1200, transform_space="RELATIVE")
+    b.feed(info.inputs["Object"], gi.outputs["Mask"])
+    r = b.vmath("DOT_PRODUCT", info.outputs["Scale"], (1 / 3, 1 / 3, 1 / 3), x=-3000, y=1200)
+    roll = b.map_range(r, gi.outputs["Fold Start"], gi.outputs["Fold Close"], x=-2800, y=1300, smooth=True)
+    unroll = b.map_range(r, gi.outputs["Fold Close"], gi.outputs["Fold End"], x=-2800, y=1100, smooth=True)
+    closed = b.map_range(r, gi.outputs["Close Start"], b.math("MAXIMUM", gi.outputs["Close End"], b.math(
+        "ADD", gi.outputs["Close Start"], 1e-4, x=-3000, y=850), x=-2900, y=900), x=-2800, y=900)
+    after = b.compare("GREATER_EQUAL", r, gi.outputs["Fold Close"], x=-2800, y=1500)
+    started = b.compare("GREATER_THAN", r, gi.outputs["Fold Start"], x=-2800, y=1650)
+    shell = b.math("MAXIMUM", gi.outputs["Shell"], 1e-4, x=-3000, y=600)
+    sheet_r = b.math("MULTIPLY", shell, math.pi, x=-2800, y=600)  # (pi Shell: it closes into the ball)
+    foot = b.math("MULTIPLY", sheet_r, b.math("SUBTRACT", 1.0, roll, x=-2600, y=700), x=-2400, y=650)
+    bend = b.math("DIVIDE", b.math("MAXIMUM", b.math("SUBTRACT", 1.0, unroll, x=-2600, y=500), 1e-5, x=-2400,
+                                   y=500), shell, x=-2200, y=550)
+    cx, cy, _cz = b.split_xyz(gi.outputs["Center"], x=-3200, y=300)
+    floor = gi.outputs["Floor"]
+    reach = b.math("MAXIMUM", gi.outputs["Reach"], 1e-4, x=-3000, y=450)
+    frame = b.node("GeometryNodeInputSceneTime", -3200, 1500).outputs["Frame"]
+
+    def bent(position, lift, x, y, direction=None):
+        """(where `position`, `lift` over the floor, goes with the sheet bent; the sheet's normal there). Its way out
+        from the middle is `direction` when given (the sheet's middle has none of its own)."""
+        px, py, pz = b.split_xyz(position, x=x, y=y)
+        dx = b.math("SUBTRACT", px, cx, x=x + 200, y=y)
+        dy = b.math("SUBTRACT", py, cy, x=x + 200, y=y - 150)
+        s = b.vmath("LENGTH", b.combine(dx, dy, 0.0, x=x + 400, y=y), x=x + 600, y=y)
+        if direction is not None:
+            ux, uy, _uz = b.split_xyz(direction, x=x + 1000, y=y)
+        else:
+            safe = b.math("MAXIMUM", s, 1e-6, x=x + 800, y=y - 150)
+            ux = b.math("DIVIDE", dx, safe, x=x + 1000, y=y)
+            uy = b.math("DIVIDE", dy, safe, x=x + 1000, y=y - 150)
+        z = b.math("ADD", b.math("SUBTRACT", pz, floor, x=x + 400, y=y - 300), lift, x=x + 600, y=y - 300)
+        a = b.math("MULTIPLY", bend, b.math("MAXIMUM", b.math("SUBTRACT", s, foot, x=x + 800, y=y - 450), 0.0,
+                                            x=x + 1000, y=y - 450), x=x + 1200, y=y - 450)
+        sa = b.math("SINE", a, x=x + 1400, y=y - 400)
+        ca = b.math("COSINE", a, x=x + 1400, y=y - 550)
+        half = b.math("SINE", b.math("MULTIPLY", a, 0.5, x=x + 1400, y=y - 700), x=x + 1600, y=y - 700)
+        out = b.math("ADD", foot, b.math("SUBTRACT", b.math("DIVIDE", sa, bend, x=x + 1600, y=y - 400),
+                                         b.math("MULTIPLY", z, sa, x=x + 1600, y=y - 550), x=x + 1800, y=y - 450),
+                     x=x + 2000, y=y - 400)
+        up = b.math("ADD", b.math("DIVIDE", b.math("MULTIPLY", b.math("MULTIPLY", half, half, x=x + 1800, y=y - 700),
+                                                   2.0, x=x + 2000, y=y - 700), bend, x=x + 2200, y=y - 700),
+                    b.math("MULTIPLY", z, ca, x=x + 2000, y=y - 850), x=x + 2400, y=y - 750)
+        where = b.combine(b.math("MULTIPLY_ADD", ux, out, cx, x=x + 2200, y=y), b.math("MULTIPLY_ADD", uy, out, cy,
+                                                                                         x=x + 2200, y=y - 150),
+                          b.math("ADD", floor, up, x=x + 2600, y=y - 750), x=x + 2800, y=y)
+        normal = b.combine(b.math("MULTIPLY", b.math("MULTIPLY", ux, sa, x=x + 1800, y=y - 1000), -1.0, x=x + 2000,
+                                  y=y - 1000),
+                           b.math("MULTIPLY", b.math("MULTIPLY", uy, sa, x=x + 1800, y=y - 1150), -1.0, x=x + 2000,
+                                  y=y - 1150), ca, x=x + 2200, y=y - 1050)
+        return where, normal
+
+    def picked(material, x, y):
+        n = b.node("GeometryNodeMaterialSelection", x, y)
+        b.feed(n.inputs["Material"], gi.outputs[material])
+        return n.outputs[0]
+
+    parts = b.node("GeometryNodeSeparateComponents", -3000, -200)
+    b.feed(parts.inputs["Geometry"], gi.outputs["Geometry"])
+    # the world's mesh: its own floor and the rim gone; the sky only once the ball has closed, grown round Center
+    sky = picked("Sky Material", -2800, -600)
+    gone = b.boolean("OR", b.boolean("OR", picked("Ground Material", -2800, -400), picked("Rim Material", -2800, -500),
+                                     x=-2600, y=-450),
+                     b.boolean("AND", sky, b.boolean("NOT", after, x=-2600, y=-700), x=-2400, y=-650), x=-2200,
+                     y=-500)
+    mesh = b.delete(parts.outputs["Mesh"], gone, "FACE", x=-2000, y=-200)
+    position = b.node("GeometryNodeInputPosition", -2400, -900).outputs[0]
+    grown = b.vmath("ADD", gi.outputs["Center"], b.vmath("SCALE", b.vmath("SUBTRACT", position, gi.outputs["Center"],
+                                                                         x=-2200, y=-900),
+                                                        scale=gi.outputs["Sky"], x=-2000, y=-900), x=-1800, y=-900)
+    mesh = b.set_position(mesh, position=grown, x=-1600, y=-200)
+    # the props: once the ball has closed, on the sheet, bent with it (turned about where they stand first, then
+    # carried along)
+    props = b.delete(parts.outputs["Instances"], b.boolean("NOT", after, x=-2800, y=-1300), "INSTANCE", x=-2600,
+                     y=-1200)
+    _where, normal = bent(position, 0.0, -2600, -1600)
+    align = b.node("FunctionNodeAlignEulerToVector", 400, -1600, axis="Z")
+    b.feed(align.inputs["Vector"], normal)
+    turned = b.node("GeometryNodeRotateInstances", 600, -1200)
+    b.feed(turned.inputs["Instances"], props)
+    b.feed(turned.inputs["Rotation"], align.outputs[0])
+    b.feed(turned.inputs["Pivot Point"], position)
+    turned.inputs["Local Space"].default_value = False
+    where_p, _normal = bent(position, 0.0, -2600, -2900)
+    props = b.set_position(turned.outputs["Instances"], position=where_p, x=800, y=-1200)
+    # the sheet: rings round the middle (a tube's side opened out flat: its height across the disc), drawing in as the
+    # world closes; what the floor's material needs (where on the floor, the pool of light), then bent
+    tube = b.node("GeometryNodeMeshCylinder", -2800, 2200, fill_type="NONE")
+    tube.inputs["Vertices"].default_value = 160
+    tube.inputs["Side Segments"].default_value = 96
+    tube.inputs["Radius"].default_value = 1.0
+    tube.inputs["Depth"].default_value = 1.0
+    tx, ty, tz = b.split_xyz(position, x=-2600, y=2000)
+    drawn = b.math("MULTIPLY", sheet_r, b.math("SUBTRACT", 1.0, closed, x=-2600, y=1800), x=-2400, y=1850)
+    s_flat = b.math("MULTIPLY", b.math("SUBTRACT", 0.5, tz, x=-2400, y=2000), drawn, x=-2200, y=2000)
+    gx = b.math("MULTIPLY", tx, s_flat, x=-2000, y=2100)
+    gy = b.math("MULTIPLY", ty, s_flat, x=-2000, y=1950)
+    # (stored while the tube is still a tube: its points say where on the floor they go)
+    ground = b.store(tube.outputs["Mesh"], ATTR_GROUND, b.combine(b.math("DIVIDE", gx, reach, x=-1800, y=1800),
+                                                                  b.math("DIVIDE", gy, reach, x=-1800, y=1650),
+                                                                  b.math("DIVIDE", drawn, reach, x=-1800, y=1500),
+                                                                  x=-1600, y=1700), "FLOAT_VECTOR", x=-1400, y=2200)
+    ground = b.store(ground, ATTR_DOMAIN, b.combine(1.0, closed, frame, x=-1400, y=1700), "FLOAT_VECTOR", x=-1200,
+                     y=2200)
+    follow = b.node("GeometryNodeObjectInfo", -1400, 1400, transform_space="RELATIVE")
+    b.feed(follow.inputs["Object"], gi.outputs["Follow"])
+    fx, fy, _fz = b.split_xyz(follow.outputs["Location"], x=-1200, y=1400)
+    pool = b.combine(b.math("DIVIDE", b.math("SUBTRACT", fx, cx, x=-1000, y=1500), reach, x=-800, y=1500),
+                     b.math("DIVIDE", b.math("SUBTRACT", fy, cy, x=-1000, y=1350), reach, x=-800, y=1350),
+                     b.math("DIVIDE", b.math("MULTIPLY", gi.outputs["Height"], 0.28, x=-1000, y=1200), reach,
+                            x=-800, y=1200), x=-600, y=1400)
+    ground = b.store(ground, ATTR_AXIS, pool, "FLOAT_VECTOR", x=-1000, y=2200)
+    ground = b.store(ground, FOLD_WAY, b.combine(tx, ty, 0.0, x=-1000, y=2650), "FLOAT_VECTOR", x=-800, y=2200)
+    ground = b.set_position(ground, position=b.combine(b.math("ADD", cx, gx, x=-1000, y=2500),
+                                                       b.math("ADD", cy, gy, x=-1000, y=2350), floor, x=-800,
+                                                       y=2400), x=-600, y=2200)
+    lift = b.math("MULTIPLY", gi.outputs["Height"], 0.0015, x=-800, y=1900)
+    where_s, _normal = bent(position, lift, -800, 2900,
+                            direction=b.named_attribute(FOLD_WAY, "FLOAT_VECTOR", x=-1000, y=3100)[0])
+    ground = b.set_position(ground, position=where_s, x=2200, y=2200)
+    smooth = b.node("GeometryNodeSetShadeSmooth", 2400, 2200)
+    b.feed(smooth.inputs[0], ground)
+    shaded = b.node("GeometryNodeSetMaterial", 2600, 2200)
+    b.feed(shaded.inputs["Geometry"], smooth.outputs[0])
+    b.feed(shaded.inputs["Material"], gi.outputs["Ground Material"])
+    sheet = b.switch("GEOMETRY", started, None, shaded.outputs["Geometry"], x=2800, y=2200)
+    b.feed(go.inputs["Geometry"], b.join([mesh, props, sheet], x=3600, y=0))
+    return ng
+
+
+def ensure_fold_group():
+    if not _current(FOLD_GROUP):
+        build_fold_group()
+    return bpy.data.node_groups[FOLD_GROUP]

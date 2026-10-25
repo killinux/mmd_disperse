@@ -662,6 +662,13 @@ _ZH = {
     ("*", "Reflection Ahead"): "倒影提前",
     ("*", "Polaroid"): "拍立得",
     ("*", "Photo Comes Alive"): "照片活过来",
+    # 1.17
+    ("*", "Out to the Earth"): "地球拉远",
+    ("*", "Into the Eye"): "钻进瞳孔",
+    ("*", "Comes"): "出现方式",
+    ("*", "Opens Out"): "从她身上展开",
+    ("*", "Folds Round Her"): "世界折叠",
+    ("*", "World Fold"): "世界折叠",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

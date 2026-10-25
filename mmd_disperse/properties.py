@@ -425,9 +425,19 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("STAGE", "Concert", "A dark concert hall: beams of light sweep from the stage, a crowd of light "
                                     "sticks waves all round, a pool of light where the dancer stands")),
         default="VOID", update=_sync)
+    domain_arrive: EnumProperty(
+        name="Comes",
+        items=(("OPEN", "Opens Out", "A sphere opens out from the dancer: first a round window onto the new world "
+                                     "behind her, then, once it has swallowed the camera, the whole picture"),
+               ("FOLD", "Folds Round Her", "The new world's ground rises all round at the horizon and rolls in, "
+                                           "curling up over her head into a closed ball at the big moment, then "
+                                           "opens out from the top and lies flat, the new world all round (world "
+                                           "morphing, Inception)")),
+        default="OPEN", update=_sync)
     domain_open: FloatProperty(name="Opens Over", default=0.35, min=0.02, max=1.0, subtype="FACTOR", update=_sync,
-                               description="How long the world takes to open round the dancer, as a share of the time "
-                                           "to the big moment (the swap, or the new outfit complete)")
+                               description="How long the world takes to open round the dancer (or to roll in round "
+                                           "her), as a share of the time to the big moment (the swap, or the new "
+                                           "outfit complete)")
     domain_hold: FloatProperty(name="Stays For", default=0.35, min=0.0, max=3.0, subtype="FACTOR", update=_sync,
                                description="How long the world stays after the big moment, as a share of the "
                                            "transformation")
@@ -734,10 +744,18 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                          "outfits swap, and back to the scene camera"),
                ("RISE", "Rising Reveal", "Close up on the front, the camera tilts up the body with it from the feet "
                                          "to the head (pausing where the front pauses), then pulls back to show all "
-                                         "of her (a VTuber's new outfit shown part by part; pair it with Sweep Up)")),
+                                         "of her (a VTuber's new outfit shown part by part; pair it with Sweep Up)"),
+               ("EARTH", "Out to the Earth", "The camera rises over the dancer faster and faster, looking down, bursts "
+                                             "through the clouds and out into space, where the whole Earth lies "
+                                             "below; the outfits swap out there and it dives back down to her (the "
+                                             "Earth zoom of short videos)"),
+               ("PUPIL", "Into the Eye", "The camera flies at her face and into the eye nearer to it, a black iris "
+                                         "closing over the picture; the outfits swap in the dark and it comes back "
+                                         "out (Eyes In)")),
         default="WHIP", update=_sync)
     shot_length: FloatProperty(name="Move Time", default=2.0, min=0.2, soft_max=10.0, update=_sync,
-                               description="How long the dolly zoom, the orbit and the cuts take, in seconds")
+                               description="How long the dolly zoom, the orbit, the cuts and the journeys out to the "
+                                           "Earth and into the eye take, in seconds")
     shot_angle: FloatProperty(name="Orbit Angle", default=360.0, min=-1080.0, max=1080.0, update=_sync,
                               description="How far the camera goes round the dancer, in degrees (a whole turn comes "
                                           "back to where it started)")

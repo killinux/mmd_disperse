@@ -385,6 +385,7 @@ class MMDDISPERSE_PT_domain(_Panel, bpy.types.Panel):
         s = context.scene.mmd_disperse
         layout.active = s.domain_enable
         layout.prop(s, "domain_style")
+        layout.prop(s, "domain_arrive")
         col = layout.column(align=True)
         col.prop(s, "domain_open")
         col.prop(s, "domain_hold")
@@ -535,7 +536,7 @@ class MMDDISPERSE_PT_camera(_Panel, bpy.types.Panel):
         col = layout.column()
         col.active = s.shot_enable
         col.prop(s, "shot_style")
-        if s.shot_style in ("DOLLY", "ORBIT", "CUTS"):
+        if s.shot_style in ("DOLLY", "ORBIT", "CUTS", "EARTH", "PUPIL"):
             col.prop(s, "shot_length")
         if s.shot_style == "ORBIT":
             col.prop(s, "shot_angle")

@@ -8,6 +8,11 @@ One mesh object with no vertices of its own and a Geometry Nodes modifier (node_
 space at the origin; the world stays where it opened while the dancer moves in it. Seen from outside, the sphere shows
 only its far inner wall: a round window onto the new world behind the body. Only the concert's spotlight goes with
 the dancer: it follows an empty of ours on her hips, on the floor (Copy Location of the centre bone, its height kept).
+
+1.17, the world folding round her (世界折叠): instead of opening out of her the new world comes rolling in from the
+horizon, its ground curling up all round and over her head into a closed ball at the big moment, and opens out flat
+again. A second modifier after the world's own (cover_nodes.build_fold_group) makes the ground a sheet that rolls and
+bends, and holds back the sky and the props until the ball has closed.
 """
 
 import bpy
@@ -23,6 +28,7 @@ P_WORLD = "mmd_disperse_world"  # on the world object: the mask of its effect
 P_FOLLOW = "mmd_disperse_world_follow"  # on the empty the spotlight follows: the mask of its effect
 P_REACH = "mmd_disperse_world_reach"  # on the mask: how far the sphere opens (round the camera) ...
 P_REACH_KEY = "mmd_disperse_world_key"  # ... measured for this camera, these frames and this centre
+FOLD = "MMD Disperse World Fold"  # the second modifier: the world folding round her (1.17)
 SAMPLES = 24  # camera positions looked at when the camera moves
 MARGIN = 1.25  # how much further than the camera the sphere opens
 MIN_REACH = 3.0  # ... and at least this many model heights
@@ -111,9 +117,11 @@ def _unfollow(mask):
         bpy.data.objects.remove(ob)
 
 
-def sync(settings, mask, centre, floor, height, open_end, close_start, close_end, reach, armature=None):
+def sync(settings, mask, centre, floor, height, open_end, close_start, close_end, reach, armature=None, fold=None):
     """Push the style, its materials, where it opens and its timing (mask radii) to the world's modifier; the
-    spotlight follows the centre bone of `armature` (the dancing model's)."""
+    spotlight follows the centre bone of `armature` (the dancing model's). With `fold` (its "start", "close" and "end"
+    in mask radii, the ball's radius "shell" and the sky's size "sky") the world folds round her (the second
+    modifier); without, that modifier goes."""
     style = settings.domain_style
     made = materials.ensure_domain_materials(style)
     scene = settings.id_data
@@ -161,7 +169,33 @@ def sync(settings, mask, centre, floor, height, open_end, close_start, close_end
                 for name, value in values.items():
                     if ids.get(name) is not None and value is not None:
                         mod[ids[name]] = value
+        _fold(ob, None if fold is None else {
+            "Mask": mask, "Center": tuple(centre), "Floor": floor, "Height": height, "Reach": reach,
+            "Shell": fold["shell"], "Sky": fold["sky"], "Fold Start": fold["start"], "Fold Close": fold["close"],
+            "Fold End": fold["end"], "Close Start": close_start, "Close End": max(close_end, close_start + 1e-4),
+            "Follow": follow, "Ground Material": made["floor"], "Sky Material": made["sky"],
+            "Rim Material": made["rim"]})
         ob.update_tag()
+
+
+def _fold(ob, values):
+    """The world folding round her: the second modifier on `ob` with `values`, or none."""
+    from .cover_nodes import ensure_fold_group
+
+    mod = next((m for m in ob.modifiers if m.type == "NODES" and m.name == FOLD), None)
+    if values is None:
+        if mod is not None:
+            ob.modifiers.remove(mod)
+        return
+    group = ensure_fold_group()
+    if mod is None:
+        mod = ob.modifiers.new(FOLD, "NODES")
+    if mod.node_group != group:
+        mod.node_group = group
+    ids = input_identifiers(group)
+    for name, value in values.items():
+        if ids.get(name) is not None and value is not None:
+            mod[ids[name]] = value
 
 
 def remove(mask):
@@ -175,3 +209,8 @@ def remove(mask):
         if mask is not None and key in mask:
             del mask[key]
     materials.remove_domain_materials()
+    from .cover_nodes import FOLD_GROUP
+
+    ng = bpy.data.node_groups.get(FOLD_GROUP)
+    if ng is not None and ng.users == 0:
+        bpy.data.node_groups.remove(ng)

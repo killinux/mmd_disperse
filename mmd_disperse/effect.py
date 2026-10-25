@@ -141,6 +141,8 @@ FIGURINE_AWAY = (0.3, 0.12)  # where the figurine lands: to the side and towards
 SHATTER_AT = 1.0  # share of the wave at which the old outfit goes all at once (exit timing): when the wave is done
 BEAT_REACH = 2.0  # seconds a moment may wait for the next beat
 WORLD_CLOSE = 0.12  # share of the wave the world change takes to shatter or close back
+WORLD_UNFOLD = 0.4  # ... and, folded round her (1.17), to open out again after the big moment
+FOLD_SKY = 3.2  # ... its sky then this many times as far as the ball's radius (outside it as it opens)
 SHELL_GO = 0.12  # share of the wave the shell takes to go after the big moment
 NOISE_CELLS_PER_HEIGHT = 6.0
 
@@ -335,10 +337,42 @@ def _extra(settings, wave, has_base, has_target):
 
 def _world_times(settings, wave, big):
     """(open end, close start, close end) of the world change in mask radius: it opens over a share of the way to the
-    big moment `big`, stays for a share of the wave after it and then shatters or closes back."""
+    big moment `big`, stays for a share of the wave after it and then shatters or closes back. Folded round her (1.17)
+    it is all there at once (held back by the fold until the moment) and stays for that share once it has opened out."""
     open_end = max(settings.domain_open * big, 1e-3 * max(wave, 1e-3))
     close_start = big + settings.domain_hold * wave
+    if settings.domain_arrive == "FOLD":  # (it stays for Stays For once it has opened out)
+        open_end = 1e-3 * max(wave, 1e-3)
+        close_start += WORLD_UNFOLD * wave
     return open_end, close_start, close_start + WORLD_CLOSE * wave
+
+
+def _fold_times(settings, wave, big):
+    """The world folding round her (1.17): {"start", "close", "end"} in mask radius (it rolls in over Opens Over's
+    share of the way to the big moment, is closed at it and opens out after it); None when it opens out of her."""
+    if settings.domain_arrive != "FOLD":
+        return None
+    return {"start": big * (1.0 - settings.domain_open), "close": big, "end": big + WORLD_UNFOLD * wave}
+
+
+def _fold_size(scene, mask, centre, floor, height, reach, moment):
+    """(the ball's radius, the sky's size as a share of its own) for the world folding round her: the ball holds the
+    scene camera as it is at the moment (frame `moment`) when it can, so the camera sees it close round itself too; a
+    camera very low or far off sees it close from outside. Both stay well inside what the camera can see (its clip
+    end): a sky out past it would be cut away and show the scene's own world."""
+    camera = shots.user_camera(scene, mask) or scene.camera
+    shell = 1.6 * height
+    sky = FOLD_SKY * shell
+    if camera is not None:
+        spot = (sampling.matrix_at(camera, moment) if moment is not None else camera.matrix_world).translation
+        across = (spot.x - centre.x) ** 2 + (spot.y - centre.y) ** 2
+        up = spot.z - floor
+        if up > 0.05 * height:
+            shell = min(max(1.15 * (across + up * up) / (2.0 * up), 1.6 * height), 25.0 * height)
+        far = camera.data.clip_end
+        shell = min(shell, 0.42 * far)
+        sky = min(FOLD_SKY * shell, max(0.92 * (far - (spot - centre).length), reach))
+    return shell, max(1.0, sky / max(reach, 1e-6))
 
 
 def _scale_curves(ob):
@@ -792,8 +826,12 @@ def _update_world(settings, mask, wave, big):
     last = int(last) if last is not None else max(settings.frame_end, first + 1)
     reach = domain.camera_reach(settings.id_data, mask, centre, first, last, height)
     models = _models(settings)
+    fold = _fold_times(settings, wave, big)
+    if fold is not None:  # 1.17: the world folding round her
+        fold["shell"], fold["sky"] = _fold_size(settings.id_data, mask, centre, lo.z, height, reach,
+                                                _frame_at(mask, big))
     domain.sync(settings, mask, centre, lo.z, height, open_end, close_start, close_end, reach,
-                models[0].armature if models else None)
+                models[0].armature if models else None, fold)
 
 
 def _unstep(mask):
@@ -1168,8 +1206,11 @@ def sync(settings):
     models = _models(settings)
     focus = _focus(mask)
     rise = _rise_heights(settings, mask) if settings.shot_enable and settings.shot_style == "RISE" else None
+    # (1.17: the journey into the pupil plays the dance once with all of this switched off, and finds the eyes on the
+    # dancing model)
+    hidden = [ob for m in models for ob in m.meshes] + [ob for ob in objects if ob.type == "MESH"]
     shots.sync(settings, mask, big_frame, focus, models[0].armature if models else None,
-               max(settings.size_reference, 1e-3), rise)
+               max(settings.size_reference, 1e-3), rise, hidden, models[0].meshes if models else ())
     _update_look(settings, big_frame)
     wire = bpy.data.materials.get(WIRE_MATERIAL)
     materials.update_wire_material(wire, settings)

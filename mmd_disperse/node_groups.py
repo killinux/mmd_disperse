@@ -28,7 +28,7 @@ import os
 
 import bpy
 
-VERSION = 18
+VERSION = 19
 CACHE_PREFIX = "mmd_disperse_node_groups_"  # the main groups, once built, are kept in the user's config folder
 
 FIELD_GROUP = "MMDDisperse Field"
@@ -442,7 +442,7 @@ STEPS_INPUTS = (
     ("Glow Material", "NodeSocketMaterial", None, None, None, None),
 )
 
-DOMAIN_STYLES = ("VOID", "CRIMSON", "FLOWERS", "WATER", "STAGE")
+DOMAIN_STYLES = ("VOID", "CRIMSON", "FLOWERS", "WATER", "STAGE", "DREAM")  # (the dream's crystals: the void's)
 # The world change (domain.py), in world units: the domain object stands at the origin, unscaled. Open End, Close Start
 # and Close End are mask radii.
 DOMAIN_INPUTS = (

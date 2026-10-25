@@ -57,8 +57,11 @@ MIRROR_GROUP = "MMDDisperse Mirror Copy"
 PHOTO_GROUP = "MMDDisperse Photo Figure"
 FOLD_GROUP = "MMDDisperse World Fold"
 FOLD_WAY = "mmdd_fold_way"  # on the folding sheet: each point's way out from the middle (its ring's angle)
+ECHO_GROUP = "MMDDisperse Echo"
+ECHO_NUMBER = "mmdd_echo"  # on the multiple exposure's copies (instances): which copy, k / Count ...
+ECHO_FADE = "mmdd_fade"  # ... and how much it shows
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 11  # bumped when one of these groups changes
+REVISION = 14  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -1804,3 +1807,70 @@ def ensure_fold_group():
     if not _current(FOLD_GROUP):
         build_fold_group()
     return bpy.data.node_groups[FOLD_GROUP]
+
+
+# --------------------------------------------------------------------------- 1.18: the multiple exposure
+
+def build_echo_group():
+    """The multiple exposure (echo.py): Count copies of Twin round Anchor, as instances of it (they cost little and
+    show in its materials), the k-th
+    (k = 1 .. Count) scaled by 1 + Spread * Size * k / Count, turned about the up by Turn * Spread * k (every other
+    one the other way) and pushed Push * Spread * k along Back (away from the camera: each one behind the one inside
+    it, showing round it); each carries its number (mmdd_echo: k / Count) and how much it shows (mmdd_fade: Fade, the
+    outer ones less) for the material. Nothing while Fade is 0."""
+    ng, b = _group(ECHO_GROUP, (
+        ("Twin", "NodeSocketObject"),
+        ("Anchor", "NodeSocketObject"),
+        ("Count", "NodeSocketInt", 5),
+        ("Spread", "NodeSocketFloat", 0.0),
+        ("Fade", "NodeSocketFloat", 0.0),
+        ("Size", "NodeSocketFloat", 0.6),
+        ("Turn", "NodeSocketFloat", 0.06),
+        ("Back", "NodeSocketVector", (0.0, 1.0, 0.0)),
+        ("Push", "NodeSocketFloat", 0.0),
+    ))
+    gi = b.node("NodeGroupInput", -1800, 0)
+    go = b.node("NodeGroupOutput", 1800, 0)
+    twin = b.node("GeometryNodeObjectInfo", -1600, 300, transform_space="RELATIVE")
+    b.feed(twin.inputs["Object"], gi.outputs["Twin"])
+    twin.inputs["As Instance"].default_value = True
+    anchor = b.node("GeometryNodeObjectInfo", -1600, -300, transform_space="RELATIVE")
+    b.feed(anchor.inputs["Object"], gi.outputs["Anchor"])
+    centre = anchor.outputs["Location"]
+    moved = b.node("GeometryNodeTransform", -1400, 300)
+    b.feed(moved.inputs["Geometry"], twin.outputs["Geometry"])
+    b.feed(moved.inputs["Translation"], b.vmath("SCALE", centre, scale=-1.0, x=-1600, y=0))
+    pts = b.node("GeometryNodePoints", -1200, -200)
+    b.feed(pts.inputs["Count"], gi.outputs["Count"])
+    index = b.node("GeometryNodeInputIndex", -1400, -500).outputs[0]
+    k = b.math("ADD", index, 1.0, x=-1200, y=-500)
+    push = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Push"], gi.outputs["Spread"], x=-1400, y=-350), k,
+                  x=-1300, y=-350)
+    b.feed(pts.inputs["Position"], b.vmath("ADD", centre, b.vmath("SCALE", gi.outputs["Back"], scale=push, x=-1300,
+                                                                 y=-250), x=-1250, y=-200))
+    share = b.math("DIVIDE", k, b.math("MAXIMUM", gi.outputs["Count"], 1.0, x=-1200, y=-700), x=-1000, y=-550)
+    grow = b.math("MULTIPLY_ADD", b.math("MULTIPLY", gi.outputs["Spread"], gi.outputs["Size"], x=-1000, y=-800),
+                  share, 1.0, x=-800, y=-650)
+    way = b.math("SUBTRACT", 1.0, b.math("MULTIPLY", b.math("MODULO", index, 2.0, x=-1200, y=-950), 2.0,
+                                         x=-1000, y=-950), x=-800, y=-950)
+    angle = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Turn"], gi.outputs["Spread"],
+                                                         x=-1000, y=-1100), k, x=-800, y=-1100), way, x=-600,
+                   y=-1000)
+    on = b.node("GeometryNodeInstanceOnPoints", -400, 0)
+    b.feed(on.inputs["Points"], pts.outputs["Geometry"])
+    b.feed(on.inputs["Instance"], moved.outputs["Geometry"])
+    b.feed(on.inputs["Rotation"], b.combine(0.0, 0.0, angle, x=-600, y=-1200))
+    b.feed(on.inputs["Scale"], b.combine(grow, grow, grow, x=-600, y=-650))
+    copies = b.store(on.outputs["Instances"], ECHO_NUMBER, share, "FLOAT", "INSTANCE", x=-200, y=0)
+    copies = b.store(copies, ECHO_FADE, b.math("MULTIPLY", gi.outputs["Fade"], b.math(
+        "MULTIPLY_ADD", share, -0.45, 1.0, x=-400, y=-400), x=-200, y=-300), "FLOAT", "INSTANCE", x=0, y=0)
+    shown = b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Fade"], 0.001, x=0, y=-300), None, copies,
+                     x=400, y=0)
+    b.feed(go.inputs["Geometry"], shown)
+    return ng
+
+
+def ensure_echo_group():
+    if not _current(ECHO_GROUP):
+        build_echo_group()
+    return bpy.data.node_groups[ECHO_GROUP]

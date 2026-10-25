@@ -78,12 +78,15 @@ P_LEATHER = "mmd_disperse_leather"
 P_LEATHER_BLEND = "mmd_disperse_leather_blend"  # blend mode to put back (Hashed before 4.2)
 OIL = "MMDD Oil"  # 1.16 (shadowplay.py, into the painting): pressed flat, painted in oils on the canvas
 P_OIL = "mmd_disperse_oil"
+SWEAT = "MMDD Sweat"  # 1.18 (sweat.py): a wet sheen and beads of sweat on the old outfit, added on top
+P_SWEAT = "mmd_disperse_sweat"
 GHOST = "MMDD Ghost"  # 1.16 (ghost.py): she turns see-through from the feet up, a rim of light flowing up her
 P_GHOST = "mmd_disperse_ghost"
 P_GHOST_BLEND = "mmd_disperse_ghost_blend"  # blend mode to put back once the ghost is gone (Hashed before 4.2)
 _CHAIN = ((REAL + " Mix", 1), (PORCELAIN + " Mix", 1), (LEATHER + " Mix", 1), (OIL + " Mix", 1), (SURFACE + " Mix", 1), (LAYER + " Mix", 1), (PAINT + " Mix", 1), (TINT + " Mix", 1),
           (INNER + " Mix", 1), (HOLO + " Mix", 1),
-          (HUSK + " Mix", 1), (GLOW + " Add", 0), (PRINT + " Add", 0), (GHOST + " Mix", 1), (SHADOW + " Mix", 1))
+          (HUSK + " Mix", 1), (GLOW + " Add", 0), (PRINT + " Add", 0), (SWEAT + " Add", 0), (GHOST + " Mix", 1),
+          (SHADOW + " Mix", 1))
 
 
 def _set_input(node, names, value):
@@ -2781,10 +2784,10 @@ def remove_husk(mat):
 # --------------------------------------------------------------------------- the world change (domain.py)
 
 DOMAIN_MATERIAL = "MMD Disperse World"  # + " Sky / Floor / Props / Rim " + the style
-DOMAIN_STYLES = ("VOID", "CRIMSON", "FLOWERS", "WATER", "STAGE")
+DOMAIN_STYLES = ("VOID", "CRIMSON", "FLOWERS", "WATER", "STAGE", "DREAM")
 # the rim of the window onto each world, and its floor's glowing front
 DOMAIN_ACCENTS = {"VOID": (0.45, 0.65, 1.0), "CRIMSON": (1.0, 0.3, 0.05), "FLOWERS": (1.0, 0.6, 0.8),
-                  "WATER": (0.75, 0.92, 1.0), "STAGE": (0.85, 0.45, 1.0)}
+                  "WATER": (0.75, 0.92, 1.0), "STAGE": (0.85, 0.45, 1.0), "DREAM": (1.0, 0.12, 0.2)}
 
 
 class _Nodes:
@@ -2942,6 +2945,46 @@ def _sky_color(s, style, d, frame, x, y):
         color = s.add(s.add((0.002, 0.003, 0.012), s.scaled(nebula, 0.8, x + 2200, y - 1600), x + 2400, y - 1600),
                       milky, x + 2600, y - 1800)
         return s.add(color, s.combine(stars, stars, stars, x + 2400, y), x + 2800, y - 600)
+    if style == "DREAM":  # a violet night and a great red moon, gouged and its rim twisting (Kamen Rider Zeztz)
+        grad = s.ramp(up, ((0.45, (0.1, 0.01, 0.04)), (0.55, (0.07, 0.01, 0.09)), (0.8, (0.02, 0.0, 0.05)),
+                           (1.0, (0.004, 0.0, 0.014))), x + 400, y)
+        stars = _star_field(s, d, 90.0, 0.4, 0.09, 2.0, frame, x, y - 300)
+        moon = s.node("ShaderNodeCombineXYZ", x, y - 900)
+        moon.name = moon.label = "World Sun"  # (pointed behind the dancer and up, like the crimson world's sun)
+        moon.inputs[1].default_value = 0.85
+        moon.inputs[2].default_value = 0.5
+        toward = s.vmath("NORMALIZE", moon.outputs[0], x=x + 200, y=y - 900)
+        wobble = s.noise(d, 7.0, 3.0, x + 200, y - 1100, w=s.math("MULTIPLY", frame, 0.01, x=x, y=y - 1200))
+        c = s.math("ADD", s.vmath("DOT_PRODUCT", d, toward, x=x + 400, y=y - 900),
+                   s.math("MULTIPLY", s.math("SUBTRACT", wobble, 0.5, x=x + 400, y=y - 1100), 0.006, x=x + 600,
+                          y=y - 1100), x=x + 800, y=y - 950)
+        disk = s.smooth(c, 0.9925, 0.9930, x + 1000, y - 900)  # (about seven degrees across)
+        # the gouge: a smaller disc to its upper side, its edge ragged, glowing where it bites into the moon
+        side = s.vmath("NORMALIZE", s.vmath("CROSS_PRODUCT", toward, (0.0, 0.0, 1.0), x=x + 400, y=y - 1300),
+                       x=x + 600, y=y - 1300)
+        bitten = s.vmath("NORMALIZE", s.vmath("ADD", toward, s.vmath("ADD", s.vmath("SCALE", side, scale=0.075,
+                                                                                    x=x + 800, y=y - 1300),
+                                                                     (0.0, 0.0, 0.05), x=x + 1000, y=y - 1300),
+                                              x=x + 1200, y=y - 1300), x=x + 1400, y=y - 1300)
+        rag = s.math("MULTIPLY", s.math("SUBTRACT", s.noise(d, 90.0, 4.0, x + 1200, y - 1500), 0.5, x=x + 1400,
+                                        y=y - 1500), 0.0016, x=x + 1600, y=y - 1500)
+        cb = s.math("ADD", s.vmath("DOT_PRODUCT", d, bitten, x=x + 1600, y=y - 1300), rag, x=x + 1800, y=y - 1350)
+        bite = s.smooth(cb, 0.9964, 0.9968, x + 2000, y - 1300)
+        lava = s.math("MULTIPLY", s.math("SUBTRACT", s.smooth(cb, 0.9955, 0.9964, x + 2000, y - 1500), bite,
+                                         x=x + 2200, y=y - 1500), disk, x=x + 2400, y=y - 1450)
+        body = s.math("MULTIPLY", disk, s.math("SUBTRACT", 1.0, bite, x=x + 2200, y=y - 1300), x=x + 2400, y=y - 1250)
+        craters = s.ramp(s.noise(d, 160.0, 5.0, x + 800, y - 1700), ((0.35, (0.18, 0.005, 0.01)),
+                                                                      (0.55, (0.7, 0.04, 0.03)),
+                                                                      (0.75, (1.0, 0.16, 0.06))), x + 1000, y - 1700)
+        halo = s.math("SUBTRACT", s.smooth(c, 0.975, 0.9930, x + 1000, y - 1900), disk, x=x + 1200, y=y - 1900)
+        color = s.add(s.scaled(grad, s.math("SUBTRACT", 1.0, disk, x=x + 1200, y=y - 900), x + 1400, y),
+                      s.combine(stars, stars, stars, x + 1400, y - 300), x + 1600, y - 100)
+        color = s.add(color, s.scaled(craters, s.math("MULTIPLY", body, 2.5, x=x + 1600, y=y - 1100), x + 1800,
+                                      y - 1200), x + 2000, y - 400)
+        color = s.add(color, s.scaled((3.0, 0.5, 0.1), lava, x + 2600, y - 1450), x + 2800, y - 500)
+        return s.add(color, s.scaled((1.4, 0.06, 0.1), s.math("POWER", s.math("MAXIMUM", halo, 0.0, x=x + 1400,
+                                                                               y=y - 2000), 1.6, x=x + 1600,
+                                                              y=y - 2000), x + 1800, y - 2000), x + 3000, y - 600)
     if style == "CRIMSON":
         grad = s.ramp(up, ((0.45, (0.85, 0.12, 0.03)), (0.52, (0.5, 0.05, 0.02)), (0.68, (0.12, 0.01, 0.01)),
                            (0.9, (0.02, 0.0, 0.0))), x + 400, y)
@@ -3018,6 +3061,13 @@ def _floor_shader(s, style, g, frame, opened, accent, x, y):
         burn = s.add(glow, s.scaled((1.0, 0.3, 0.05), s.math("MULTIPLY", crack, 4.0, x=x + 1200, y=y - 700),
                                     x + 1400, y - 600), x + 1600, y - 500)
         return s.principled(x + 2800, y, (0.08, 0.012, 0.008), 0.85, emission=burn)
+    if style == "DREAM":  # a black mirror, a few dim stars in it and patches of red mist
+        stars = _star_field(s, flat, 300.0, 0.2, 0.12, 1.0, frame, x + 800, y - 600)
+        mist = s.math("MULTIPLY", s.smooth(s.noise(flat, 6.0, 4.0, x + 800, y - 900), 0.45, 0.8, x + 1000, y - 900), 0.3,
+                      x=x + 1200, y=y - 900)
+        light = s.add(s.add(glow, s.scaled((0.35, 0.2, 0.6), stars, x + 1400, y - 600), x + 1600, y - 500),
+                      s.scaled((0.7, 0.03, 0.08), mist, x + 1400, y - 900), x + 1800, y - 600)
+        return s.principled(x + 2800, y, (0.003, 0.0, 0.006), 0.06, emission=light)
     if style == "FLOWERS":
         cells = s.voronoi(flat, 70.0, x + 600, y - 600)
         cr, _cg, _cb = s.split(cells.outputs["Color"], x + 800, y - 800)
@@ -3061,10 +3111,11 @@ def _floor_shader(s, style, g, frame, opened, accent, x, y):
 
 def _prop_shader(s, style, out, x, y):
     """What the props of `style` are made of (feathers have their own); returns True when it is see-through."""
-    if style == "VOID":  # crystals of light
+    if style in ("VOID", "DREAM"):  # crystals of light (red in the dream)
         facing = s.node("ShaderNodeLayerWeight", x, y - 300)
         facing.inputs["Blend"].default_value = 0.4
-        shader = s.principled(x + 400, y, (0.05, 0.08, 0.15), 0.1, emission=(0.5, 0.8, 1.0),
+        shader = s.principled(x + 400, y, (0.05, 0.08, 0.15) if style == "VOID" else (0.15, 0.02, 0.03), 0.1,
+                              emission=(0.5, 0.8, 1.0) if style == "VOID" else (1.0, 0.12, 0.16),
                               strength=s.math("MULTIPLY_ADD", facing.outputs["Facing"], 4.0, 1.0, x=x + 200,
                                               y=y - 300))
     elif style == "CRIMSON":  # swords
@@ -3133,8 +3184,10 @@ def ensure_domain_materials(style):
         accent = DOMAIN_ACCENTS[style]
         if key == "sky":
             # emission only; seen from outside only the far inner wall (EEVEE culls the back faces, Cycles needs the
-            # mix)
-            color = _sky_color(s, style, s.attribute(ATTR_DIR, -2400, 0).outputs["Vector"], frame, -2200, 0)
+            # mix). The direction is kept at the corners and runs straight across the faces: made whole again, it is
+            # the true direction from the centre (the sun's and the moon's rims round, not cornered)
+            way = s.vmath("NORMALIZE", s.attribute(ATTR_DIR, -2600, 0).outputs["Vector"], x=-2400, y=0)
+            color = _sky_color(s, style, way, frame, -2200, 0)
             geometry = s.node("ShaderNodeNewGeometry", 1200, 300)
             shader = s.mix_shader(geometry.outputs["Backfacing"], s.emission(color, 1.0, 1200, 0),
                                   s.node("ShaderNodeBsdfTransparent", 1200, -200).outputs[0], 1500, 0)
@@ -5686,6 +5739,214 @@ def remove_voyage_materials():
             bpy.data.materials.remove(mat)
 
 
+# --------------------------------------------------------------------------- 1.18: the multiple exposure (echo.py)
+
+ECHO_PALETTE = ((0.0, (1.0, 0.08, 0.55)), (0.2, (1.0, 0.42, 0.04)), (0.38, (1.0, 0.88, 0.08)),
+                (0.55, (0.35, 1.0, 0.18)), (0.72, (0.08, 0.82, 1.0)), (0.88, (0.55, 0.18, 1.0)))  # 1960s psychedelia
+ECHO_TINT = "MMDD Echo Tint"  # the one colour (the glow colour) ...
+ECHO_MONO = "MMDD Echo Mono"  # ... and how much it is used instead of the palette (1 with One Colour)
+ECHO_OF = "mmd_disperse_echo_of"  # on the multiple exposure's materials: "image|UV map" of the texture whose alpha cuts
+# them out ("" for the one without)
+
+
+def _cover_echo(name, image=None, uv=""):
+    """The multiple exposure's copies (ECHO, echo.py): light in a colour by the copy's number (mmdd_echo, an attribute
+    of the instance) through the palette, or the one colour (ECHO_TINT, as much as ECHO_MONO), brighter towards its
+    outline, as much as its mmdd_fade, and as much as the alpha of `image` (read through UV map `uv`, the active one
+    when "") when there is one: the cut-out texture of the material it stands in for (hair cards, lace, lashes), so
+    only what shows of her glows; it adds light, so where they overlap they glow brighter."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    number = s.attribute("mmdd_echo", -1600, 200, "INSTANCER").outputs[2]
+    fade = s.attribute("mmdd_fade", -1600, -100, "INSTANCER").outputs[2]
+    palette = s.ramp(number, ECHO_PALETTE, -1400, 300, constant=True)
+    tint = s.node("ShaderNodeRGB", -1400, 0)
+    tint.name = ECHO_TINT
+    tint.outputs[0].default_value = (1.0, 0.6, 0.9, 1.0)
+    mono = s.node("ShaderNodeValue", -1400, -150)
+    mono.name = ECHO_MONO
+    mono.outputs[0].default_value = 0.0
+    color = s.lerp(palette, tint.outputs[0], mono.outputs[0], -1100, 200)
+    facing = s.node("ShaderNodeLayerWeight", -1400, -400)
+    facing.inputs["Blend"].default_value = 0.5
+    rim = m("POWER", facing.outputs["Facing"], 3.0, x=-1200, y=-400)  # (light at the outline, the inside see-through)
+    strength = m("MULTIPLY", fade, m("MULTIPLY_ADD", rim, 0.8, 0.03, x=-1000, y=-400), x=-900, y=-200)
+    if image is not None:
+        tex = s.node("ShaderNodeTexImage", -1400, -700, image=image)
+        if uv:
+            s.feed(tex.inputs["Vector"], s.node("ShaderNodeUVMap", -1600, -700, uv_map=uv).outputs[0])
+        strength = m("MULTIPLY", strength, tex.outputs["Alpha"], x=-800, y=-400)
+    add = s.node("ShaderNodeAddShader", -300, 0)
+    nt.links.new(s.node("ShaderNodeBsdfTransparent", -600, -200).outputs[0], add.inputs[0])
+    nt.links.new(s.emission(color, strength, -600, 100), add.inputs[1])
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    _blended(mat)
+    for flag in ("use_transparency_overlap", "show_transparent_back"):  # only the nearest layer of a copy shows (long
+        if hasattr(mat, flag):  # hair is cards over cards: they would all add up to a blaze)
+            setattr(mat, flag, False)
+    _no_shadow(mat)
+    _two_sided(mat)
+    mat.diffuse_color = (1.0, 0.4, 0.8, 0.4)
+    mat[ECHO_OF] = "%s|%s" % (image.name, uv) if image is not None else ""
+    return mat
+
+
+def _alpha_image(mat):
+    """(image, UV map name or "") of the texture whose alpha cuts material `mat` out: the one behind its alpha
+    (_alpha_source), followed back through what that runs through; (None, "") when there is none."""
+    nt = mat.node_tree if mat is not None and mat.use_nodes else None
+    socket = _alpha_source(nt) if nt is not None else None
+    todo, seen = [socket.node] if socket is not None else [], set()
+    while todo:
+        node = todo.pop()
+        if node.name in seen:
+            continue
+        seen.add(node.name)
+        if node.bl_idname == "ShaderNodeTexImage" and node.image is not None:
+            vector = node.inputs.get("Vector")
+            source = vector.links[0].from_node if vector is not None and vector.links else None
+            return node.image, source.uv_map if source is not None and source.bl_idname == "ShaderNodeUVMap" else ""
+        todo.extend(link.from_node for sock in node.inputs for link in sock.links)
+    return None, ""
+
+
+def echo_material(source):
+    """The material a copy of the multiple exposure shows where she shows `source` (one of her materials): the ECHO
+    light, cut out as `source` is (one material for each cut-out texture, made on first use)."""
+    image, uv = _alpha_image(source)
+    if image is None:
+        return ensure_cover_material("ECHO")
+    key = "%s|%s" % (image.name, uv)
+    found = next((m for m in bpy.data.materials if m.get(ECHO_OF) == key), None)
+    if found is not None:
+        return found
+    base = "%s %s" % (_cover_name("ECHO"), image.name[:24])
+    name, n = base, 1
+    while bpy.data.materials.get(name) is not None:
+        n += 1
+        name = "%s %d" % (base, n)
+    return _cover_echo(name, image, uv)
+
+
+def echo_materials():
+    """All the multiple exposure's materials."""
+    return [m for m in bpy.data.materials if m.get(ECHO_OF) is not None]
+
+
+def update_echo(style, tint):
+    """The multiple exposure's colours, on all its materials: the palette (PSYCHEDELIC) or `tint` for all (MONO)."""
+    for mat in echo_materials():
+        nt = mat.node_tree
+        if nt is None:
+            continue
+        if nt.nodes.get(ECHO_TINT) is not None:
+            nt.nodes[ECHO_TINT].outputs[0].default_value = tuple(tint[:3]) + (1.0,)
+        if nt.nodes.get(ECHO_MONO) is not None:
+            nt.nodes[ECHO_MONO].outputs[0].default_value = 1.0 if style == "MONO" else 0.0
+
+
+def _cover_eyelid(name):
+    """Eyelids closing over the picture (EYELID, domain.py's blink): black from the top and the bottom down to an
+    edge that bows in the middle, as far as the object's mmdd_lid says (0 open .. 1 shut), on a sheet across the
+    picture (UVs 0 .. 1)."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    lid = s.attribute("mmdd_lid", -1400, 200, "OBJECT").outputs[2]
+    u, v, _w = s.split(s.node("ShaderNodeTexCoord", -1600, -200).outputs["UV"], -1400, -200)
+    across = m("MULTIPLY", m("SUBTRACT", u, 0.5, x=-1200, y=-200), 2.0, x=-1000, y=-200)
+    up = m("ABSOLUTE", m("MULTIPLY", m("SUBTRACT", v, 0.5, x=-1200, y=-350), 2.0, x=-1000, y=-350), x=-800, y=-350)
+    bow = m("SUBTRACT", 1.0, m("MULTIPLY", across, across, x=-800, y=-200), x=-600, y=-200)
+    edge = m("SUBTRACT", 1.12, m("MULTIPLY", lid, m("MULTIPLY_ADD", bow, 0.3, 1.12, x=-600, y=0), x=-400, y=100),
+             x=-200, y=100)
+    black = s.smooth(m("SUBTRACT", up, edge, x=0, y=0), -0.02, 0.02, 200, 0)
+    nt.links.new(s.mix_shader(black, s.node("ShaderNodeBsdfTransparent", 200, -200).outputs[0],
+                              s.emission((0.0, 0.0, 0.0), 1.0, 200, -350), 500, 0), out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    _two_sided(mat)
+    mat.diffuse_color = (0.0, 0.0, 0.0, 0.5)
+    return mat
+
+
+# --------------------------------------------------------------------------- 1.18: the big title (title.py)
+
+def _cover_title(name):
+    """The big title's words (TITLE, title.py): ink, gold or white (the object's mmdd_style: 0, 0.5, 1; the gold and
+    the white glow), brushed in along their own X (down their Y when set upright: mmdd_upright) as mmdd_reveal goes
+    0 .. 1, with a ragged edge and the streaks of a dry brush; turned seal red as mmdd_seal does and blown to specks as
+    mmdd_blow does. mmdd_span_x and mmdd_span_y are their extent in their own space."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    reveal = s.attribute("mmdd_reveal", -2400, 400, "OBJECT").outputs[2]
+    blow = s.attribute("mmdd_blow", -2400, 250, "OBJECT").outputs[2]
+    seal = s.attribute("mmdd_seal", -2400, 100, "OBJECT").outputs[2]
+    style = s.attribute("mmdd_style", -2400, -50, "OBJECT").outputs[2]
+    upright = s.attribute("mmdd_upright", -2400, -200, "OBJECT").outputs[2]
+    x0, x1, _z = s.split(s.attribute("mmdd_span_x", -2400, -350, "OBJECT").outputs["Vector"], -2200, -350)
+    y0, y1, _z2 = s.split(s.attribute("mmdd_span_y", -2400, -500, "OBJECT").outputs["Vector"], -2200, -500)
+    p = s.node("ShaderNodeTexCoord", -2400, -700).outputs["Object"]
+    px, py, _pz = s.split(p, -2200, -700)
+    across = m("DIVIDE", m("SUBTRACT", px, x0, x=-2000, y=-400), m("MAXIMUM", m("SUBTRACT", x1, x0, x=-2000, y=-550),
+                                                                  1e-6, x=-1800, y=-550), x=-1600, y=-450)
+    down = m("DIVIDE", m("SUBTRACT", y1, py, x=-2000, y=-700), m("MAXIMUM", m("SUBTRACT", y1, y0, x=-2000, y=-850),
+                                                                1e-6, x=-1800, y=-850), x=-1600, y=-750)
+    t = s.lerp(across, down, upright, -1400, -600)
+    rag = s.noise(p, 6.0, 4.0, -1600, -1000)
+    edge = m("MULTIPLY_ADD", m("SUBTRACT", rag, 0.5, x=-1400, y=-1000), 0.14, t, x=-1200, y=-800)
+    brushed = m("DIVIDE", m("SUBTRACT", m("MULTIPLY", reveal, 1.25, x=-1200, y=400), edge, x=-1000, y=-200), 0.05,
+                x=-800, y=-200, clamp=True)
+    # the streaks of a dry brush, along the stroke
+    along = s.lerp(px, py, upright, -1400, -1300)
+    athwart = s.lerp(py, px, upright, -1400, -1450)
+    streak = s.noise(s.combine(m("MULTIPLY", along, 2.0, x=-1200, y=-1300), m("MULTIPLY", athwart, 45.0, x=-1200,
+                                                                             y=-1450), 0.0, -1000, -1350), 1.0, 3.0,
+                     -800, -1350)
+    dry = m("MULTIPLY_ADD", s.smooth(streak, 0.3, 0.55, -600, -1350), 0.35, 0.65, x=-400, y=-1300)
+    specks = s.noise(p, 28.0, 2.0, -1000, -1700)
+    left = s.smooth(m("SUBTRACT", specks, m("MULTIPLY", blow, 1.15, x=-800, y=-1600), x=-600, y=-1650), -0.04, 0.02,
+                    -400, -1650)
+    alpha = m("MULTIPLY", m("MULTIPLY", brushed, dry, x=-200, y=-800), left, x=0, y=-1000)
+    tint = s.ramp(style, ((0.0, (0.015, 0.015, 0.02)), (0.25, (1.0, 0.72, 0.22)), (0.75, (1.0, 0.97, 0.92))), -1000,
+                  200, constant=True)
+    color = s.lerp(tint, (0.78, 0.05, 0.04), seal, -600, 200)
+    strength = m("ADD", m("MULTIPLY", m("GREATER_THAN", style, 0.25, x=-600, y=0), 1.4, x=-400, y=0), 0.6, x=-200, y=0)
+    nt.links.new(s.mix_shader(alpha, s.node("ShaderNodeBsdfTransparent", 200, -200).outputs[0],
+                              s.emission(color, strength, 200, 100), 500, 0), out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    _two_sided(mat)
+    mat.diffuse_color = (1.0, 0.75, 0.25, 1.0)
+    return mat
+
+
+def _cover_seal_frame(name):
+    """The seal's frame (SEAL_FRAME, title.py): a red square border, worn at its edges, as much as the object's
+    mmdd_seal says, on a square of UVs 0 .. 1."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    shown = s.attribute("mmdd_seal", -1400, 200, "OBJECT").outputs[2]
+    u, v, _w = s.split(s.node("ShaderNodeTexCoord", -1600, -200).outputs["UV"], -1400, -200)
+    du = m("ABSOLUTE", m("SUBTRACT", u, 0.5, x=-1200, y=-200), x=-1000, y=-200)
+    dv = m("ABSOLUTE", m("SUBTRACT", v, 0.5, x=-1200, y=-350), x=-1000, y=-350)
+    out_ = m("MAXIMUM", du, dv, x=-800, y=-250)
+    wear = s.noise(s.node("ShaderNodeTexCoord", -1600, -500).outputs["UV"], 18.0, 4.0, -1200, -500)
+    band = m("MULTIPLY", s.smooth(out_, 0.4, 0.42, -600, -250),
+             m("SUBTRACT", 1.0, s.smooth(out_, 0.48, 0.5, -600, -400), x=-400, y=-400), x=-200, y=-300)
+    alpha = m("MULTIPLY", m("MULTIPLY", band, s.smooth(wear, 0.25, 0.4, -400, -600), x=0, y=-400), shown, x=200,
+              y=-200)
+    nt.links.new(s.mix_shader(alpha, s.node("ShaderNodeBsdfTransparent", 200, -500).outputs[0],
+                              s.emission((0.78, 0.05, 0.04), 1.0, 200, -700), 500, 0), out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    _two_sided(mat)
+    mat.diffuse_color = (0.78, 0.05, 0.04, 1.0)
+    return mat
+
+
 _COVER_MAKERS = {"MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS": _cover_glass,
                  "CLOTH": _cover_cloth, "UMBRELLA": _cover_umbrella, "FAN": _cover_fan, "EMOJI": _cover_emoji,
                  "FRAME": _cover_frame, "CANVAS": _cover_canvas, "PETALS": _cover_pieces, "PLUMES": _cover_plumes,
@@ -5698,7 +5959,8 @@ _COVER_MAKERS = {"MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS"
                  "OIL_CANVAS": _cover_oil_canvas, "MIRROR_GLASS": _cover_mirror_glass,
                  "POLAROID": _cover_polaroid, "EARTH": _cover_earth, "EARTH_CLOUDS": _cover_earth_clouds,
                  "EARTH_AIR": _cover_earth_air, "SPACE": _cover_space, "CLOUD_SHEET": _cover_cloud_sheet,
-                 "IRIS": _cover_iris}
+                 "IRIS": _cover_iris, "ECHO": _cover_echo,
+                 "EYELID": _cover_eyelid, "TITLE": _cover_title, "SEAL_FRAME": _cover_seal_frame}
 
 
 # --------------------------------------------------------------------------- 1.14: the print (printer.py)
@@ -6256,6 +6518,68 @@ def remove_porcelain(mat):
     for node in [n for n in nt.nodes if n.name.startswith(PORCELAIN)]:
         nt.nodes.remove(node)
     del mat[P_PORCELAIN]
+
+
+# --------------------------------------------------------------------------- 1.18: the sweat (sweat.py)
+
+def add_sweat(mat):
+    """Splice a sheen of sweat on top of the surface (SWEAT + " Add", after the glow): a wet film catching the light at
+    grazing angles and small beads of sweat glinting (a Voronoi of the object's own coordinates, so they stay put on
+    the body), added as glossy reflection as much as SWEAT + " On" says (sweat.py drives it), none where the material
+    is see-through."""
+    nt = mat.node_tree
+    if nt is None or mat.get(P_SWEAT):
+        return
+    outputs = _outputs(nt)
+    if not outputs:
+        return
+    m = _shader_math(nt, SWEAT)
+    x = min(n.location.x for n in outputs) - 400
+    y = min(n.location.y for n in outputs) - 12400
+    on = _new(nt, "ShaderNodeValue", SWEAT + " On", x - 1400, y + 300)
+    on.outputs[0].default_value = 0.0
+    shine = _new(nt, "ShaderNodeValue", SWEAT + " Shine", x - 1400, y + 150)
+    shine.outputs[0].default_value = 1.0
+    coords = _new(nt, "ShaderNodeTexCoord", SWEAT + " Coords", x - 1600, y - 200)
+    beads = _new(nt, "ShaderNodeTexVoronoi", SWEAT + " Beads", x - 1400, y - 200)
+    nt.links.new(coords.outputs["Object"], beads.inputs["Vector"])
+    beads.inputs["Scale"].default_value = 90.0
+    bead = m("SUBTRACT", 1.0, m("DIVIDE", beads.outputs["Distance"], 0.16, x=x - 1200, y=y - 200, clamp=True),
+             x=x - 1000, y=y - 200)
+    bead = m("POWER", bead, 3.0, x=x - 800, y=y - 200)
+    film = _new(nt, "ShaderNodeLayerWeight", SWEAT + " Film", x - 1200, y - 450)
+    film.inputs["Blend"].default_value = 0.3
+    wet = m("MULTIPLY", m("MULTIPLY", m("MULTIPLY_ADD", film.outputs["Fresnel"], 0.5, bead, x=x - 600, y=y - 300), on.outputs[0],
+                          x=x - 400, y=y - 200), shine.outputs[0], x=x - 200, y=y - 200)
+    alpha = _alpha_source(nt)
+    if alpha is not None:
+        wet = m("MULTIPLY", wet, alpha, x=x - 200, y=y - 400)
+    gloss = _new(nt, "ShaderNodeBsdfGlossy", SWEAT + " Gloss", x - 400, y + 200)
+    _set_input(gloss, ("Roughness",), 0.06)
+    dark = _new(nt, "ShaderNodeEmission", SWEAT + " Dark", x - 400, y + 400)
+    dark.inputs["Strength"].default_value = 0.0
+    scaled = _new(nt, "ShaderNodeMixShader", SWEAT + " Scaled", x - 150, y + 300)
+    nt.links.new(wet, scaled.inputs[0])
+    nt.links.new(dark.outputs[0], scaled.inputs[1])
+    nt.links.new(gloss.outputs[0], scaled.inputs[2])
+    for i, out in enumerate(outputs):
+        add = _new(nt, "ShaderNodeAddShader", "%s Add %d" % (SWEAT, i), out.location.x - 180, out.location.y + 1300)
+        _splice(nt, out, add)
+        nt.links.new(scaled.outputs[0], add.inputs[1])
+    mat[P_SWEAT] = 1
+
+
+def remove_sweat(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_SWEAT):
+        return
+    node = nt.nodes.get(SWEAT + " On")
+    if node is not None:
+        node.outputs[0].driver_remove("default_value")
+    _unsplice(nt, SWEAT + " Add")
+    for node in [n for n in nt.nodes if n.name.startswith(SWEAT)]:
+        nt.nodes.remove(node)
+    del mat[P_SWEAT]
 
 
 # --------------------------------------------------------------------------- 1.16: the shadow play's leather (shadowplay.py)

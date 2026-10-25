@@ -231,12 +231,12 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.17：用 Blender 几何节点给 MMD 模型做换装变身。下面一百四十八段视频都是插件生成的
+    <p>mmd_disperse 1.18：用 Blender 几何节点给 MMD 模型做换装变身。下面一百五十四段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>148</b> 段演示</span>
+      <span><b>154</b> 段演示</span>
       <span><b>61</b> 组效果</span>
-      <span><b>136</b> 个一键预设</span>
+      <span><b>142</b> 个一键预设</span>
       <span><b>23400</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
@@ -295,7 +295,7 @@
 <section id="effects">
   <div class="wrap">
     <h2>效果演示</h2>
-    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.17 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
+    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.18 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
 
     <div class="index">
       <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
@@ -446,6 +446,12 @@
       <a href="#into-eye"><img src="../test_output/posters/into_eye.jpg" alt="" loading="lazy">钻进瞳孔</a>
       <a href="#world-fold"><img src="../test_output/posters/world_fold.jpg" alt="" loading="lazy">世界折叠</a>
       <a href="#earth-zoom"><img src="../test_output/posters/earth_zoom.jpg" alt="" loading="lazy">地球拉远</a>
+      <a href="#big-title"><img src="../test_output/posters/big_title.jpg" alt="" loading="lazy">书法大字幕</a>
+      <a href="#ab-side"><img src="../test_output/posters/ab_side.jpg" alt="" loading="lazy">反差 AB 面</a>
+      <a href="#touch-change"><img src="../test_output/posters/touch_change.jpg" alt="" loading="lazy">碰饰品变身</a>
+      <a href="#multi-exposure"><img src="../test_output/posters/multi_exposure.jpg" alt="" loading="lazy">迷幻多重曝光</a>
+      <a href="#chest-beat"><img src="../test_output/posters/chest_beat.jpg" alt="" loading="lazy">捶胸变身</a>
+      <a href="#dream-world"><img src="../test_output/posters/dream_world.jpg" alt="" loading="lazy">梦境领域</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -1778,6 +1784,48 @@
             <p class="cmd">演示参数：<code>--preset HEART --white-flash --vmd "恋爱频率.vmd" --wave 380:480</code></p>
           </div>
         </article>
+
+        <article class="effect variant" id="touch-change">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/touch_change.jpg">
+              <source src="../test_output/demo_v20/tifa_touch_change_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">碰饰品 · 跳舞（有声音）</span><span class="ver">1.18</span><span class="tag">VMD 舞蹈</span><span class="tag">碰饰品 / 扶眼镜</span><span class="tag">沿体表流动</span><span class="tag">碎片飞散</span></div>
+            <h3>碰饰品变身（新预设）</h3>
+            <p class="lead">她抬手遮住一只眼的那一下，变化从那只眼睛开始，沿着身体流开，旧衣服碎成星光（VRChat 的换装机关：碰耳环、扶眼镜就换装）。舞是「为什么晚上总是有星星出舞蹈了」。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧设在那个动作之前；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">碰饰品变身</span>：<span class="ui">开始时机</span> 选 <span class="v">碰饰品 / 扶眼镜</span>，<span class="ui">路径</span> <span class="v">沿体表流动</span>，<span class="ui">退场方式</span> <span class="v">碎片飞散</span>。</li>
+            <li>生成时把舞播一遍，找到指尖碰到耳朵、眼角或鼻梁停一下的那一刻；<span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset TOUCH_CHANGE --white-flash --vmd "为什么晚上总是有星星出舞蹈了_VMD-TDA.vmd" --wave 420:520</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="chest-beat">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/chest_beat.jpg">
+              <source src="../test_output/demo_v20/tifa_chest_beat_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">捶胸 · 跳舞（有声音）</span><span class="ver">1.18</span><span class="tag">VMD 舞蹈</span><span class="tag">捶胸</span><span class="tag">球形扩散</span><span class="tag">冲击帧</span><span class="tag">地面冲击波</span></div>
+            <h3>捶胸变身（新预设）</h3>
+            <p class="lead">双拳一下下收回胸前，第三下时变化从胸口球形炸开，冲击帧、地面冲击波，旧衣服碎成火星（大金刚 Bananza 的「Bananza 仪式」）。舞是 KARA 的「Mister」（动作作者要求注明出处，仅本地演示）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧设在那个动作之前；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">捶胸变身</span>：<span class="ui">开始时机</span> 选 <span class="v">捶胸</span>，<span class="ui">路径</span> <span class="v">球形扩散</span>；<span class="ui">冲击帧</span> 勾上（<span class="ui">集中线</span>、<span class="ui">地面冲击波</span> 勾上）。</li>
+            <li><span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。她在这段舞里走动多，演示把画面放宽到 1.5 个身高。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset CHEST_BEAT --white-flash --vmd "Mister.vmd" --wave 2040:2140 --view 1.5</code></p>
+          </div>
+        </article>
       </div>
     </section>
     <section class="family card" id="fam-flame">
@@ -2144,6 +2192,27 @@
             <p class="cmd">演示参数：<code>--preset WORLD_FOLD --white-flash --vmd "回レ！雪月花.vmd" --wave 140:220 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"</code></p>
           </div>
         </article>
+
+        <article class="effect variant" id="dream-world">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/dream_world.jpg">
+              <source src="../test_output/demo_v20/tifa_dream_world_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">梦境领域 · 跳舞（有声音）</span><span class="ver">1.18</span><span class="tag">VMD 舞蹈</span><span class="tag">领域展开</span><span class="tag">梦境</span><span class="tag">眨眼</span><span class="tag">瞬间换装</span><span class="tag">全屏闪白</span></div>
+            <h3>梦境领域（新预设）</h3>
+            <p class="lead">眼皮从上下合上，黑屏里进到梦里：紫黑的夜空，一轮被啃掉一块、缺口发着熔岩光的红月，红雾和红色光晶；她在梦里一道白光换成 Remake 版的蒂法，再眨一次眼，醒回原来的舞台（《假面骑士 Zeztz》的梦世界）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">梦境领域</span>：<span class="ui">领域展开</span> 勾上，<span class="ui">世界</span> 选 <span class="v">梦境</span>，<span class="ui">出现方式</span> 选 <span class="v">眨眼</span>，<span class="ui">展开用时</span> <span class="v">0.6</span>，<span class="ui">停留时长</span> <span class="v">0.6</span>。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>；<span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。要有场景相机（眼皮挂在相机前面）。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset DREAM_WORLD --white-flash --vmd "回レ！雪月花.vmd" --wave 140:220 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"</code></p>
+          </div>
+        </article>
       </div>
     </section>
     <section class="family card" id="fam-camera">
@@ -2421,6 +2490,27 @@
             <p class="cmd">演示参数：<code>--preset SONG_PAINTING</code></p>
           </div>
         </article>
+
+        <article class="effect variant" id="ab-side">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/ab_side.jpg">
+              <source src="../test_output/demo_v20/tifa_ab_side_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">反差 AB 面 · 跳舞（有声音）</span><span class="ver">1.18</span><span class="tag">VMD 舞蹈</span><span class="tag">素颜平光</span><span class="tag">汗光</span><span class="tag">举手向天</span><span class="tag">慢放</span><span class="tag">全屏闪白</span></div>
+            <h3>反差 AB 面（新预设）</h3>
+            <p class="lead">灰扑扑的素颜平光里，她越跳越出汗，皮肤和衣服湿亮；手一举、舞蹈慢下来，一道白光换成 AC 版的蒂法，画面一下切回全彩（抖音的反差变装）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">反差 AB 面</span>：<span class="ui">画面风格</span> 选 <span class="v">素颜平光</span>，<span class="ui">风格时长</span> <span class="v">4</span> 秒；<span class="ui">汗光</span> 勾上，<span class="ui">出汗时长</span> <span class="v">4</span> 秒；<span class="ui">开始时机</span> 选 <span class="v">举手向天</span>；<span class="ui">时间</span> 选 <span class="v">慢放</span>。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>；<span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset AB_SIDE --white-flash --vmd "回レ！雪月花.vmd" --wave 120:200 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"</code></p>
+          </div>
+        </article>
       </div>
     </section>
     <article class="effect card" id="paper-cut">
@@ -2678,6 +2768,27 @@
             <li><span class="ui">预设</span> 选 <span class="v">千手开屏</span>：<span class="ui">新服装登场</span> <span class="v">三头六臂</span>，<span class="ui">手臂对数</span> 8，<span class="ui">手臂间隔角</span> 0.35。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset THOUSAND_HANDS --white-flash --vmd "回レ！雪月花.vmd" --wave 140:240 --view 1.6</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="multi-exposure">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/multi_exposure.jpg">
+              <source src="../test_output/demo_v20/tifa_multi_exposure_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">迷幻多重曝光 · 跳舞（有声音）</span><span class="ver">1.18</span><span class="tag">VMD 舞蹈</span><span class="tag">迷幻多重曝光</span><span class="tag">瞬间换装</span><span class="tag">全屏闪白</span></div>
+            <h3>迷幻多重曝光（新预设）</h3>
+            <p class="lead">快到关键时刻时，一层层她的分身从身上往外扩，每层大一点、转一点、往后推一点，各是一种 60 年代的迷幻颜色；一道白光换好，新衣服的分身再一层层收回她身上（《神奇四侠：初露锋芒》隐形女侠的多重曝光）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">迷幻多重曝光</span>：<span class="ui">迷幻多重曝光</span> 勾上，<span class="ui">配色</span> 选 <span class="v">迷幻配色</span>，<span class="ui">层数</span> <span class="v">5</span>，<span class="ui">外扩</span> <span class="v">0.6</span>，<span class="ui">曝光时长</span> <span class="v">1.5</span> 秒。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>；<span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset MULTI_EXPOSURE --white-flash --vmd "回レ！雪月花.vmd" --wave 150:210</code></p>
           </div>
         </article>
       </div>
@@ -3272,6 +3383,27 @@
             <li>选框从头边那一角拉到对角；生成时把舞播一遍，看人在画面上的位置。改了相机要重新生成。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset EDITOR_CURSOR --vmd "回レ！雪月花.vmd" --wave 140:220</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="big-title">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/big_title.jpg">
+              <source src="../test_output/demo_v20/tifa_big_title_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">书法大字幕 · 跳舞（有声音）</span><span class="ver">1.18</span><span class="tag">VMD 舞蹈</span><span class="tag">书法大字幕</span><span class="tag">瞬间换装</span><span class="tag">全屏闪白</span></div>
+            <h3>书法大字幕（新预设）</h3>
+            <p class="lead">关键时刻前，镜头前一笔刷出金色的「变身」两个大字（楷体），带着毛笔参差的边和枯笔的丝；一道白光换好，字吹散成金色的墨点飘走（漫改剧《烈焰》放大招时满屏的大字）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">书法大字幕</span>：<span class="ui">书法大字幕</span> 勾上，<span class="ui">文字</span> <span class="v">变身</span>，<span class="ui">字体</span> 选一个有中文的字体（演示用 Windows 的楷体 <code>C:/Windows/Fonts/simkai.ttf</code>），<span class="ui">颜色</span> 选 <span class="v">金色</span>，<span class="ui">之后</span> 选 <span class="v">吹散</span>，<span class="ui">字幕时长</span> <span class="v">1</span> 秒。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>；<span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。要有场景相机；想要印章就把 <span class="ui">之后</span> 改成 <span class="v">缩成印章</span>、勾上 <span class="ui">竖排</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset BIG_TITLE --white-flash --vmd "回レ！雪月花.vmd" --wave 150:210 --set title_font=C:/Windows/Fonts/simkai.ttf</code></p>
           </div>
         </article>
       </div>
@@ -3911,7 +4043,7 @@
           <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>剪纸窗花</li><li>发光纹身</li><li>LED 屏幕</li><li>电子纸</li><li>也可以不变</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>45</b></h3>
+        <h3>叠加开关 <b>48</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行（全息 / 星空纱 / 黑剪影 / 冰晶）</li><li>故障风</li><li>光剪影</li><li>光带</li>
           <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
           <li>毒液共生体（触手、蹼、黏丝；黑色黏液或液态金属）</li>
@@ -3920,9 +4052,9 @@
           <li>光环（魔法阵 / 火花圈 / 发光面板 / 雪花屏 / 星光彗星 / 光环 / 卡通水流）</li><li>画稿（线稿上色 / 水墨 / 数字雨）</li>
           <li>反应堆起手</li><li>装甲板鼓起</li><li>电弧闪电（开场落雷）</li><li>卡通火焰（沿着边缘 / 全身气焰）</li>
           <li>冲击帧（集中线、地面冲击波）</li><li>魂环</li>
-          <li>领域展开（星空虚空 / 赤红荒原 / 花海 / 天空之镜 / 演唱会；从她身上展开 / 世界折叠；碎裂 / 收回）</li>
+          <li>领域展开（星空虚空 / 赤红荒原 / 花海 / 天空之镜 / 演唱会 / 梦境；从她身上展开 / 世界折叠 / 眨眼；碎裂 / 收回）</li>
           <li>镜头运动（甩镜头 / 旋转 / 冲焦 / 推拉变焦 / 环绕 / 终结技分镜 / 上摇揭晓 / 地球拉远 / 钻进瞳孔）</li><li>时间（定格 / 慢放 / 一拍二 / 倒带重放）</li>
-          <li>卡通物理（压扁回弹 / 纸片翻面 / 卡牌翻面）</li><li>浮空</li><li>画面风格（逆光剪影 / 去色留色 / 古画 / 像素打码）</li>
+          <li>卡通物理（压扁回弹 / 纸片翻面 / 卡牌翻面）</li><li>浮空</li><li>画面风格（逆光剪影 / 去色留色 / 古画 / 像素打码 / 素颜平光）</li>
           <li>舞蹈绸带（光带 / 水袖 / 混天绫 / 花瓣）</li><li>步步生莲（莲花 / 光印）</li>
           <li>外壳（结界罩 / 泡泡 / 护盾 / 糖纸 / 水壳）</li><li>熄灯</li><li>相机闪光灯（可以随闪光分段换装）</li>
           <li>镜头星芒</li><li>收尾亮相（写真定格 / 抽卡出金）</li>
@@ -3932,17 +4064,18 @@
           <li>次元切换（随前沿变写实 / 按拍闪切；反向、胶片质感、补光）</li>
           <li>雾中图腾（星形 / 心形 / 文字 / 网格物体）</li>
           <li>幽灵化（脚下飘雾、烛光）</li><li>人偶（线断在拍子上）</li><li>压成平面（皮影 / 画中人）</li>
-          <li>镜里先换</li></ul>
+          <li>镜里先换</li><li>迷幻多重曝光（迷幻配色 / 发光颜色）</li>
+          <li>书法大字幕（金色 / 白色 / 墨色；吹散 / 缩成印章；横排 / 竖排）</li><li>汗光</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
         <ul><li>开始时机：开始帧 / 拍手 / 飞吻 / 敬礼 / 甩头 / 转身背对镜头 / 下蹲 / 起跳 / 落地 / 落脚 / 举手向天 / 比心 /
-          眨眼 / 拉绳 / 对视 / 张开双臂（要舞蹈动作）</li><li>建议换装时刻：曲中 / 曲首 / 终盘（按音乐的响度）</li>
+          眨眼 / 拉绳 / 对视 / 张开双臂 / 碰饰品或扶眼镜 / 捶胸（要舞蹈动作）</li><li>建议换装时刻：曲中 / 曲首 / 终盘（按音乐的响度）</li>
           <li>穿上（旧→新）/ 脱下（新→旧）</li><li>只有新服装：从无到有长出来</li><li>只有旧服装：整个人化成灰</li><li>渲染：辉光、色散、全屏闪白</li></ul>
       </div>
     </div>
     <p class="sum">路径 × 登场 × 退场 × 粒子 = 20 × 13 × 5 × 18 = <b>23400</b> 种基本组合，再乘旧服装表面的 13 种就是 304200 种；
-      再叠加 45 个开关（收尾闪光有两种方式，内衬有两种样式，光环有七种样式，画稿有三种，火焰有两种范围，世界有五个、两种出现方式，运镜有九种，绸带有四种，遮挡物有十二种，换色有三种，次元切换有两种，雾中图腾有四种形状，压成平面有两种）和十六种开始时机，组合多到数不过来
+      再叠加 48 个开关（收尾闪光有两种方式，内衬有两种样式，光环有七种样式，画稿有三种，火焰有两种范围，世界有六个、三种出现方式，运镜有九种，绸带有四种，遮挡物有十二种，换色有三种，次元切换有两种，雾中图腾有四种形状，压成平面有两种，大字幕有三种颜色两种收尾）和十八种开始时机，组合多到数不过来
       （「留在原地」在碎片飞散、装甲弹开、开了粒子、零件飞入或收尾星星时起作用；光环要配平面扫描或螺旋上升）。</p>
   </div>
 </section>
@@ -4091,6 +4224,12 @@
           <tr><td>钻进瞳孔</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>钻进瞳孔（2.4 秒），不发光</td></tr>
           <tr><td>世界折叠</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>领域展开（花海，世界折叠，碎裂）、全屏闪白</td></tr>
           <tr><td>地球拉远</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>地球拉远（3 秒），不发光</td></tr>
+          <tr><td>书法大字幕</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>书法大字幕（金色，吹散）、全屏闪白</td></tr>
+          <tr><td>反差 AB 面</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>素颜平光、汗光、举手向天、慢放、全屏闪白</td></tr>
+          <tr><td>碰饰品变身</td><td>沿体表流动</td><td>边缘生长</td><td>碎片飞散</td><td>碰饰品 / 扶眼镜触发、全屏闪白</td></tr>
+          <tr><td>迷幻多重曝光</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>迷幻多重曝光（五层，迷幻配色）、全屏闪白</td></tr>
+          <tr><td>捶胸变身</td><td>球形扩散</td><td>边缘生长</td><td>碎片飞散</td><td>捶胸触发、冲击帧、集中线、地面冲击波、全屏闪白</td></tr>
+          <tr><td>梦境领域</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>领域展开（梦境，眨眼进出）、全屏闪白</td></tr>
         </tbody>
       </table>
     </div>

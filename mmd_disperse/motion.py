@@ -1,6 +1,7 @@
 """The dance itself: when and from where the transformation starts (a clap, a blown kiss, a salute, a toss of the head,
 the back turned to the camera; 1.11: a squat, a jump, landing, a footfall, a hand thrown up to the sky, a finger heart,
-a wink, a cord pulled on the chest), and where the hands sweep over the body (the hand path).
+a wink, a cord pulled on the chest; 1.18: a fingertip at an ear, the corner of an eye or the bridge of the nose, fists
+drummed on the chest), and where the hands sweep over the body (the hand path).
 
 Short-video outfit changes are set off by a move of the dance (#拍手变装 "clap change", #飞吻变装 "kiss change" ...), and
 Lynda Carter's Wonder Woman changed in the middle of a spin. The build looks for the move in the old model's motion,
@@ -20,9 +21,9 @@ from . import arrival
 from .model import ORIGIN_BONES
 
 TRIGGERS = ("NONE", "CLAP", "KISS", "SALUTE", "FLIP", "TURN", "SQUAT", "JUMP", "LAND", "STEP", "RAISE", "HEART",
-            "WINK", "PULL", "GAZE", "OPEN")
+            "WINK", "PULL", "GAZE", "OPEN", "TOUCH", "BEAT")
 # moves the front starts from (where they are made) ...
-GESTURES = ("CLAP", "KISS", "SALUTE", "FLIP", "STEP", "RAISE", "HEART", "WINK", "PULL", "GAZE")
+GESTURES = ("CLAP", "KISS", "SALUTE", "FLIP", "STEP", "RAISE", "HEART", "WINK", "PULL", "GAZE", "TOUCH", "BEAT")
 # ... and moves the big moment (the swap, or the middle of the wave) is put on
 MOMENTS = ("TURN", "SQUAT", "JUMP", "LAND", "OPEN")
 OPEN_WIDE = 0.32  # 1.13: both wrists this far out from the body's middle (a share of the height), at about the chest
@@ -41,6 +42,7 @@ WINKS = (("ウィンク", "ウインク", "wink", "Wink", "wink_l", "Wink_L", "�
          ("ウィンク右", "ウインク右", "wink_r", "Wink_R", "ｳｨﾝｸ２右", "ウィンク２右", "ウインク２右"))
 WRISTS = arrival.LIMB_BONES[:2]
 HEAD = ("頭", "head", "Head", "J_Bip_C_Head")
+CHEST = ("上半身2", "upper body2", "UpperBody2", "Chest", "chest", "J_Bip_C_Chest")
 EYES = (("目.L", "左目", "eye.L", "Eye_L", "J_Adj_L_FaceEye"), ("目.R", "右目", "eye.R", "Eye_R", "J_Adj_R_FaceEye"))
 FINGERS = (("中指１.L", "左中指１", "middle1.L", "MiddleFinger1_L", "J_Bip_L_Middle1"),
            ("中指１.R", "右中指１", "middle1.R", "MiddleFinger1_R", "J_Bip_R_Middle1"))
@@ -84,6 +86,21 @@ PULL_NEAR = 0.07  # a palm this close to the chest or the neck ...
 PULL_AWAY = 0.18  # ... then this much further from it within PULL_TIME (a cord pulled, a pin pulled out)
 PULL_TIME = 0.3
 WINK_SHUT = 0.6  # a wink morph past this
+# 1.18: touching an earring or pushing up one's glasses (VRChat's outfit gimmicks): the forefinger's tip this close
+# to an ear (out to the side and back from the eyes), the corner of an eye or the bridge of the nose for TOUCH_TIME
+TOUCH_NEAR = 0.03
+TOUCH_TIME = 0.15
+EAR_SIDE, EAR_BACK, EAR_DOWN = 0.055, 0.035, 0.01  # where an ear is from between the eyes (model heights)
+TEMPLE_SIDE, TEMPLE_BACK = 0.04, 0.005  # ... the corner of an eye, where glasses rest
+BRIDGE_FRONT = 0.025  # ... the bridge of the nose
+# a chest beat (Donkey Kong Bananza's ritual): a palm on the front of the chest and back out in front of it, BEAT_HITS
+# times (either hand) within BEAT_SPAN seconds
+BEAT_NEAR = 0.05  # (in front of the breastbone)
+BEAT_SIDE = 0.1
+BEAT_LEVEL = 0.09
+BEAT_AWAY = 0.035
+BEAT_HITS = 3
+BEAT_SPAN = 1.2
 GAZE_ON = 15.0  # degrees: the face turned this close to the way to the camera ...
 GAZE_OFF = 30.0  # ... after it was turned further away than this: eye contact (1.12)
 
@@ -654,6 +671,74 @@ def _pull(track, height, fps):
     return best
 
 
+def _touch(track, height, fps):
+    """A fingertip held at an ear, the corner of an eye (one's glasses) or the bridge of the nose for TOUCH_TIME, the
+    other hand not there: (the first frame of it, the eye on that side)."""
+    hold = max(2, int(round(TOUCH_TIME * fps)))
+    settled = _settled(track, height, fps)
+    left = np.cross(track.up, track.front)  # (MMD models face -Y: their left is +X)
+    best = None
+    for side in SIDES:
+        out = left if side == "L" else -left
+        spots = (track.eyes + out * (EAR_SIDE * height) - track.front * (EAR_BACK * height)
+                 - track.up * (EAR_DOWN * height),
+                 track.eyes + out * (TEMPLE_SIDE * height) - track.front * (TEMPLE_BACK * height),
+                 track.eyes + track.front * (BRIDGE_FRONT * height))
+        tip = track.index[side]
+        near = np.min([_distance(tip, spot) for spot in spots], axis=0)
+        other = SIDES[1 - SIDES.index(side)]
+        alone = ~(_distance(track.index[other], track.eyes) <= (EAR_SIDE + 2.0 * TOUCH_NEAR) * height)
+        at = (near < TOUCH_NEAR * height) & alone & settled
+        run = 0
+        for i, close in enumerate(at):
+            run = run + 1 if close else 0
+            if run >= hold:
+                start = i - hold + 1
+                if best is None or start < best[0]:
+                    best = (start, ("EYE_" + side,))
+                break
+    return best
+
+
+def breastbone(track, height):
+    """Per frame: about the middle of the chest: seven tenths of the way from the upper body's root to the neck (or
+    0.12 model heights over the root without a neck), a little in front of the bones."""
+    neck = np.where(np.isfinite(track.neck), track.neck, track.chest + track.body_up * (0.17 * height))
+    return track.chest + 0.7 * (neck - track.chest) + track.facing * (0.05 * height)
+
+
+def _beat(track, height, fps):
+    """Fists drummed on the chest: BEAT_HITS hits (either hand) within BEAT_SPAN. A hit: a palm on the front of the
+    chest (at most BEAT_NEAR in front of the breastbone, within BEAT_SIDE of its middle line and BEAT_LEVEL of its
+    height), having come in from the front and going back out to it by BEAT_AWAY, never far to the side meanwhile (an
+    arm swept across the chest is no beat); the last of those hits, the chest."""
+    settled = _settled(track, height, fps)
+    bone = breastbone(track, height)
+    bounce = max(2, int(round(0.2 * fps)))
+    hits = []
+    for side in SIDES:
+        rel = track.palm[side] - bone
+        depth = (rel * track.facing).sum(axis=1)
+        level = (rel * track.body_up).sum(axis=1)
+        aside = np.linalg.norm(rel - depth[:, None] * track.facing - level[:, None] * track.body_up, axis=1)
+        on = (depth < BEAT_NEAR * height) & (aside < BEAT_SIDE * height) & (np.abs(level) < BEAT_LEVEL * height)
+        for i in range(1, len(depth) - 1):
+            if not settled[i] or not on[i] or depth[i] > depth[i - 1] or depth[i] > depth[i + 1]:
+                continue
+            window = slice(max(0, i - bounce), i + 1 + bounce)
+            before, after = depth[max(0, i - bounce):i], depth[i + 1:i + 1 + bounce]
+            if (after.size and before.size and np.nanmax(after) - depth[i] > BEAT_AWAY * height
+                    and np.nanmax(before) - depth[i] > BEAT_AWAY * height
+                    and np.nanmax(aside[window]) < 2.0 * BEAT_SIDE * height):
+                hits.append(i)
+    hits.sort()
+    span = BEAT_SPAN * fps
+    for k in range(len(hits) - BEAT_HITS + 1):
+        if hits[k + BEAT_HITS - 1] - hits[k] <= span:
+            return hits[k + BEAT_HITS - 1], ("CHEST",)
+    return None
+
+
 def find(track, kind, height, fps):
     """(index into the track's frames, what it starts from: hand sides "L" / "R", "HEAD", "HIPS", "FEET", "FOOT_L" /
     "FOOT_R" or "EYE_L" / "EYE_R") of the first `kind` of move in the track, None when there is none."""
@@ -687,6 +772,10 @@ def find(track, kind, height, fps):
         return _turn(track)
     if kind == "OPEN":
         return _open(track, height, fps)
+    if kind == "TOUCH":
+        return _touch(track, height, fps)
+    if kind == "BEAT":
+        return _beat(track, height, fps)
     return None
 
 
@@ -705,6 +794,8 @@ def start_points(armature, parts):
         elif part.startswith("EYE_"):
             choices = [EYES[SIDES.index(part[-1])], HEAD]
             choices = [next((c for c in choices if rest_head(armature, c) is not None), HEAD)]
+        elif part == "CHEST":  # (the upper body's second bone, else its root)
+            choices = [next((c for c in (CHEST, ORIGIN_BONES) if rest_head(armature, c) is not None), ORIGIN_BONES)]
         else:
             choices = [WRISTS[SIDES.index(part)]]
         for bones in choices:

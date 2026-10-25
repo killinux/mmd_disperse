@@ -400,7 +400,7 @@ def update_streaks(scene, moment, fps):
 
 
 LOOK = "MMD Disperse Look"  # the Mix node that blends the look in; the look's other nodes are named LOOK + " ..."
-LOOK_STYLES = ("NONE", "SILHOUETTE", "ACCENT", "SONG", "PIXEL")
+LOOK_STYLES = ("NONE", "SILHOUETTE", "ACCENT", "SONG", "PIXEL", "PLAIN")
 PIXEL_SIZE = 0.045  # 1.13, the pixelated change: its blocks at their biggest, a share of the picture's width
 P_LOOK = "mmd_disperse_look"  # on the Mix node: what its nodes were made for
 INK = (0.07, 0.05, 0.04, 1.0)
@@ -623,6 +623,11 @@ def update_look(scene, style, first, last, dancer=(), color=(1.0, 0.08, 0.03), p
             look = b.mix("ADD", b.edges(matte), shape, (1.0, 0.95, 0.85, 1.0))
         elif style == "ACCENT":
             look = b.mix("MIX", b.matte(scene, dancer), b.grey(source), source)
+        elif style == "PLAIN":  # (1.18) washed out, flat and a little cold: the A side of the A/B change
+            washed = b.mix("MIX", 0.5, source, b.grey(source))
+            flat = b.mix("MIX", 0.14, washed, (0.45, 0.45, 0.47, 1.0))
+            cold = b.mix("MULTIPLY", 1.0, flat, (0.93, 0.96, 1.0, 1.0))
+            look = b.mix("SCREEN", 1.0, cold, (0.05, 0.05, 0.055, 1.0))
         elif style == "PIXEL":  # the dancer in blocks (the matte in the same blocks, so they are whole)
             size = pixel_expression(peak, peak - first, last - peak, PIXEL_SIZE * render.resolution_x)
             blocks = b.pixelated(source, size)

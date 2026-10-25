@@ -3603,6 +3603,213 @@ def run():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.17 checks")
 
+    # --- 1.18: a fingertip at an ear, the corner of an eye or the bridge of the nose; fists drummed on the chest
+    # (made-up motions as in the 1.10 checks)
+    up_, front_ = np.array((0.0, 0.0, 1.0)), np.array((0.0, -1.0, 0.0))
+    left_ = np.cross(up_, front_)
+    for case_, expect_ in (("ear", (30, ("EYE_L",))), ("glasses", (25, ("EYE_R",))), ("brief", None),
+                           ("both hands", None)):
+        touch_ = made_up(70)
+        eyes_ = touch_.eyes[0]
+        ear_l = eyes_ + left_ * (motion.EAR_SIDE * H) - front_ * (motion.EAR_BACK * H) - up_ * (motion.EAR_DOWN * H)
+        ear_r = ear_l - 2.0 * left_ * (motion.EAR_SIDE * H)
+        bridge_ = eyes_ + front_ * (motion.BRIDGE_FRONT * H)
+        for side_ in ("L", "R"):
+            touch_.index[side_][:] = touch_.tip[side_][0]
+        if case_ == "ear":
+            touch_.index["L"][30:41] = ear_l
+        elif case_ == "glasses":
+            touch_.index["R"][25:36] = bridge_
+        elif case_ == "brief":
+            touch_.index["L"][30:32] = ear_l
+        else:
+            touch_.index["L"][30:41] = ear_l
+            touch_.index["R"][30:41] = ear_r
+        found_ = motion.find(touch_, "TOUCH", H, FPS)
+        check(found_ == expect_, "made-up touch (%s): %s" % (case_, found_))
+    for case_, expect_ in (("drumming", (40, ("CHEST",))), ("slow", None)):
+        beat_ = made_up(140)
+        beat_.neck[:] = (0.0, 0.0, 0.85 * H)
+        bone_ = motion.breastbone(beat_, H)[0]
+        for side_, x_ in (("L", 1.0), ("R", -1.0)):
+            beat_.palm[side_][:] = bone_ + (0.12 * H * x_, -0.2 * H, 0.0)
+        for k_, at_ in enumerate((30, 35, 40) if case_ == "drumming" else (30, 75, 120)):
+            side_ = "L" if k_ % 2 == 0 else "R"
+            for d_ in range(-3, 4):
+                beat_.palm[side_][at_ + d_] = bone_ + (0.0, -0.01 * H - 0.07 * H * abs(d_), 0.0)
+        found_ = motion.find(beat_, "BEAT", H, FPS)
+        check(found_ == expect_, "made-up chest beat (%s): %s" % (case_, found_))
+    chest_points, chest_bones = motion.start_points(base.armature, ("CHEST",))
+    check(len(chest_points) == 1, "the chest beat starts from the chest (%s)" % chest_bones)
+    # the multiple exposure: copies of the old outfit swelling out up to the moment, of the new one gathering back
+    from mmd_disperse import echo as echo_mod  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "echo_enable", "echo_count", "echo_spread", "echo_length", "domain_enable",
+        "domain_style", "domain_arrive", "domain_open", "domain_hold")}
+    made_camera = None
+    if scene.camera is None:
+        made_camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(made_camera)
+        made_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
+        made_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        scene.camera = made_camera
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+    s.domain_enable = False
+    s.echo_enable, s.echo_count, s.echo_spread, s.echo_length = True, 4, 0.6, 1.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the multiple exposure")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    copies_ = {o.get(echo_mod.P_OUTFIT): o for o in echo_mod.objects(s.mask, "COPIES")}
+
+    def echo_instances(outfit_):
+        """(how many copies of `outfit_` show now, the largest one's scale against its twin's)."""
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        scales_ = [inst.matrix_world.to_scale().x / max(inst.object.original.matrix_world.to_scale().x, 1e-9)
+                   for inst in deps_.object_instances
+                   if inst.is_instance and inst.parent is not None
+                   and inst.parent.original == copies_.get(outfit_)]
+        return len(scales_), max(scales_) if scales_ else 0.0
+
+    seen_ = {}
+    for label_, f_ in (("before", moment - 1.5 * s.echo_length * fps), ("swelling", moment - 0.3 * s.echo_length * fps),
+                       ("after", moment + 2), ("gathered", moment + (echo_mod.GATHER + 0.1) * s.echo_length * fps)):
+        scene.frame_set(int(round(f_)))
+        seen_[label_] = (echo_instances("OLD"), echo_instances("NEW"))
+    echo_drivers = [d for o in copies_.values() for d in (o.animation_data.drivers if o.animation_data else [])]
+    parts_ = {"objects": set(copies_) == {"OLD", "NEW"},
+              "none before": seen_["before"][0][0] == 0 and seen_["before"][1][0] == 0,
+              "old swelling": seen_["swelling"][0][0] == 4 and seen_["swelling"][0][1] > 1.1
+              and seen_["swelling"][1][0] == 0,
+              "new far out after": seen_["after"][1][0] == 4 and seen_["after"][1][1] > 1.3 and seen_["after"][0][0] == 0,
+              "gathered": seen_["gathered"][1][0] == 0,
+              "simple drivers": len(echo_drivers) == 4 and all(d.driver.is_valid and d.driver.is_simple_expression
+                                                               for d in echo_drivers)}
+    check(all(parts_.values()), "multiple exposure: four copies of the old outfit swelling out before the moment, of "
+                                "the new one far out after it and gathered back in (%s; %s)"
+          % (seen_, [k_ for k_, ok_ in parts_.items() if not ok_] or "all"))
+    # the copies show in the twins' own materials: the echo light, cut out as hers are (hair cards, lace)
+    slots_, cut_, wrong_ = 0, 0, []
+    for twin_ in echo_mod.objects(s.mask, "TWIN"):
+        hers_ = bpy.data.objects.get(twin_.get(echo_mod.P_SOURCE))
+        for k_, slot_ in enumerate(twin_.material_slots):
+            slots_ += 1
+            her_ = hers_.material_slots[k_].material if hers_ is not None else None
+            image_ = materials._alpha_image(her_)[0]
+            key_ = slot_.material.get(materials.ECHO_OF) if slot_.material is not None else None
+            cut_ += image_ is not None
+            if (slot_.link != "OBJECT" or key_ is None or (image_ is None) != (key_ == "")
+                    or (image_ is not None and not key_.startswith(image_.name + "|"))
+                    or (her_ is not None and her_.get(materials.ECHO_OF) is not None)):
+                wrong_.append((twin_.name, k_))
+    check(slots_ > 0 and not wrong_, "multiple exposure: the twins in the echo light, %d of %d slots cut out as hers "
+                                     "are, hers untouched (%s)" % (cut_, slots_, wrong_[:4] or "all"))
+    check(not draw_panels(bpy.context), "panels draw with the multiple exposure")
+    s.echo_enable = False
+    check(not echo_mod.objects(s.mask) and bpy.data.node_groups.get(cover_nodes.ECHO_GROUP) is None
+          and not materials.echo_materials(),
+          "multiple exposure off: the twins, the copies, the group and the materials gone")
+    # the dream world: eyelids shut as it comes and as it goes; it shows only between
+    s.domain_enable, s.domain_style, s.domain_arrive, s.domain_open, s.domain_hold = True, "DREAM", "BLINK", 0.6, 0.5
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the dream world")
+    world_ = domain.world_objects(s.mask)[0]
+    lids_ = next((o for o in bpy.data.objects if o.get(domain.P_LIDS) == s.mask), None)
+    lid_keys = []
+    if lids_ is not None and lids_.animation_data is not None:
+        lid_keys = [(k_.co[0], k_.co[1]) for fc in camera_moves._curves(lids_) if "mmdd_lid" in fc.data_path
+                    for k_ in fc.keyframe_points]
+    shut_ = [f_ for f_, v_ in lid_keys if v_ > 0.99]
+    states_ = []
+    if len(shut_) == 4:
+        into_, out_ = 0.5 * (shut_[0] + shut_[1]), 0.5 * (shut_[2] + shut_[3])
+        for f_ in (into_ - 8, into_, 0.5 * (into_ + out_), out_, out_ + 8):
+            scene.frame_set(int(round(f_)))
+            states_.append((not world_.hide_render, round(lids_["mmdd_lid"], 2)))
+    check(lids_ is not None and lids_.parent == camera_moves.carrier(scene, s.mask) and len(shut_) == 4
+          and [st_[0] for st_ in states_] == [False, True, True, True, False]
+          and states_[1][1] > 0.99 and states_[2][1] < 0.01 and states_[3][1] > 0.99,
+          "dream world: the eyelids shut as it comes and as it goes, the world only between (%s)" % states_)
+    check(not draw_panels(bpy.context), "panels draw with the dream world")
+    s.domain_arrive = "OPEN"
+    check(not [o for o in bpy.data.objects if o.get(domain.P_LIDS) == s.mask]
+          and (world_.animation_data is None or not camera_moves._curves(world_)),
+          "dream world opening out of her instead: the eyelids gone, the world not keyed")
+    # the big title: brushed in before the moment, blown away after it; or shrunk into the seal in the corner
+    from mmd_disperse import title as title_mod  # noqa: E402
+    saved_title = {key_: getattr(s, key_) for key_ in ("title_enable", "title_text", "title_end", "title_upright",
+                                                  "title_time")}
+    s.title_enable, s.title_text, s.title_end, s.title_upright, s.title_time = True, "HENSHIN", "BLOW", False, 1.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the big title")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    words_ = next(iter(title_mod.objects(s.mask, "WORDS")), None)
+    looks_ = []
+    for f_ in (moment - 1.2 * fps, moment - 0.65 * fps, moment, moment + (title_mod.HOLD + title_mod.GO) * fps + 2):
+        scene.frame_set(int(round(f_)))
+        looks_.append((round(words_["mmdd_reveal"], 2), round(words_["mmdd_blow"], 2), words_.hide_render)
+                      if words_ else None)
+    span_x = tuple(words_["mmdd_span_x"]) if words_ else (0.0, 0.0, 0.0)
+    check(words_ is not None and words_.parent == camera_moves.carrier(scene, s.mask) and span_x[1] > span_x[0]
+          and looks_[0][2] and not looks_[1][2] and 0.0 < looks_[1][0] < 1.0 and looks_[2][:2] == (1.0, 0.0)
+          and (looks_[3][1] == 1.0 or looks_[3][2]),
+          "big title: on the camera, brushed in before the moment, whole at it, blown away after (%s)" % looks_)
+    s.title_end, s.title_upright = "SEAL", True
+    scene.frame_set(int(round(moment)))
+    words_ = next(iter(title_mod.objects(s.mask, "WORDS")), None)
+    big_size = words_.scale[0] if words_ else 0.0
+    scene.frame_set(int(round(moment + (title_mod.HOLD + title_mod.GO) * fps + 2)))
+    frame_ = next(iter(title_mod.objects(s.mask, "SEAL")), None)
+    check(words_ is not None and "\n" in words_.data.body and frame_ is not None and words_["mmdd_seal"] > 0.99
+          and frame_["mmdd_seal"] > 0.99 and words_.scale[0] < 0.5 * big_size,
+          "big title set upright, shrunk into the red seal in the corner (%.3f from %.3f)"
+          % (words_.scale[0] if words_ else -1.0, big_size))
+    check(not draw_panels(bpy.context), "panels draw with the big title")
+    s.title_enable = False
+    check(not title_mod.objects(s.mask), "big title off: the words and the seal gone")
+    for key_, value in saved_title.items():
+        setattr(s, key_, value)
+    # the sweat: a sheen on every material of the old outfit only, rising to the moment, gone at it
+    saved_sweat = {key_: getattr(s, key_) for key_ in ("sweat_enable", "sweat_time", "look_style", "look_length")}
+    s.sweat_enable, s.sweat_time = True, 1.5
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the sweat")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    old_mats = {sl.material for ob in base.meshes for sl in ob.material_slots
+                if sl.material is not None and sl.material.node_tree is not None}
+    new_mats = {sl.material for ob in target.meshes for sl in ob.material_slots
+                if sl.material is not None and sl.material.node_tree is not None}
+    wet_mats = {mm for mm in bpy.data.materials if mm.get(materials.P_SWEAT)}
+    one_ = next(iter(sorted(wet_mats, key=lambda mm: mm.name)), None)
+    wetness = []
+    for f_ in (moment - 2.0 * fps, moment - 0.2 * fps, moment + 2):
+        scene.frame_set(int(round(f_)))
+        wetness.append(round(one_.node_tree.nodes[materials.SWEAT + " On"].outputs[0].default_value, 2)
+                       if one_ else -1.0)
+    sweat_drivers = [d for mm in wet_mats for d in (mm.node_tree.animation_data.drivers
+                                                     if mm.node_tree.animation_data else [])]
+    check(wet_mats == old_mats and not wet_mats & new_mats and wetness[0] == 0.0 and wetness[1] > 0.5
+          and wetness[2] == 0.0 and sweat_drivers and all(d.driver.is_simple_expression for d in sweat_drivers),
+          "sweat: every material of the old outfit only, wetter up to the moment, dry after it (%s)" % wetness)
+    s.sweat_enable = False
+    check(not [mm for mm in bpy.data.materials if mm.get(materials.P_SWEAT)], "sweat off: out of the materials")
+    # the plain look: on from Look Time before the swap up to it
+    s.look_style, s.look_length = "PLAIN", 1.0
+    tree_ = compositor._existing_tree(scene)
+    look_ = tree_.nodes.get(compositor.LOOK) if tree_ is not None else None
+    swap_ = int(math.ceil(moment - 1e-6))
+    expr_ = [d.driver.expression for d in (tree_.animation_data.drivers if tree_ is not None and tree_.animation_data
+                                           else []) if compositor.LOOK in d.data_path]
+    check(look_ is not None and expr_ == [compositor.look_expression(swap_ - int(round(fps)), swap_)],
+          "plain look: from Look Time before the swap up to it (%s)" % expr_)
+    for key_, value in saved_sweat.items():
+        setattr(s, key_, value)
+    if made_camera is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.18 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

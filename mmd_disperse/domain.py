@@ -29,6 +29,9 @@ P_FOLLOW = "mmd_disperse_world_follow"  # on the empty the spotlight follows: th
 P_REACH = "mmd_disperse_world_reach"  # on the mask: how far the sphere opens (round the camera) ...
 P_REACH_KEY = "mmd_disperse_world_key"  # ... measured for this camera, these frames and this centre
 FOLD = "MMD Disperse World Fold"  # the second modifier: the world folding round her (1.17)
+LIDS = "MMD Disperse World Eyelids"  # 1.18: the eyelids of the blink, in front of the camera ...
+P_LIDS = "mmd_disperse_world_lids"  # ... with the mask of their effect
+BLINK = (5, 2, 6)  # frames the eyelids take to shut, stay shut on either side of the change, take to open
 SAMPLES = 24  # camera positions looked at when the camera moves
 MARGIN = 1.25  # how much further than the camera the sphere opens
 MIN_REACH = 3.0  # ... and at least this many model heights
@@ -117,11 +120,14 @@ def _unfollow(mask):
         bpy.data.objects.remove(ob)
 
 
-def sync(settings, mask, centre, floor, height, open_end, close_start, close_end, reach, armature=None, fold=None):
+def sync(settings, mask, centre, floor, height, open_end, close_start, close_end, reach, armature=None, fold=None,
+         blink=None, seen=None):
     """Push the style, its materials, where it opens and its timing (mask radii) to the world's modifier; the
     spotlight follows the centre bone of `armature` (the dancing model's). With `fold` (its "start", "close" and "end"
     in mask radii, the ball's radius "shell" and the sky's size "sky") the world folds round her (the second
-    modifier); without, that modifier goes."""
+    modifier); without, that modifier goes. With `blink` (two frames) the world shows only between them, eyelids
+    shutting over the picture at both. The sky's sun (or moon) hangs behind her as the camera sees her at frame `seen`
+    (the big moment; as it is now without it)."""
     style = settings.domain_style
     made = materials.ensure_domain_materials(style)
     scene = settings.id_data
@@ -139,8 +145,19 @@ def sync(settings, mask, centre, floor, height, open_end, close_start, close_end
         away.z = 0.0
         if away.length > 1e-6:
             back = away.normalized()
-    # the crimson world's dark sun hangs behind the dancer and up
-    materials.update_domain_materials(style, tuple((back + Vector((0.0, 0.0, 0.55))).normalized()))
+    # the crimson world's dark sun hangs behind the dancer and up; the dream's moon low over the horizon (a long lens
+    # sees little of the sky): behind her as the camera sees her at the big moment
+    from . import sampling
+
+    sky = back
+    shot = sampling.camera_at(scene, seen) if seen is not None else None
+    if shot is not None:
+        away = centre - sampling.matrix_at(shot, seen).translation
+        away.z = 0.0
+        if away.length > 1e-6:
+            sky = away.normalized()
+    materials.update_domain_materials(style, tuple((sky + Vector((0.0, 0.0, 0.2 if style == "DREAM" else 0.55)))
+                                                   .normalized()))
     values = {
         "Mask": mask,
         "Center": tuple(centre),
@@ -169,6 +186,7 @@ def sync(settings, mask, centre, floor, height, open_end, close_start, close_end
                 for name, value in values.items():
                     if ids.get(name) is not None and value is not None:
                         mod[ids[name]] = value
+        _blink_world(ob, blink)
         _fold(ob, None if fold is None else {
             "Mask": mask, "Center": tuple(centre), "Floor": floor, "Height": height, "Reach": reach,
             "Shell": fold["shell"], "Sky": fold["sky"], "Fold Start": fold["start"], "Fold Close": fold["close"],
@@ -176,6 +194,66 @@ def sync(settings, mask, centre, floor, height, open_end, close_start, close_end
             "Follow": follow, "Ground Material": made["floor"], "Sky Material": made["sky"],
             "Rim Material": made["rim"]})
         ob.update_tag()
+    _lids(scene, mask, collection, blink)
+
+
+def _blink_world(ob, blink):
+    """The world shown only between the frames of `blink` (shut eyelids hide the change), or always."""
+    from .cover import _clear_keys, _shown
+
+    _clear_keys(ob)
+    ob.hide_render = ob.hide_viewport = False
+    if blink is not None:
+        _shown(ob, int(round(blink[0])), int(round(blink[1])))
+
+
+def _lids(scene, mask, collection, blink):
+    """The eyelids in front of the camera, shut at each frame of `blink` (or none)."""
+    from . import shots
+    from .cover import _clear_keys, _key, _shown
+    from .picture import _frame
+
+    ob = next((o for o in bpy.data.objects if o.get(P_LIDS) == mask), None)
+    camera = shots.carrier(scene, mask)
+    if blink is None or camera is None:
+        if ob is not None:
+            data = ob.data
+            bpy.data.objects.remove(ob)
+            if data is not None and data.users == 0:
+                bpy.data.meshes.remove(data)
+        return
+    if ob is not None and ob.parent != camera:
+        data = ob.data
+        bpy.data.objects.remove(ob)
+        bpy.data.meshes.remove(data)
+        ob = None
+    if ob is None:
+        centre, width, tall = _frame(scene, camera, 1.0)
+        half_w, half_h = 0.55 * width, 0.55 * tall
+        me = bpy.data.meshes.new(LIDS)
+        me.from_pydata([(centre.x + sx * half_w, centre.y + sy * half_h, -1.0)
+                        for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))], [], [(0, 1, 2, 3)])
+        layer = me.uv_layers.new(name="UVMap")
+        for loop in me.loops:
+            layer.data[loop.index].uv = ((0, 0), (1, 0), (1, 1), (0, 1))[loop.vertex_index]
+        me.materials.append(materials.ensure_cover_material("EYELID"))
+        ob = bpy.data.objects.new(LIDS, me)
+        collection.objects.link(ob)
+        ob[P_LIDS] = mask
+        ob.hide_select = True
+        ob.parent = camera
+        if hasattr(ob, "visible_shadow"):
+            ob.visible_shadow = False
+    _clear_keys(ob)
+    depth = 1.002 * camera.data.clip_start
+    ob.scale = (depth, depth, depth)
+    shut, held, opening = BLINK
+    keys = []
+    for at in blink:
+        keys += [(at - shut - held, 0.0), (at - held, 1.0), (at + held, 1.0), (at + held + opening, 0.0)]
+    ob["mmdd_lid"] = 0.0
+    _key(ob, '["mmdd_lid"]', keys, interpolation="BEZIER")
+    _shown(ob, int(blink[0] - shut - held) - 1, int(blink[1] + held + opening) + 1)
 
 
 def _fold(ob, values):
@@ -200,6 +278,11 @@ def _fold(ob, values):
 
 def remove(mask):
     for ob in world_objects(mask):
+        me = ob.data
+        bpy.data.objects.remove(ob)
+        if me is not None and me.users == 0:
+            bpy.data.meshes.remove(me)
+    for ob in [o for o in bpy.data.objects if o.get(P_LIDS) == mask]:
         me = ob.data
         bpy.data.objects.remove(ob)
         if me is not None and me.users == 0:

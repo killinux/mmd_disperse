@@ -18,6 +18,7 @@ _OFF = dict(
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
     cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
     ghost_enable=False, puppet_enable=False, shadow_enable=False, shadow_style="SHADOW", mirror_enable=False,
+    echo_enable=False, title_enable=False, sweat_enable=False,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -692,6 +693,42 @@ PRESETS = (
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, domain_enable=True,
           domain_style="FLOWERS", domain_arrive="FOLD", domain_open=0.85, domain_hold=0.5, domain_close="SHATTER",
           finale=True, finale_white=0.35, particle_color=(1.0, 0.75, 0.85), glow_color=(1.0, 0.7, 0.85))),
+    # --- 1.18
+    ("MULTI_EXPOSURE", "Multiple Exposure", "Copies of her swell out one after another in 1960s colours as the old "
+                                            "outfit's last moments play, and copies in the new outfit gather back "
+                                            "into her (迷幻多重曝光, The Fantastic Four: First Steps)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, echo_enable=True,
+          echo_style="PSYCHEDELIC", echo_count=5, echo_spread=0.6, echo_length=1.5, finale=True, finale_white=0.3,
+          glow_color=(1.0, 0.45, 0.8))),
+    ("BIG_TITLE", "Big Title", "Gold strokes brush the name of the move across the picture just before the outfits "
+                               "swap in a flash, then blow away in specks (书法大字幕)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, title_enable=True,
+          title_style="GOLD", title_end="BLOW", title_time=1.0, finale=True, finale_white=0.35,
+          glow_color=(1.0, 0.8, 0.4))),
+    ("AB_SIDE", "A/B Side", "Plain and washed out, dancing on in flat light, sweat glistening; a wave of the hand "
+                            "up, the dance slows and the picture cuts to full colour in a flash as the outfits swap "
+                            "(反差 A/B 面 of short videos)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, look_style="PLAIN",
+          look_length=4.0, trigger="RAISE", time_warp="SLOW", warp_length=1.0, sweat_enable=True, sweat_amount=1.0,
+          sweat_time=4.0, finale=True, finale_white=0.45, glow_color=(1.0, 0.85, 0.7))),
+    ("TOUCH_CHANGE", "Touch to Change", "A fingertip touches an ear, the corner of an eye or the glasses and the "
+                                        "change flows over the body from there, the old outfit bursting into "
+                                        "sparkles (VRChat's outfit gimmicks: 碰饰品、扶眼镜; needs a dance)",
+     dict(_OFF, path="SURFACE", trigger="TOUCH", exit_style="FRAGMENTS", frag_glow=True, particles="STAR",
+          particle_count=400, finale=True, finale_white=0.5, particle_color=(0.8, 0.9, 1.0), particle_glow=3.0,
+          glow_color=(0.5, 0.8, 1.0), frag_wind_dir=(0.0, 0.2, 1.0))),
+    ("CHEST_BEAT", "Chest Beat", "Fists drummed on the chest and the change bursts out of it, impact frames and a "
+                                 "shockwave on the floor (捶胸, Donkey Kong Bananza's ritual; needs a dance)",
+     dict(_OFF, path="SPHERE", trigger="BEAT", exit_style="FRAGMENTS", frag_glow=True, particles="EMBER",
+          particle_count=400, impact_enable=True, speed_lines=True, shockwave=True, finale=True, finale_white=0.5,
+          particle_color=(1.0, 0.6, 0.2), particle_glow=4.0, glow_color=(1.0, 0.55, 0.15),
+          frag_wind_dir=(0.0, 0.3, 1.0))),
+    ("DREAM_WORLD", "Dream World", "She blinks and the stage is a dream: a violet night, a great red moon, gouged and "
+                                   "twisting, over a black mirror; she changes there and blinks awake on the stage in "
+                                   "the new outfit (梦境领域, Kamen Rider Zeztz)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, domain_enable=True,
+          domain_style="DREAM", domain_arrive="BLINK", domain_open=0.6, domain_hold=0.6, finale=True,
+          finale_white=0.3, glow_color=(1.0, 0.2, 0.3))),
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
@@ -704,7 +741,8 @@ WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPAR
                "SPLIT", "FIGURINE", "NEZHA", "HEART", "SILHOUETTE", "STARRY_VEIL", "IRIS", "CLOCK_HAND", "DHARMA",
                "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE", "COLOR_TUG", "ERAS",
                "POWER_UP", "DIMENSION_BEATS", "SLOT_MACHINE", "TOTEM", "MARIONETTE", "SHADOW_PLAY", "PAINTING", "MIRROR_FIRST", "POLAROID",
-               "WORLD_FOLD"}
+               "WORLD_FOLD", "MULTI_EXPOSURE", "DREAM_WORLD", "BIG_TITLE", "AB_SIDE", "TOUCH_CHANGE",
+               "CHEST_BEAT"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

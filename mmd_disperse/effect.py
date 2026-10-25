@@ -9,7 +9,8 @@ import numpy as np
 from mathutils import Matrix, Vector
 
 from . import (arrival, beats, chain, compositor, cover, dimension, domain, finish, glint, grow, impact, launch, lights,
-               ghost, materials, mirror, mist, motion, origins, particles, picture, printer, puppet, pyro, replay,
+               echo, ghost, materials, mirror, mist, motion, origins, particles, picture, printer, puppet, pyro,
+               replay, sweat, title,
                ribbons, rings, sampling, shadowplay, shell, shots, spirit, timewarp, tint, toon, totem, trails, venom)
 from . import model as mdl
 from .node_groups import (ATTR_ARRIVAL, BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups,
@@ -344,6 +345,8 @@ def _world_times(settings, wave, big):
     if settings.domain_arrive == "FOLD":  # (it stays for Stays For once it has opened out)
         open_end = 1e-3 * max(wave, 1e-3)
         close_start += WORLD_UNFOLD * wave
+    elif settings.domain_arrive == "BLINK":  # (there at once behind the eyelids; gone behind them again)
+        open_end = 1e-3 * max(wave, 1e-3)
     return open_end, close_start, close_start + WORLD_CLOSE * wave
 
 
@@ -599,6 +602,9 @@ def remove_effect(mask):
     puppet.remove(mask)
     shadowplay.remove(mask)
     mirror.remove(mask)
+    echo.remove(mask)
+    title.remove(mask)
+    sweat.remove(mask)
     grow.remove(mask)
     chain.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
@@ -830,8 +836,14 @@ def _update_world(settings, mask, wave, big):
     if fold is not None:  # 1.17: the world folding round her
         fold["shell"], fold["sky"] = _fold_size(settings.id_data, mask, centre, lo.z, height, reach,
                                                 _frame_at(mask, big))
+    blink = None
+    if settings.domain_arrive == "BLINK":  # 1.18: eyelids shut as it comes and as it goes (it does not close itself)
+        into, out = _frame_at(mask, big * (1.0 - settings.domain_open)), _frame_at(mask, close_start)
+        if into is not None and out is not None:
+            blink = (into, max(out, into + 2.0))
+        close_start, close_end = 1e9, 1e9 + 1.0
     domain.sync(settings, mask, centre, lo.z, height, open_end, close_start, close_end, reach,
-                models[0].armature if models else None, fold)
+                models[0].armature if models else None, fold, blink, _frame_at(mask, big))
 
 
 def _unstep(mask):
@@ -1104,6 +1116,13 @@ def _update_look(settings, moment):
     fps = scene.render.fps / scene.render.fps_base
     span = max(int(round(settings.look_length * fps)), 1)
     first = moment - int(round(LOOK_BEFORE * span))
+    if settings.look_style == "PLAIN":  # (all of it before the swap: it cuts to the full colour then; the big frame
+        # is where a move of the dance sets the front off, when it does)
+        mask = settings.mask
+        wave = float(mask.get(P_WAVE, 0.0)) if mask is not None else 0.0
+        swap = _frame_at(mask, _finale_start(settings, wave, mask)) if wave > 0.0 else None
+        moment = int(math.ceil(swap - 1e-6)) if swap is not None else moment
+        first = moment - span
     dancer = [ob for m in _models(settings) for ob in m.meshes]
     try:
         compositor.update_look(scene, settings.look_style, first, first + span, dancer, tuple(settings.look_color),
@@ -1294,6 +1313,10 @@ def sync(settings):
     shadowplay.sync(settings, mask, _models(settings), _frame_at(mask, 0.0),
                     _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.16: the shadow play
     mirror.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.16
+    echo.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.18
+    title.sync(settings, mask, _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.18: the big title
+    sweat.sync(settings, mask, _models(settings), _frame_at(mask, 0.0),
+               _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.18: the sweat
     # 1.11: cartoon physics at the big moment (the first frame of it: the swap, or the new outfit complete), about an
     # anchor under the old model's hips; the float lands then
     landing = _frame_at(mask, big) if wave_at > 0.0 else None

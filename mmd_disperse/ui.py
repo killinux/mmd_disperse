@@ -389,7 +389,8 @@ class MMDDISPERSE_PT_domain(_Panel, bpy.types.Panel):
         col = layout.column(align=True)
         col.prop(s, "domain_open")
         col.prop(s, "domain_hold")
-        layout.prop(s, "domain_close")
+        if s.domain_arrive != "BLINK":
+            layout.prop(s, "domain_close")
         if s.domain_style != "STAGE":
             layout.prop(s, "domain_props")
         if context.scene.camera is None:
@@ -971,6 +972,73 @@ class MMDDISPERSE_PT_mirror(_Panel, bpy.types.Panel):
             layout.label(text="Needs a scene camera", icon="ERROR")
 
 
+class MMDDISPERSE_PT_sweat(_Panel, bpy.types.Panel):
+    bl_label = "Sweat"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "sweat_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.sweat_enable
+        col = layout.column(align=True)
+        col.prop(s, "sweat_amount")
+        col.prop(s, "sweat_time")
+
+
+class MMDDISPERSE_PT_title(_Panel, bpy.types.Panel):
+    bl_label = "Big Title"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "title_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.title_enable
+        col = layout.column(align=True)
+        col.prop(s, "title_text")
+        col.prop(s, "title_font")
+        layout.prop(s, "title_upright")
+        layout.prop(s, "title_style")
+        layout.prop(s, "title_end")
+        layout.prop(s, "title_time")
+        if bpy.app.version < (4, 0, 0) and not s.title_font and any(ord(c) > 0x2E7F for c in s.title_text):
+            layout.label(text="Pick a font with these characters", icon="INFO")
+        if context.scene.camera is None:
+            layout.label(text="Needs a scene camera", icon="ERROR")
+
+
+class MMDDISPERSE_PT_echo(_Panel, bpy.types.Panel):
+    bl_label = "Multiple Exposure"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "echo_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.echo_enable
+        layout.prop(s, "echo_style")
+        col = layout.column(align=True)
+        col.prop(s, "echo_count")
+        col.prop(s, "echo_spread")
+        col.prop(s, "echo_length")
+
+
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
     bl_label = "Hologram / Veil"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -1239,6 +1307,9 @@ classes = (
     MMDDISPERSE_PT_puppet,
     MMDDISPERSE_PT_shadowplay,
     MMDDISPERSE_PT_mirror,
+    MMDDISPERSE_PT_echo,
+    MMDDISPERSE_PT_title,
+    MMDDISPERSE_PT_sweat,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

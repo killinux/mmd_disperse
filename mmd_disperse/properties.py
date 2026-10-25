@@ -259,7 +259,13 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                        "a star glinting in them (#对视变装)"),
                ("OPEN", "Arms Open", "Swap as both arms fly open wide (a drag queen's reveal, flinging her cape "
                                      "open); with the Balloons cover the cloud bursts out as they open and the outfits "
-                                     "swap once it covers her")),
+                                     "swap once it covers her"),
+               ("TOUCH", "Touch Ear or Glasses", "Start when a fingertip touches an ear, the corner of an eye or the "
+                                                 "bridge of the nose and stays a moment (touching an earring, pushing "
+                                                 "up one's glasses: VRChat's outfit gimmicks), from that side of the "
+                                                 "head"),
+               ("BEAT", "Chest Beat", "Start once the fists have drummed on the chest three times within a second or "
+                                      "so (Donkey Kong Bananza's ritual), from the chest")),
         default="NONE",
         description="Start the transformation on a move of the dance: building looks for it in the old model's motion "
                     "from the start frame on and moves the transformation there (the start and end frames follow; with "
@@ -422,6 +428,9 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("FLOWERS", "Flower Field", "A pastel sky over a meadow full of flowers that open as it spreads"),
                ("WATER", "Sky Mirror", "A blue sky with white clouds over still water that ripples, white feathers "
                                        "falling (Precure, Wuthering Waves)"),
+               ("DREAM", "Dream", "A violet night over a black mirror, a great red moon, gouged and its rim "
+                                  "twisting, crystals of red light floating (Kamen Rider Zeztz's dream world; best "
+                                  "with Comes: Blink)"),
                ("STAGE", "Concert", "A dark concert hall: beams of light sweep from the stage, a crowd of light "
                                     "sticks waves all round, a pool of light where the dancer stands")),
         default="VOID", update=_sync)
@@ -432,7 +441,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("FOLD", "Folds Round Her", "The new world's ground rises all round at the horizon and rolls in, "
                                            "curling up over her head into a closed ball at the big moment, then "
                                            "opens out from the top and lies flat, the new world all round (world "
-                                           "morphing, Inception)")),
+                                           "morphing, Inception)"),
+               ("BLINK", "Blink", "Eyelids close over the picture and open on the world, all of it there at once; "
+                                  "when it is over they close again and open on the stage (a dream: Kamen Rider "
+                                  "Zeztz)")),
         default="OPEN", update=_sync)
     domain_open: FloatProperty(name="Opens Over", default=0.35, min=0.02, max=1.0, subtype="FACTOR", update=_sync,
                                description="How long the world takes to open round the dancer (or to roll in round "
@@ -718,6 +730,63 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                  description="Seconds before the big moment the mirror stands up beside her")
     mirror_first: FloatProperty(name="Reflection Ahead", default=0.9, min=0.0, soft_max=4.0, update=_sync,
                                 description="Seconds before the big moment the reflection changes")
+    # --- 1.18: the sweat (sweat.py)
+    sweat_enable: BoolProperty(name="Sweat", default=False, update=_sync,
+                               description="As she dances towards the big moment she glistens more and more, a wet "
+                                           "sheen on her skin and the old outfit and beads of sweat catching the light; "
+                                           "the new outfit comes on dry (汗光: Gakumas' live shows)")
+    sweat_amount: FloatProperty(name="Shine", default=1.0, min=0.0, soft_max=3.0, update=_sync,
+                                description="How strongly the sweat catches the light")
+    sweat_time: FloatProperty(name="Sweat Time", default=4.0, min=0.2, soft_max=20.0, update=_sync,
+                              description="Seconds before the big moment she starts to glisten (not before the "
+                                          "transformation starts)")
+    # --- 1.18: the big calligraphy title (title.py)
+    title_enable: BoolProperty(name="Big Title", default=False, update=_sync,
+                               description="A little before the big moment the name of the move is brushed onto the "
+                                           "picture in great strokes, holds as the outfits swap and then blows away "
+                                           "in specks or shrinks into a red seal in a corner (书法大字幕: the titles "
+                                           "of a drama's finishing moves)")
+    title_text: StringProperty(name="Words", default="变身", update=_sync,
+                               description="What is written (one character under another when set upright)")
+    title_font: StringProperty(name="Font", subtype="FILE_PATH", default="", update=_sync,
+                               description="A font file for the words (a brush script looks best, if its licence lets "
+                                           "you); Blender's own has no Chinese on Blender 3.6: Windows' 楷体 is "
+                                           "C:/Windows/Fonts/simkai.ttf")
+    title_style: EnumProperty(
+        name="Ink",
+        items=(("GOLD", "Gold", "Glowing gold"), ("WHITE", "White", "Glowing white"),
+               ("INK", "Black Ink", "Black ink (for a light picture)")),
+        default="GOLD", update=_sync)
+    title_end: EnumProperty(
+        name="Then",
+        items=(("BLOW", "Blow Away", "It blows away in specks of ink, drifting up"),
+               ("SEAL", "Seal", "It shrinks into a red seal in a corner of the picture and stays a while")),
+        default="BLOW", update=_sync)
+    title_time: FloatProperty(name="Title Time", default=1.0, min=0.2, soft_max=5.0, update=_sync,
+                              description="Seconds before the big moment the brush starts (it takes seven tenths of "
+                                          "that, then the words hold)")
+    title_upright: BoolProperty(name="Upright", default=False, update=_sync,
+                                description="Set the words upright, one character under another, brushed downwards")
+    # --- 1.18: the multiple exposure (echo.py)
+    echo_enable: BoolProperty(name="Multiple Exposure", default=False, update=_sync,
+                              description="On the way to the big moment copies of her in the old outfit swell out of "
+                                          "her one after another, larger and turned a little, each in its own colour, "
+                                          "like a print exposed again and again; at the moment they are copies in the "
+                                          "new outfit, far out, and they gather back into her (迷幻多重曝光, The "
+                                          "Fantastic Four: First Steps)")
+    echo_style: EnumProperty(
+        name="Echo Colors",
+        items=(("PSYCHEDELIC", "Psychedelic", "1960s colours: magenta, orange, yellow, lime, cyan, violet"),
+               ("MONO", "Glow Color", "All of them in the glow colour")),
+        default="PSYCHEDELIC", update=_sync)
+    echo_count: IntProperty(name="Copies", default=5, min=2, max=8, update=_sync,
+                            description="How many copies swell out of her")
+    echo_spread: FloatProperty(name="Spread", default=0.6, min=0.1, soft_max=2.0, update=_sync,
+                               description="How much larger than her the outermost copy grows (0.6: 1.6 times as "
+                                           "large)")
+    echo_length: FloatProperty(name="Echo Time", default=1.5, min=0.2, soft_max=6.0, update=_sync,
+                               description="Seconds before the big moment the copies start to swell out of her (they "
+                                           "gather back into her over seven tenths of that after it)")
     shadow_length: FloatProperty(name="Shadow Time", default=2.5, min=0.2, soft_max=10.0, update=_sync,
                                  description="Seconds before the big moment she is pressed onto the screen (or from "
                                              "the start of the transformation, when that is later)")
@@ -815,7 +884,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                         "it with On Twos)"),
                ("PIXEL", "Pixelated", "The dancer breaks up into big blocks of colour, biggest at the moment the "
                                       "outfits swap behind them, then sharp again (像素打码; pair it with All at "
-                                      "Once)")),
+                                      "Once)"),
+               ("PLAIN", "Plain Before", "The picture flat, washed out and a little cold for Look Time before the "
+                                         "big moment, then it cuts to its full colour as the outfits swap (反差 A/B "
+                                         "side: plain face and flat light, a wave of the hand, glamour)")),
         default="NONE", update=_sync,
         description="A look the picture takes round the big moment, made in the compositor (each turns on Cryptomatte "
                     "for the view layer to find the dancer); removing the effect takes it out")

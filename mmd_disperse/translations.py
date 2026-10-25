@@ -725,6 +725,8 @@ _ZH = {
     ("*", "Talisman Count"): "符纸张数",
     ("*", "Talisman Time"): "飞符时长",
     ("*", "Burn Time"): "燃尽时长",
+    ("*", "Inflate and Pop"): "充气爆开",
+    ("*", "Melt Away"): "融化滴落",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

@@ -61,6 +61,7 @@ ECHO_GROUP = "MMDDisperse Echo"
 ECHO_NUMBER = "mmdd_echo"  # on the multiple exposure's copies (instances): which copy, k / Count ...
 ECHO_FADE = "mmdd_fade"  # ... and how much it shows
 PEEL_GROUP = "MMDDisperse Peel"
+PEEL_POP = 0.75  # 1.22, the tearing's INFLATE: when (0 .. 1 of the tearing time) the balloon pops (the big moment)
 FUMBLE_GROUP = "MMDDisperse Fumble"
 TALISMAN_GROUP = "MMDDisperse Talisman"
 ATTR_STICK = "mmdd_stick"  # on the old outfit's meshes (a face attribute): 1 where talisman.py's talismans may stick
@@ -68,7 +69,7 @@ FUMBLE_HIDE_GROUP = "MMDDisperse Fumble Hide"
 ATTR_LOOSE = "mmdd_loose"  # on the new outfit's meshes (a face attribute): 1 where fumble.py lets it fall off
 ATTR_TEAR = "mmdd_tear"  # on the old outfit's meshes (a face attribute): 1 where peel.py tears it off
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 17  # bumped when one of these groups changes
+REVISION = 18  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -1899,7 +1900,15 @@ def build_peel_group():
       hangs there for Hold, then drops (the arms', the collar's and the legs' cloth drops at once);
     2 YANK: the top is yanked up and back, the bottom drops;
     3 STRIPS: it comes off in Strips strips round her, each curling down from the top in its turn and gone at the
-      bottom.
+      bottom;
+    4 INFLATE: its seams welded, it swells up like a balloon (out along its normals, smoothed out: the wrinkles go),
+      in a long breath and two jerks, trembles, and at PEEL_POP pops into rubber scraps flying off and shrinking (the
+      cells of a Voronoi of where they are at rest, cut apart) and confetti (Confetti Material) fluttering down till
+      PEEL_POP + 0.85;
+    5 MELT: it slumps to the floor like wax, some columns ahead (dripping), the sleeves dropping, and spreads into a
+      pool round her feet (the higher it was the further out), smoothed out; the pool shrinks back under her from 1
+      to 1.4.
+    INFLATE and MELT store how far along they are (mmdd_gloss, 0 .. 1) for the lining's gloss.
     The mesh is cut between the pieces (told apart face by face), so no face stretches across two.
     It lies a hair out along its normals (over the new outfit; Push times that: the outer of several layers further),
     and shows, still whole, from Show From (a layer of several waiting for its turn). With Threads (1 about one point in 250) sticky threads
@@ -1920,6 +1929,7 @@ def build_peel_group():
         ("Thread Material", "NodeSocketMaterial"),
         ("Show From", "NodeSocketFloat", 0.0),
         ("Push", "NodeSocketFloat", 1.0),
+        ("Confetti Material", "NodeSocketMaterial"),
     ))
     gi = b.node("NodeGroupInput", -3400, 0)
     go = b.node("NodeGroupOutput", 3400, 0)
@@ -1964,6 +1974,8 @@ def build_peel_group():
     piece = b.switch("FLOAT", b.compare("EQUAL", style, 2.0, x=-800, y=-2850), piece, b.math(
         "SUBTRACT", 1.0, lower_f, x=-1000, y=-3000), x=-600, y=-2750)
     piece = b.switch("FLOAT", b.compare("EQUAL", style, 3.0, x=-600, y=-3000), piece, strip_f, x=-400, y=-2900)
+    piece = b.switch("FLOAT", b.compare("GREATER_THAN", style, 3.5, x=-600, y=-3150), piece, 0.0, x=-400,
+                     y=-3050)  # (a balloon and wax stay whole)
     piece = b.on_domain(piece, "FACE", x=-200, y=-2750)
     mean = b.on_domain(piece, "EDGE", x=0, y=-2900)  # an edge between two pieces: the ids of its faces differ
     spread = b.math("SUBTRACT", b.on_domain(b.on_domain(b.math("MULTIPLY", piece, piece, x=-200, y=-3150), "FACE",
@@ -2178,6 +2190,179 @@ def build_peel_group():
                    b.map_range(t, 0.1, 0.3, x=1600, y=y0 + 850, smooth=True), 1800, y0 + 500)
     strips = b.switch("VECTOR", loose, strips, burst, x=2000, y=y0)
 
+    def smoothed(geometry, amount, iterations, x, y):
+        """`geometry` with its positions blurred (Blur Attribute) as much as `amount` 0 .. 1 says."""
+        here_ = b.node("GeometryNodeInputPosition", x - 200, y - 450).outputs[0]
+        blur = b.node("GeometryNodeBlurAttribute", x, y - 300, data_type="FLOAT_VECTOR")
+        b.feed(_enabled(blur.inputs, "Value")[0], here_)
+        blur.inputs["Iterations"].default_value = iterations
+        to = b.vmath("ADD", here_, b.vmath("SCALE", b.vmath("SUBTRACT", _enabled(blur.outputs, "Value")[0], here_,
+                                                            x=x + 200, y=y - 300), scale=amount, x=x + 400,
+                                           y=y - 300), x=x + 600, y=y - 300)
+        return b.set_position(geometry, position=to, x=x + 800, y=y)
+
+    # --- INFLATE: its seams welded, swollen out along its normals and smoothed out (the wrinkles gone) in a long
+    # breath and two jerks, trembling; popped at PEEL_POP into rubber scraps (the cells of a Voronoi of where they
+    # are at rest, cut apart) flying out from her middle and shrinking away, and confetti fluttering down
+    y0 = -11000
+    welded = b.node("GeometryNodeMergeByDistance", -1800, y0)
+    b.feed(welded.inputs["Geometry"], b.set_position(b.store(cloth, "mmdd_from", pushed, "FLOAT_VECTOR", x=-2200,
+                                                             y=y0), position=pushed, x=-2000, y=y0))
+    b.feed(welded.inputs["Distance"], b.math("MULTIPLY", h, 0.0001, x=-2000, y=y0 - 200))  # (its seams only: the
+    # mesh may be finer than a few millimetres)
+    swell = b.math("MULTIPLY_ADD", b.map_range(t, 0.0, 0.45, x=-2000, y=y0 - 400, smooth=True), 0.7, b.math(
+        "MULTIPLY", b.math("ADD", b.map_range(t, 0.5, 0.57, x=-2000, y=y0 - 550, smooth=True),
+                           b.map_range(t, 0.64, 0.71, x=-2000, y=y0 - 700, smooth=True), x=-1800, y=y0 - 600),
+        0.15, x=-1600, y=y0 - 600), x=-1400, y=y0 - 450)
+    tremble = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY", t, 90.0, x=-1800, y=y0 - 850), x=-1600,
+                                            y=y0 - 850),
+                     b.math("MULTIPLY", b.map_range(t, 0.55, PEEL_POP, x=-1800, y=y0 - 1000), 0.05, x=-1600,
+                            y=y0 - 1000), 1.0, x=-1400, y=y0 - 900)
+    smooth_ = smoothed(welded.outputs["Geometry"], swell, 20, -1400, y0)
+    puffed = b.set_position(smooth_, offset=b.vmath("SCALE", normal, scale=b.math("MULTIPLY", b.math(
+        "MULTIPLY", swell, tremble, x=-800, y=y0 - 700), b.math("MULTIPLY", h, 0.11, x=-800, y=y0 - 850), x=-600,
+        y=y0 - 750), x=-400, y=y0 - 600), x=-400, y=y0)
+    bx, by, bz = b.split_xyz(b.node("GeometryNodeInputPosition", 400, y0 - 900).outputs[0], x=600, y=y0 - 900)
+    floored = b.set_position(smoothed(puffed, swell, 10, -200, y0), position=b.combine(
+        bx, by, b.math("MAXIMUM", bz, 0.0, x=800, y=y0 - 1000), x=1000, y=y0 - 900), x=800, y=y0)  # (on the floor)
+    balloon = b.store(floored, "mmdd_gloss", swell, x=1000, y=y0)
+    # the pop: cut into the cells, each flying out from her middle (and a little up), falling, shrinking away
+    yp = y0 - 1600
+    cells = b.node("ShaderNodeTexVoronoi", -1200, yp)
+    b.feed(cells.inputs["Vector"], b.on_domain(rest, "FACE", "FLOAT_VECTOR", x=-1400, y=yp))
+    b.feed(cells.inputs["Scale"], b.math("DIVIDE", 13.0, h, x=-1400, y=yp - 200))
+    cell_r, _cell_g, _cell_b = b.split_xyz(cells.outputs["Color"], x=-1000, y=yp)
+    cell = b.on_domain(b.math("FLOOR", b.math("MULTIPLY", cell_r, 997.0, x=-800, y=yp), x=-600, y=yp), "FACE",
+                       x=-400, y=yp)
+    cell_mean = b.on_domain(cell, "EDGE", x=-200, y=yp - 200)
+    cell_spread = b.math("SUBTRACT", b.on_domain(b.on_domain(b.math("MULTIPLY", cell, cell, x=-400, y=yp - 400),
+                                                             "FACE", x=-200, y=yp - 400), "EDGE", x=0, y=yp - 400),
+                         b.math("MULTIPLY", cell_mean, cell_mean, x=0, y=yp - 200), x=200, y=yp - 300)
+    scraps = b.node("GeometryNodeSplitEdges", 1000, y0)
+    b.feed(scraps.inputs["Mesh"], balloon)
+    b.feed(scraps.inputs["Selection"], b.compare("GREATER_THAN", cell_spread, 0.1, x=400, y=yp - 300))
+    scrap = b.on_domain(cell, "POINT", x=400, y=yp - 600)
+    pop = b.map_range(t, PEEL_POP, 1.0, x=600, y=yp - 800)
+    here = b.node("GeometryNodeInputPosition", 600, yp - 1000).outputs[0]
+    middle = b.vmath("SCALE", b.accumulate(here, scrap, data_type="FLOAT_VECTOR", x=800, y=yp - 1000),
+                     scale=b.math("DIVIDE", 1.0, b.math("MAXIMUM", b.accumulate(1.0, scrap, x=800, y=yp - 1200), 1.0,
+                                                        x=1000, y=yp - 1200), x=1200, y=yp - 1200),
+                     x=1400, y=yp - 1000)
+    waist = placed(gi.outputs["Centre"], lower_frame, 800, yp - 1500)
+    out_ = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("SUBTRACT", middle, waist, x=1600, y=yp - 1300),
+                                        b.combine(0.0, 0.0, b.math("MULTIPLY", h, 0.12, x=1400, y=yp - 1600),
+                                                  x=1600, y=yp - 1600), x=1800, y=yp - 1400), x=2000, y=yp - 1400)
+    kick, _kc = b.white_noise(b.combine(scrap, gi.outputs["Seed"], 0.61, x=1600, y=yp - 1800), x=1800,
+                              y=yp - 1800)
+    flown = b.vmath("ADD", b.vmath("SCALE", out_, scale=b.math("MULTIPLY", pop, b.math(
+        "MULTIPLY", h, b.math("MULTIPLY_ADD", kick, 0.3, 0.35, x=2000, y=yp - 1800), x=2200, y=yp - 1800),
+        x=2400, y=yp - 1700), x=2600, y=yp - 1500),
+                    b.combine(0.0, 0.0, b.math("MULTIPLY", b.math("MULTIPLY", pop, pop, x=2200, y=yp - 2000),
+                                               b.math("MULTIPLY", h, -0.45, x=2200, y=yp - 2150), x=2400,
+                                               y=yp - 2000), x=2600, y=yp - 2000), x=2800, y=yp - 1600)
+    left_ = b.math("SUBTRACT", 1.0, b.map_range(pop, 0.15, 1.0, x=2600, y=yp - 2300, smooth=True), x=2800,
+                   y=yp - 2300)
+    popped = b.set_position(scraps.outputs["Mesh"], position=b.vmath(
+        "ADD", b.vmath("ADD", middle, flown, x=3000, y=yp - 1300),
+        b.vmath("SCALE", b.vmath("SUBTRACT", here, middle, x=2800, y=yp - 1100), scale=left_, x=3000, y=yp - 1100),
+        x=3200, y=yp - 1200), x=3200, y=y0)
+    # the confetti: from a few hundred of its points (picked by where they are at rest), flung out along its normals,
+    # slowed by the air, fluttering down, spinning, fading at the end (the confetti material's mmdd_age)
+    yc = y0 - 4400
+    sized = b.node("GeometryNodeAttributeDomainSize", 0, yc - 300, component="MESH")
+    b.feed(sized.inputs["Geometry"], balloon)
+    lucky, _lc = b.white_noise(b.vmath("SCALE", rest, scale=b.math("DIVIDE", 89.0, h, x=-400, y=yc - 600),
+                                       x=-200, y=yc - 600), x=0, y=yc - 600)
+    life = b.map_range(t, PEEL_POP, PEEL_POP + 0.85, x=0, y=yc - 800)
+    sprinkled = b.node("GeometryNodeMeshToPoints", 400, yc)
+    b.feed(sprinkled.inputs["Mesh"], b.store(balloon, "mmdd_n", normal, "FLOAT_VECTOR", x=200, y=yc))
+    b.feed(sprinkled.inputs["Selection"], b.boolean("AND", b.compare("LESS_THAN", lucky, b.math(
+        "DIVIDE", 320.0, b.math("MAXIMUM", sized.outputs["Point Count"], 1.0, x=200, y=yc - 300), x=200,
+        y=yc - 450), x=400, y=yc - 500), b.compare("GREATER_EQUAL", t, PEEL_POP, x=200, y=yc - 800), x=400,
+        y=yc - 700))
+    r_, spin = b.white_noise(b.vmath("SCALE", rest, scale=b.math("DIVIDE", 71.0, h, x=200, y=yc - 1100), x=400,
+                                     y=yc - 1100), x=600, y=yc - 1100)
+    way_ = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("ADD", b.named_attribute("mmdd_n", "FLOAT_VECTOR", x=600,
+                                                                                y=yc - 1300)[0],
+                                                       b.vmath("SCALE", b.vmath("SUBTRACT", spin, (0.5, 0.5, 0.5),
+                                                                                x=800, y=yc - 1450), scale=1.4,
+                                                               x=1000, y=yc - 1450), x=1200, y=yc - 1350),
+                                        (0.0, 0.0, 0.5), x=1400, y=yc - 1350), x=1600, y=yc - 1350)
+    eased = b.math("SUBTRACT", 1.0, b.math("POWER", b.math("SUBTRACT", 1.0, life, x=800, y=yc - 1650), 3.0, x=1000,
+                                           y=yc - 1650), x=1200, y=yc - 1650)
+    flutter = b.combine(b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY_ADD", life, 19.0, b.math(
+        "MULTIPLY", r_, 40.0, x=1000, y=yc - 1900), x=1200, y=yc - 1850), x=1400, y=yc - 1850), b.math(
+        "MULTIPLY", b.math("MULTIPLY", h, 0.03, x=1200, y=yc - 2000), life, x=1400, y=yc - 2000), x=1600,
+        y=yc - 1900),
+                        b.math("MULTIPLY", b.math("COSINE", b.math("MULTIPLY_ADD", life, 15.0, b.math(
+                            "MULTIPLY", r_, 30.0, x=1000, y=yc - 2200), x=1200, y=yc - 2150), x=1400, y=yc - 2150),
+                               b.math("MULTIPLY", b.math("MULTIPLY", h, 0.03, x=1200, y=yc - 2300), life, x=1400,
+                                      y=yc - 2300), x=1600, y=yc - 2200),
+                        b.math("MULTIPLY", b.math("MULTIPLY", life, life, x=1400, y=yc - 2450), b.math(
+                            "MULTIPLY", h, -0.3, x=1400, y=yc - 2600), x=1600, y=yc - 2500), x=1800, y=yc - 2200)
+    thrown = b.set_position(b.store(sprinkled.outputs["Points"], "mmdd_r", r_, x=600, y=yc), offset=b.vmath(
+        "ADD", b.vmath("SCALE", way_, scale=b.math("MULTIPLY", eased, b.math("MULTIPLY", h, b.math(
+            "MULTIPLY_ADD", r_, 0.4, 0.3, x=1400, y=yc - 1550), x=1600, y=yc - 1550), x=1800, y=yc - 1550),
+                       x=2000, y=yc - 1400), flutter, x=2200, y=yc - 1500), x=2200, y=yc)
+    bit = b.node("GeometryNodeMeshGrid", 2000, yc + 300)
+    b.feed(bit.inputs["Size X"], b.math("MULTIPLY", h, 0.024, x=1800, y=yc + 300))
+    b.feed(bit.inputs["Size Y"], b.math("MULTIPLY", h, 0.012, x=1800, y=yc + 150))
+    bit.inputs["Vertices X"].default_value = 2
+    bit.inputs["Vertices Y"].default_value = 2
+    bits = b.node("GeometryNodeInstanceOnPoints", 2400, yc)
+    b.feed(bits.inputs["Points"], thrown)
+    b.feed(bits.inputs["Instance"], bit.outputs["Mesh"])
+    b.feed(bits.inputs["Rotation"], b.vmath("ADD", b.vmath("SCALE", spin, scale=6.2832, x=2000, y=yc - 2700),
+                                            b.vmath("SCALE", (11.0, 7.0, 5.0), scale=life, x=2000, y=yc - 2850),
+                                            x=2200, y=yc - 2750))
+    confetti = b.node("GeometryNodeRealizeInstances", 2600, yc)
+    b.feed(confetti.inputs["Geometry"], bits.outputs["Instances"])
+    dressed_bits = b.node("GeometryNodeSetMaterial", 3000, yc)
+    b.feed(dressed_bits.inputs["Geometry"], b.store(confetti.outputs["Geometry"], "mmdd_age", life, x=2800, y=yc))
+    b.feed(dressed_bits.inputs["Material"], gi.outputs["Confetti Material"])
+    inflate = b.switch("GEOMETRY", b.compare("GREATER_THAN", t, PEEL_POP, x=3200, y=y0 + 200), balloon,
+                       b.join([popped, dressed_bits.outputs["Geometry"]], x=3400, y=y0 - 200), x=3600, y=y0)
+
+    # --- MELT: slumping to the floor like wax, some columns ahead (dripping), the sleeves dropping; spreading into
+    # a pool round her feet (the higher it was the further out), smoothed out; the pool shrinking back under her
+    y0 = -17500
+    melt = b.map_range(t, 0.0, 1.0, x=-2000, y=y0 - 200, smooth=True)
+    px, py, pz = b.split_xyz(pushed, x=-2000, y=y0 - 400)
+    floor_ = b.math("MULTIPLY", h, 0.003, x=-2000, y=y0 - 600)
+    drips = b.node("ShaderNodeTexNoise", -2000, y0 - 800)
+    b.feed(drips.inputs["Vector"], b.combine(rx, ry, 0.0, x=-2200, y=y0 - 800))
+    b.feed(drips.inputs["Scale"], b.math("DIVIDE", 16.0, h, x=-2200, y=y0 - 950))
+    drip = b.map_range(drips.outputs["Fac"], 0.52, 0.66, x=-1800, y=y0 - 800, smooth=True)
+    sink = b.math("POWER", b.math("SUBTRACT", 1.0, melt, x=-1600, y=y0 - 600),
+                  b.math("MULTIPLY_ADD", drip, 2.5, 1.0, x=-1600, y=y0 - 800), x=-1400, y=y0 - 700)
+    above = b.math("MAXIMUM", b.math("SUBTRACT", pz, floor_, x=-1600, y=y0 - 400), 0.0, x=-1400, y=y0 - 400)
+    low = b.math("MULTIPLY_ADD", above, sink, floor_, x=-1200, y=y0 - 500)
+    # (the sleeves drop off her arms instead, falling to the floor)
+    fallen = b.math("MAXIMUM", b.math("SUBTRACT", pz, b.math("MULTIPLY", b.math("POWER", b.map_range(
+        t, 0.0, 0.6, x=-1600, y=y0 - 1000), 2.0, x=-1400, y=y0 - 1000), b.math("MULTIPLY", h, 1.4, x=-1400,
+                                                                                y=y0 - 1150), x=-1200, y=y0 - 1050),
+                                      x=-1000, y=y0 - 1000), floor_, x=-800, y=y0 - 1000)
+    low = b.switch("FLOAT", arm, low, fallen, x=-800, y=y0 - 500)
+    waist = placed(gi.outputs["Centre"], lower_frame, -1600, y0 - 1400)
+    wx, wy, _wz = b.split_xyz(waist, x=-1200, y=y0 - 1400)
+    outward = b.vmath("NORMALIZE", b.combine(b.math("SUBTRACT", px, wx, x=-1000, y=y0 - 1300),
+                                             b.math("SUBTRACT", py, wy, x=-1000, y=y0 - 1450), 0.0, x=-800,
+                                             y=y0 - 1350), x=-600, y=y0 - 1350)
+    reach = b.math("MULTIPLY", b.math("MULTIPLY", melt, melt, x=-800, y=y0 - 1600), b.math("MULTIPLY", b.math(
+        "DIVIDE", b.math("ADD", rz, cz, x=-1200, y=y0 - 1750), h, x=-1000, y=y0 - 1750, clamp=True), b.math(
+        "MULTIPLY", h, 0.3, x=-1000, y=y0 - 1900), x=-800, y=y0 - 1800), x=-600, y=y0 - 1700)
+    ox, oy, _oz = b.split_xyz(b.vmath("SCALE", outward, scale=reach, x=-400, y=y0 - 1500), x=-200, y=y0 - 1500)
+    slumped = b.set_position(b.store(cloth, "mmdd_from", pushed, "FLOAT_VECTOR", x=-200, y=y0), position=b.combine(
+        b.math("ADD", px, ox, x=0, y=y0 - 1300), b.math("ADD", py, oy, x=0, y=y0 - 1450), low, x=200, y=y0 - 1300),
+        x=400, y=y0)
+    waxy = smoothed(slumped, melt, 10, 600, y0)
+    gather = b.map_range(t, 1.0, 1.4, x=1200, y=y0 - 400, smooth=True)
+    under = b.combine(wx, wy, floor_, x=1200, y=y0 - 600)
+    here_m = b.node("GeometryNodeInputPosition", 1200, y0 - 800).outputs[0]
+    melted = b.store(b.set_position(waxy, position=b.vmath("ADD", under, b.vmath("SCALE", b.vmath(
+        "SUBTRACT", here_m, under, x=1400, y=y0 - 700), scale=b.math("SUBTRACT", 1.0, gather, x=1400, y=y0 - 500),
+        x=1600, y=y0 - 600), x=1800, y=y0 - 600), x=1800, y=y0), "mmdd_gloss", melt, x=2000, y=y0)
+
     # the style's positions (only the one picked is worked out), and nothing outside the tearing; each point keeps
     # where it was on her (for the threads)
     def picked(positions, x, y, base=None):
@@ -2189,6 +2374,9 @@ def build_peel_group():
         moved = picked(positions, 2000, yy, strip_base if k == 3 else None)
         shaped = b.switch("GEOMETRY", b.compare("EQUAL", style, float(k), x=2000, y=yy + 200), shaped, moved,
                           x=2200, y=yy)
+    for k, made, yy in ((4, inflate, -11000), (5, melted, -17500)):  # (these keep where they were themselves)
+        shaped = b.switch("GEOMETRY", b.compare("EQUAL", style, float(k), x=3800, y=yy + 200), shaped, made,
+                          x=4000, y=yy)
     # --- the threads: from a few of its points (picked by where they are at rest) back to where they were on her
     tx, ty = 2600, -9000
     pick, _pc = b.white_noise(b.vmath("SCALE", rest, scale=b.math("DIVIDE", 97.0, h, x=tx - 600, y=ty - 200),
@@ -2255,6 +2443,9 @@ def build_peel_group():
     end = b.switch("FLOAT", b.compare("EQUAL", style, 1.0, x=2200, y=-800), 1.0,
                    b.math("ADD", gi.outputs["Hold"], 1.5, x=2200, y=-950), x=2400, y=-800)
     end = b.switch("FLOAT", b.compare("EQUAL", style, 3.0, x=2400, y=-1100), end, 1.15, x=2600, y=-1000)
+    end = b.switch("FLOAT", b.compare("EQUAL", style, 4.0, x=2600, y=-1250), end, PEEL_POP + 0.85, x=2800,
+                   y=-1150)
+    end = b.switch("FLOAT", b.compare("EQUAL", style, 5.0, x=2800, y=-1400), end, 1.4, x=3000, y=-1300)
     shown = b.boolean("AND", b.compare("GREATER_EQUAL", t, gi.outputs["Show From"], x=2600, y=-300),
                       b.compare("LESS_THAN", t, end, x=2800, y=-1000), x=2800, y=-300)
     b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", shown, None, shaped, x=3000, y=0))

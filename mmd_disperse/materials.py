@@ -85,6 +85,8 @@ LINING_ON = "mmdd_lining"  # on peel.py's twins (an object attribute the splice 
 LINING_SCALE = "mmdd_lining_scale"  # ... and the crests on the lining a unit
 LINING_ERA = "mmdd_era_amount"  # 1.21, on a layer of peel.py's: how much its outside takes the colour of its age ...
 LINING_ERA_COLOR = "mmdd_era_color"  # ... which colour
+LINING_GLOSS = "mmdd_gloss"  # 1.22, on the twins' geometry (a point attribute of the group): how glossy it has got
+# (the balloon of Inflate and Pop, the wax of Melt Away)
 SWEAT = "MMDD Sweat"  # 1.18 (sweat.py): a wet sheen and beads of sweat on the old outfit, added on top
 P_SWEAT = "mmd_disperse_sweat"
 GHOST = "MMDD Ghost"  # 1.16 (ghost.py): she turns see-through from the feet up, a rim of light flowing up her
@@ -6932,11 +6934,14 @@ def add_lining(mat, colour):
     object's own coordinates, LINING_SCALE cells a unit); everywhere else, and on her, it is as it was. Cut-outs stay
     cut out. On a layer of the layered tearing (1.21) its outside takes the colour of its age, as much as the object
     attribute LINING_ERA says: the material as it is lit (Shader to RGB, EEVEE), its brightness (shadows lifted) in
-    LINING_ERA_COLOR.
-    Called again, it only sets the colour."""
+    LINING_ERA_COLOR. Where the twin's geometry says it is glossy (LINING_GLOSS, 1.22: the balloon, the wax) it
+    shines (a Glossy BSDF added), and its inside is as its outside rather than the lining.
+    Called again, it only sets the colour (a splice from before 1.22 is made anew)."""
     nt = mat.node_tree
     if nt is None:
         return
+    if mat.get(P_LINING) and mat.get(P_LINING) < 2:
+        remove_lining(mat)
     if not mat.get(P_LINING):
         outputs = _outputs(nt)
         if not outputs:
@@ -6951,8 +6956,11 @@ def add_lining(mat, colour):
                    attribute_name=LINING_ERA)
         era_colour = _new(nt, "ShaderNodeAttribute", LINING + " Era Colour", x - 1800, y + 700,
                           attribute_type="OBJECT", attribute_name=LINING_ERA_COLOR)
-        fac = m("MULTIPLY", on.outputs["Fac"], m("MAXIMUM", inside.outputs["Backfacing"], era.outputs["Fac"],
-                                                 x=x - 1600, y=y + 300), x=x - 1400, y=y + 200)
+        gloss = _new(nt, "ShaderNodeAttribute", LINING + " Gloss", x - 1800, y + 900, attribute_type="GEOMETRY",
+                     attribute_name=LINING_GLOSS)
+        fac = m("MULTIPLY", on.outputs["Fac"], m("MAXIMUM", inside.outputs["Backfacing"], m(
+            "MAXIMUM", era.outputs["Fac"], gloss.outputs["Fac"], x=x - 1800, y=y + 300), x=x - 1600, y=y + 300),
+            x=x - 1400, y=y + 200)
         alpha = _alpha_source(nt)
         if alpha is not None:
             fac = m("MULTIPLY", fac, alpha, x=x - 1200, y=y + 200)
@@ -6971,6 +6979,13 @@ def add_lining(mat, colour):
         nt.links.new(gold, satin.inputs["Base Color"])
         _set_input(satin, ("Roughness",), 0.35)
         nt.links.new(m("MULTIPLY", crest, 0.9, x=x - 400, y=y - 500), satin.inputs["Metallic"])
+        shine = _new(nt, "ShaderNodeBsdfGlossy", LINING + " Shine", x - 400, y + 1100)
+        nt.links.new(m("MULTIPLY", gloss.outputs["Fac"], 0.75, x=x - 600, y=y + 1100), shine.inputs["Color"])
+        _set_input(shine, ("Roughness",), 0.15)
+        # (the inside of a balloon or of wax is the same stuff: the lining is gone once it is a third glossy)
+        back = m("MULTIPLY", inside.outputs["Backfacing"], m("SUBTRACT", 1.0, m("MULTIPLY", gloss.outputs["Fac"], 3.0,
+                                                                                x=x - 800, y=y + 1300, clamp=True),
+                                                              x=x - 600, y=y + 1300), x=x - 400, y=y + 1300)
         for i, out in enumerate(outputs):
             mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (LINING, i), out.location.x - 180,
                        out.location.y + 1500)
@@ -6978,7 +6993,7 @@ def add_lining(mat, colour):
             nt.links.new(fac, mix.inputs[0])
             # the outside of a layer of an age: the material as lit, its brightness in the age's colour
             side = _new(nt, "ShaderNodeMixShader", "%s Side %d" % (LINING, i), x, y + 400 + 300 * i)
-            nt.links.new(inside.outputs["Backfacing"], side.inputs[0])
+            nt.links.new(back, side.inputs[0])
             nt.links.new(satin.outputs[0], side.inputs[2])
             if mix.inputs[1].links:
                 lit = _new(nt, "ShaderNodeShaderToRGB", "%s Lit %d" % (LINING, i), x - 800, y + 900 + 300 * i)
@@ -6993,9 +7008,17 @@ def add_lining(mat, colour):
                              aged.inputs[3])
                 glow = _new(nt, "ShaderNodeEmission", "%s Aged Light %d" % (LINING, i), x - 200, y + 900 + 300 * i)
                 nt.links.new(aged.outputs[0], glow.inputs["Color"])
-                nt.links.new(glow.outputs[0], side.inputs[1])
+                # (as it is, or in the colour of its age; shining where it is glossy)
+                aged_or_not = _new(nt, "ShaderNodeMixShader", "%s Age %d" % (LINING, i), x - 100, y + 1100 + 300 * i)
+                nt.links.new(era.outputs["Fac"], aged_or_not.inputs[0])
+                nt.links.new(mix.inputs[1].links[0].from_socket, aged_or_not.inputs[1])
+                nt.links.new(glow.outputs[0], aged_or_not.inputs[2])
+                shining = _new(nt, "ShaderNodeAddShader", "%s Shining %d" % (LINING, i), x, y + 1300 + 300 * i)
+                nt.links.new(aged_or_not.outputs[0], shining.inputs[0])
+                nt.links.new(shine.outputs[0], shining.inputs[1])
+                nt.links.new(shining.outputs[0], side.inputs[1])
             nt.links.new(side.outputs[0], mix.inputs[2])
-        mat[P_LINING] = 1
+        mat[P_LINING] = 2
     node = nt.nodes.get(LINING + " Colour")
     if node is not None:
         node.outputs[0].default_value = tuple(colour[:3]) + (1.0,)

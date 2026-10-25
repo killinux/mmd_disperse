@@ -5,7 +5,11 @@ its clothes come apart over Tear Time round the new outfit, which is already on:
 - Flip Down (ぶっ返り): kabuki's basting threads pulled, everything above the waist turns down over it inside out, its
   lining showing, hangs there a while and drops;
 - Yank Off (引抜き): kabuki's instant change, the top pulled up and away and the bottom dropping, in a few frames;
-- Peel Off (剥落卷起): it comes off in strips that curl down from the top one after another, like a sticker.
+- Peel Off (剥落卷起): it comes off in strips that curl down from the top one after another, like a sticker;
+- Inflate and Pop (充气爆开, 1.22): it swells up like a balloon before the big moment, shiny, its wrinkles gone, jerks
+  twice, trembles and pops at the moment into rubber scraps and confetti;
+- Melt Away (融化滴落, 1.22): it slumps down like wax, dripping, the sleeves dropping off her arms, into a shiny pool
+  round her feet that shrinks back under her.
 Skin, face, hair and whatever Keep On names are not torn (they go with the old model as before); the inside of the
 torn cloth shows the lining colour (spliced into its materials, for the twins only). Layer by layer (层层撕回, 1.21:
 Agatha All Along's ballad, each verse an earlier age): several layers of it, torn off one after another a Layer Gap
@@ -34,7 +38,8 @@ P_LAYER = "mmd_disperse_peel_layer"  # ... and a twin's layer (0 the outer one)
 AGES = ((0.95, 0.62, 0.35), (0.86, 0.86, 0.86), (0.8, 0.6, 0.36), (0.55, 0.85, 1.0))  # the 70s, black and white,
 # an old photo, a faded blue print: the colours of the layers under the outer one
 NAME = "MMD Disperse Peel"
-STYLES = ("RIP", "FLIP", "YANK", "STRIPS")
+STYLES = ("RIP", "FLIP", "YANK", "STRIPS", "INFLATE", "MELT")
+CONFETTI = (1.0, 0.42, 0.62)  # Inflate and Pop: the confetti in hues round this pink (and gold and silver)
 WAIST = ("下半身", "LowerBody", "lower body", "Hips", "hips", "pelvis", "J_Bip_C_Hips")
 CHEST = ("上半身2", "上半身", "UpperBody2", "UpperBody", "upper body 2", "upper body", "Chest", "chest", "Spine2",
          "J_Bip_C_Chest")
@@ -63,9 +68,10 @@ def remove(mask, models=()):
         ng = bpy.data.node_groups.get(PEEL_GROUP)
         if ng is not None and ng.users == 0:
             bpy.data.node_groups.remove(ng)
-        mat = bpy.data.materials.get(materials.THREAD_MATERIAL)
-        if mat is not None and mat.users == 0:
-            bpy.data.materials.remove(mat)
+        for name in (materials.THREAD_MATERIAL, materials.COVER_MATERIAL + " Confetti"):  # (the confetti's: unless
+            mat = bpy.data.materials.get(name)  # a cover uses it)
+            if mat is not None and mat.users == 0:
+                bpy.data.materials.remove(mat)
         for mat in [m for m in bpy.data.materials if m.get(materials.P_LINING)]:
             materials.remove_lining(mat)
 
@@ -244,6 +250,8 @@ def sync(settings, mask, models, moment):
     keep, torn = [], set()
     thread = materials.ensure_thread_material(tuple(settings.peel_thread_color)) \
         if settings.peel_threads > 0.0 else None
+    confetti = materials.ensure_cover_material("CONFETTI") if settings.peel_style == "INFLATE" else None
+    lead = cover_nodes.PEEL_POP * span if settings.peel_style == "INFLATE" else 0.0  # (it pops at the moment)
     for ob in old.meshes:
         if not write_tear(ob, patterns):
             continue
@@ -260,13 +268,15 @@ def sync(settings, mask, models, moment):
             twin[materials.LINING_SCALE] = 40.0 / max(size.z, 1e-3)
             twin[materials.LINING_ERA] = 1.0 if layer else 0.0
             twin[materials.LINING_ERA_COLOR] = AGES[(layer - 1) % len(AGES)] if layer else (1.0, 1.0, 1.0)
-            start = float(moment) - (layers - 1 - layer) * gap
+            twin["mmdd_color"], twin["mmdd_glow"] = CONFETTI, 0.3  # (what the confetti material reads)
+            start = float(moment) - (layers - 1 - layer) * gap - lead
             for name, value in (("Upper", upper or lower), ("Lower", lower or upper),
                                 ("Style", STYLES.index(settings.peel_style)), ("Centre", tuple(centre)),
                                 ("Size", tuple(size)), ("Shoulder", shoulder), ("Strips", int(settings.peel_strips)),
                                 ("Hold", settings.peel_hold / max(settings.peel_time, 0.01)), ("Seed", 7 + layer),
                                 ("Threads", float(settings.peel_threads)), ("Thread Material", thread),
-                                ("Show From", -layer * gap / span), ("Push", float(layers - layer))):
+                                ("Show From", -layer * gap / span), ("Push", float(layers - layer)),
+                                ("Confetti Material", confetti)):
                 if name in ids:
                     mod[ids[name]] = value
             path = '["%s"]' % ids["Time"]

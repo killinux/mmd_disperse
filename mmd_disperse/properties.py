@@ -768,10 +768,16 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("YANK", "Yank Off", "The top is pulled up and away and the bottom drops, in a few frames (引抜き: "
                                     "kabuki's instant change)"),
                ("STRIPS", "Peel Off", "It comes off in strips that curl down from the top one after another (剥落卷起: "
-                                      "a sticker peeled off)")),
+                                      "a sticker peeled off)"),
+               ("INFLATE", "Inflate and Pop", "It swells up like a shiny balloon before the big moment, its wrinkles "
+                                              "gone, jerks twice, trembles and pops at the moment into rubber scraps "
+                                              "and confetti (充气爆开)"),
+               ("MELT", "Melt Away", "It slumps down like wax, dripping, the sleeves dropping off her arms, into a "
+                                     "shiny pool round her feet that shrinks back under her (融化滴落)")),
         default="RIP", update=_sync)
     peel_time: FloatProperty(name="Tear Time", default=0.6, min=0.05, soft_max=3.0, update=_sync,
-                             description="Seconds the tearing takes from the big moment")
+                             description="Seconds the tearing takes from the big moment (Inflate and Pop: "
+                                         "three quarters of it swelling up before the moment, the rest the pop)")
     peel_hold: FloatProperty(name="Hang", default=1.0, min=0.0, soft_max=5.0, update=_sync,
                              description="Flip Down: seconds the turned-down top hangs at her waist before it drops")
     peel_strips: IntProperty(name="Strips", default=12, min=3, soft_max=40, update=_sync,

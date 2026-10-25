@@ -3838,7 +3838,7 @@ def run():
                 float(np.linalg.norm(pts_ - pts_.mean(axis=0), axis=1).mean()))
 
     shapes_, wrong_ = {}, []
-    for style_ in peel.STYLES:
+    for style_ in peel.STYLES[:4]:  # (the balloon and the wax: the 1.22 checks)
         s.peel_enable, s.peel_style = True, style_
         check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the tearing (%s)" % style_)
         moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
@@ -3872,7 +3872,7 @@ def run():
         torn_ += int(marks_.sum())
     lined_ = {mm for mm in bpy.data.materials if mm.get(materials.P_LINING)}
     new_mats_ = {sl.material for ob in target.meshes for sl in ob.material_slots if sl.material is not None}
-    rip_, flip_, yank_, strips_ = (shapes_[k_] for k_ in peel.STYLES)
+    rip_, flip_, yank_, strips_ = (shapes_[k_] for k_ in peel.STYLES[:4])
     parts_ = {"twins and their bodies": all(v_[0] == len([o for o in base.meshes
                                                           if o.data.attributes.get(cover_nodes.ATTR_TEAR)])
                                             and v_[0] > 0 and v_[1] == 2 * v_[0] for v_ in shapes_.values())
@@ -4053,6 +4053,85 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.21 checks")
+    # --- 1.22: the tearing as a balloon popping and as wax melting
+    from mmd_disperse import peel  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "peel_enable", "peel_style", "peel_time")}
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+
+    def shape_of(objs_, f_):
+        """(faces, lowest z, highest z, mean distance from the middle, mean distance across from it, its materials,
+        how glossy at most) of `objs_` at frame `f_` (their own space)."""
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        evs_ = [o_.evaluated_get(deps_).data for o_ in objs_]
+        pts_ = np.array([tuple(v_.co) for me_ in evs_ for v_ in me_.vertices]).reshape(-1, 3)
+        mats_ = {m_.name for me_ in evs_ for m_ in me_.materials if m_ is not None}
+        gloss_ = 0.0
+        for me_ in evs_:
+            attr_ = me_.attributes.get(materials.LINING_GLOSS)
+            if attr_ is not None and len(attr_.data):
+                vals_ = np.zeros(len(attr_.data), dtype=np.float32)
+                attr_.data.foreach_get("value", vals_)
+                gloss_ = max(gloss_, float(vals_.max()))
+        faces_ = sum(len(me_.polygons) for me_ in evs_)
+        if not len(pts_):
+            return faces_, 0.0, 0.0, 0.0, 0.0, mats_, gloss_
+        mid_ = pts_.mean(axis=0)
+        return (faces_, float(pts_[:, 2].min()), float(pts_[:, 2].max()),
+                float(np.linalg.norm(pts_ - mid_, axis=1).mean()),
+                float(np.linalg.norm((pts_ - mid_)[:, :2], axis=1).mean()), mats_, gloss_)
+
+    # the balloon: swelling from three quarters of the tearing time before the moment, glossy; popping at the
+    # moment into scraps flying out and confetti; nothing before or after
+    s.peel_enable, s.peel_style, s.peel_time = True, "INFLATE", 1.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the tearing as a balloon")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    span_ = fps
+    twins_ = peel.objects(s.mask, "TWIN")
+    start_ = moment - cover_nodes.PEEL_POP * span_
+    confetti_ = materials.COVER_MATERIAL + " Confetti"
+    seen_ = {"before": shape_of(twins_, start_ - 2), "start": shape_of(twins_, start_ + 1),
+             "full": shape_of(twins_, moment - 2), "pop": shape_of(twins_, moment + 0.15 * span_),
+             "after": shape_of(twins_, start_ + (cover_nodes.PEEL_POP + 0.85) * span_ + 3)}
+    parts_ = {"nothing before, nothing after": seen_["before"][0] == 0 and seen_["after"][0] == 0
+              and seen_["start"][0] > 0,
+              "swollen (across), glossy": seen_["full"][4] > seen_["start"][4] + 0.02 * height
+              and seen_["full"][6] > 0.9,
+              "popped: scraps flying out, confetti": seen_["pop"][3] > seen_["full"][3]
+              and seen_["pop"][0] > seen_["full"][0] and confetti_ in seen_["pop"][5]
+              and confetti_ not in seen_["full"][5]}
+    check(all(parts_.values()), "inflate and pop: the old outfit swells up before the moment, glossy, and pops at it "
+                                "into scraps and confetti (%s; %s)" % ([k_ for k_, ok_ in parts_.items() if not ok_]
+                                                                       or "all", {k_: v_[:5] + (v_[6],) for k_, v_ in
+                                                                                  seen_.items()}))
+    # the wax: slumping to the floor and spreading after the moment, glossy; gone once the pool has shrunk back
+    s.peel_style = "MELT"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the tearing as wax")
+    twins_ = peel.objects(s.mask, "TWIN")
+    seen_ = {"before": shape_of(twins_, moment - 2), "start": shape_of(twins_, moment + 1),
+             "late": shape_of(twins_, moment + 0.8 * span_), "pool": shape_of(twins_, moment + span_),
+             "after": shape_of(twins_, moment + 1.4 * span_ + 3)}
+    tall_ = seen_["start"][2] - seen_["start"][1]
+    parts_ = {"nothing before, nothing after": seen_["before"][0] == 0 and seen_["after"][0] == 0
+              and seen_["start"][0] > 0,
+              "slumped to the floor": tall_ > 0.0 and seen_["late"][2] - seen_["start"][1] < 0.45 * tall_,
+              "spread into a pool, glossy": seen_["pool"][4] > seen_["start"][4] and seen_["pool"][6] > 0.9}
+    check(all(parts_.values()), "melt away: the old outfit slumps to the floor after the moment and spreads into a "
+                                "glossy pool (%s; %s)" % ([k_ for k_, ok_ in parts_.items() if not ok_] or "all",
+                                                          {k_: v_[:5] + (v_[6],) for k_, v_ in seen_.items()}))
+    check(not draw_panels(bpy.context), "panels draw with the balloon and the wax")
+    s.peel_enable = False
+    check(not peel.objects(s.mask) and bpy.data.materials.get(confetti_) is None
+          and not [mm for mm in bpy.data.materials if mm.get(materials.P_LINING)],
+          "the balloon and the wax off with the tearing: the twins, the confetti and the lining gone")
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.22 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along

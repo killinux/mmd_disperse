@@ -231,12 +231,12 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.21：用 Blender 几何节点给 MMD 模型做换装变身。下面一百六十二段视频都是插件生成的
+    <p>mmd_disperse 1.22：用 Blender 几何节点给 MMD 模型做换装变身。下面一百六十四段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>162</b> 段演示</span>
+      <span><b>164</b> 段演示</span>
       <span><b>64</b> 组效果</span>
-      <span><b>150</b> 个一键预设</span>
+      <span><b>152</b> 个一键预设</span>
       <span><b>23400</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
@@ -295,7 +295,7 @@
 <section id="effects">
   <div class="wrap">
     <h2>效果演示</h2>
-    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.21 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
+    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.22 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
 
     <div class="index">
       <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
@@ -460,6 +460,8 @@
       <a href="#fumble"><img src="../test_output/posters/fumble.jpg" alt="" loading="lazy">变身翻车</a>
       <a href="#layer-by-layer"><img src="../test_output/posters/layer_by_layer.jpg" alt="" loading="lazy">层层撕回</a>
       <a href="#talismans"><img src="../test_output/posters/talismans.jpg" alt="" loading="lazy">符箓燃尽</a>
+      <a href="#melt-away"><img src="../test_output/posters/melt_away.jpg" alt="" loading="lazy">融化滴落</a>
+      <a href="#inflate-pop"><img src="../test_output/posters/inflate_pop.jpg" alt="" loading="lazy">充气爆开</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -4143,6 +4145,48 @@
             <p class="cmd">演示参数：<code>--preset LAYER_BY_LAYER --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
           </div>
         </article>
+
+        <article class="effect variant" id="melt-away">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/melt_away.jpg">
+              <source src="../test_output/demo_v24/tifa_melt_away_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">融化滴落 · 跳舞（有声音）</span><span class="ver">1.22</span><span class="tag">VMD 舞蹈</span><span class="tag">撕开翻落</span><span class="tag">融化滴落</span><span class="tag">瞬间换装</span></div>
+            <h3>融化滴落（新预设）</h3>
+            <p class="lead">关键时刻黑紧身衣像蜡一样化了，往下塌，有几道先淌下来，袖子从手臂上滑落，在她脚下积成一滩发亮的黑水，最后缩回她脚下，里面已经是 Remake 版的蒂法。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">融化滴落</span>：<span class="ui">撕开翻落</span> 勾上，<span class="ui">撕法</span> 选 <span class="v">融化滴落</span>，<span class="ui">撕开用时</span> <span class="v">1.5</span> 秒。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>。旧衣服最好整身包住（全身紧身衣、外套、连衣裙），露得多的衣服撕下来只有窄窄的几条。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset MELT_AWAY --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="inflate-pop">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/inflate_pop.jpg">
+              <source src="../test_output/demo_v24/tifa_inflate_pop_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">充气爆开 · 跳舞（有声音）</span><span class="ver">1.22</span><span class="tag">VMD 舞蹈</span><span class="tag">撕开翻落</span><span class="tag">充气爆开</span><span class="tag">瞬间换装</span><span class="tag">冲击帧</span></div>
+            <h3>充气爆开（新预设）</h3>
+            <p class="lead">关键时刻前一秒多，黑紧身衣像气球一样鼓起来，褶皱没了、变得锃亮，又鼓了两下、抖了抖，正好在关键时刻「啪」地爆开，橡胶碎片四散，彩纸飘下来，里面已经是 Remake 版的蒂法。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">充气爆开</span>：<span class="ui">撕开翻落</span> 勾上，<span class="ui">撕法</span> 选 <span class="v">充气爆开</span>，<span class="ui">撕开用时</span> <span class="v">1.6</span> 秒（前四分之三在关键时刻前鼓起来，剩下的是爆开）。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>。旧衣服最好整身包住（全身紧身衣、外套、连衣裙），露得多的衣服撕下来只有窄窄的几条。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset INFLATE_POP --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
       </div>
     </section>
     <section class="family card" id="fam-fumble">
@@ -4266,7 +4310,7 @@
           <li>幽灵化（脚下飘雾、烛光）</li><li>人偶（线断在拍子上）</li><li>压成平面（皮影 / 画中人）</li>
           <li>镜里先换</li><li>迷幻多重曝光（迷幻配色 / 发光颜色）</li>
           <li>书法大字幕（金色 / 白色 / 墨色；吹散 / 缩成印章；横排 / 竖排）</li><li>汗光</li>
-          <li>撕开翻落（撕开 / 翻落 / 扯掉 / 卷起剥落；衬里颜色；藕断丝连；层层撕回）</li><li>变身翻车</li>
+          <li>撕开翻落（撕开 / 翻落 / 扯掉 / 卷起剥落 / 充气爆开 / 融化滴落；衬里颜色；藕断丝连；层层撕回）</li><li>变身翻车</li>
           <li>符箓燃尽</li></ul>
       </div>
       <div class="opt card">
@@ -4440,6 +4484,8 @@
           <tr><td>变身翻车</td><td>球形扩散</td><td>边缘生长</td><td>碎片飞散</td><td>星光、变身翻车（护臂掉下来、冒烟）、全屏闪白</td></tr>
           <tr><td>层层撕回</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>撕开翻落（撕开，四层，年代色调）</td></tr>
           <tr><td>符箓燃尽</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>符箓燃尽（70 张）</td></tr>
+          <tr><td>融化滴落</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>撕开翻落（融化滴落）</td></tr>
+          <tr><td>充气爆开</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>撕开翻落（充气爆开）、冲击帧</td></tr>
         </tbody>
       </table>
     </div>

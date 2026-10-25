@@ -757,6 +757,15 @@ PRESETS = (
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
           peel_style="RIP", peel_time=0.45, peel_layers=4, peel_layer_gap=0.55, peel_lining=(0.7, 0.04, 0.06),
           glow_color=(1.0, 0.8, 0.5))),
+    ("INFLATE_POP", "Inflate and Pop", "The old outfit swells up like a shiny balloon, jerks twice, trembles and "
+                                       "pops at the big moment into rubber scraps and confetti, the new one under "
+                                       "it (充气爆开)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
+          peel_style="INFLATE", peel_time=1.6, impact_enable=True, glow_color=(1.0, 0.8, 0.6))),
+    ("MELT_AWAY", "Melt Away", "At the big moment the old outfit melts like wax, slumping and dripping to the floor "
+                               "into a shiny pool round her feet, which shrinks back under her (融化滴落)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
+          peel_style="MELT", peel_time=1.5, peel_lining=(0.05, 0.05, 0.06), glow_color=(1.0, 0.7, 0.4))),
     ("TALISMANS", "Talismans", "Paper talismans fly from her fingertip, swirl round her and cover her, their "
                                "vermilion runes glowing; at the moment they all catch fire and burn away, ashes "
                                "rising, and she stands there changed (符箓燃尽)",

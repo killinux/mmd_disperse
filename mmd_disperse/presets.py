@@ -18,7 +18,7 @@ _OFF = dict(
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
     cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
     ghost_enable=False, puppet_enable=False, shadow_enable=False, shadow_style="SHADOW", mirror_enable=False,
-    echo_enable=False, title_enable=False, sweat_enable=False, peel_enable=False,
+    echo_enable=False, title_enable=False, sweat_enable=False, peel_enable=False, peel_threads=0.0, fumble_enable=False,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -740,6 +740,16 @@ PRESETS = (
                                "like a sticker (剥落卷起)",
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
           peel_style="STRIPS", peel_time=1.2, peel_strips=14, glow_color=(1.0, 0.85, 0.6))),
+    ("LOTUS_THREADS", "Lotus Threads", "The old outfit is ripped open and flung off, sticky pink threads stretching "
+                                       "from it back to her until they snap (藕断丝连: Ne Zha's lotus-root body)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
+          peel_style="RIP", peel_time=0.9, peel_threads=1.5, peel_thread_color=(1.0, 0.62, 0.74),
+          peel_lining=(0.95, 0.75, 0.8), glow_color=(1.0, 0.7, 0.8))),
+    ("FUMBLE", "Fumble", "She changes in a flash of stars and strikes a pose; then her arm guard (or belt, pads ...) "
+                         "drops off, bounces on the floor and goes in a puff of smoke (变身翻车)",
+     dict(_OFF, path="SPHERE", exit_style="FRAGMENTS", frag_glow=True, particles="STAR", particle_count=300,
+          finale=True, finale_white=0.4, fumble_enable=True, fumble_delay=0.8, fumble_smoke=True,
+          particle_color=(1.0, 0.9, 0.6), glow_color=(1.0, 0.85, 0.5))),
     ("DREAM_WORLD", "Dream World", "She blinks and the stage is a dream: a violet night, a great red moon, gouged and "
                                    "twisting, over a black mirror; she changes there and blinks awake on the stage in "
                                    "the new outfit (梦境领域, Kamen Rider Zeztz)",
@@ -759,7 +769,7 @@ WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPAR
                "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE", "COLOR_TUG", "ERAS",
                "POWER_UP", "DIMENSION_BEATS", "SLOT_MACHINE", "TOTEM", "MARIONETTE", "SHADOW_PLAY", "PAINTING", "MIRROR_FIRST", "POLAROID",
                "WORLD_FOLD", "MULTI_EXPOSURE", "DREAM_WORLD", "BIG_TITLE", "AB_SIDE", "TOUCH_CHANGE",
-               "CHEST_BEAT"}
+               "CHEST_BEAT", "FUMBLE"}
 REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
 
 

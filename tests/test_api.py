@@ -3900,6 +3900,93 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.19 checks")
+    # --- 1.20: sticky threads on the tearing; the fumble (loose parts of the new outfit falling off)
+    import fnmatch  # noqa: E402
+
+    from mmd_disperse import fumble, model as mdl, peel  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "peel_enable", "peel_style", "peel_time", "peel_threads", "fumble_enable",
+        "fumble_parts", "fumble_delay", "fumble_smoke")}
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+
+    def faces_of(objs_, f_):
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        return sum(len(o_.evaluated_get(deps_).data.polygons) for o_ in objs_)
+
+    # the threads: more faces while the torn cloth flies off (the threads), their material; gone when off
+    s.peel_enable, s.peel_style, s.peel_time, s.peel_threads = True, "RIP", 0.5, 0.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the tearing, no threads")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    at_ = moment + 0.25 * s.peel_time * fps
+    bare_ = faces_of(peel.objects(s.mask, "TWIN"), at_)
+    s.peel_threads = 3.0
+    strung_ = faces_of(peel.objects(s.mask, "TWIN"), at_)
+    thread_ = bpy.data.materials.get(materials.THREAD_MATERIAL)
+    check(strung_ > bare_ > 0 and thread_ is not None and thread_.users > 0,
+          "sticky threads: more faces on the torn cloth as it flies off (%d -> %d), their material" % (bare_, strung_))
+    s.peel_threads = 0.0
+    s.peel_enable = False
+    check(bpy.data.materials.get(materials.THREAD_MATERIAL) is None and not peel.objects(s.mask),
+          "sticky threads off with the tearing: their material gone")
+    # the fumble: the new outfit's smallest part (by faces) above her knees comes off half a second after the
+    # moment, falls, lands
+    sizes_ = {}
+    for ob_ in target.meshes:
+        index_ = np.zeros(len(ob_.data.polygons), dtype=np.int32)
+        ob_.data.polygons.foreach_get("material_index", index_)
+        centres_ = np.zeros(len(ob_.data.polygons) * 3, dtype=np.float32)
+        ob_.data.polygons.foreach_get("center", centres_)
+        zs_ = centres_.reshape(-1, 3)[:, 2]
+        knee_ = float(zs_.min()) + 0.35 * float(np.ptp(zs_)) if len(zs_) else 0.0
+        counts_ = np.bincount(index_, minlength=len(ob_.material_slots))
+        locks_ = mdl.split_patterns(mdl.DEFAULT_LOCK_PATTERNS) + mdl.split_patterns(mdl.DEFAULT_KEEP)
+        for k_, slot_ in enumerate(ob_.material_slots):
+            key_ = mdl.material_key(slot_.material) if slot_.material is not None else ""
+            if (key_ and counts_[k_] > 50 and not any(fnmatch.fnmatchcase(key_, p_) for p_ in locks_)
+                    and float(zs_[index_ == k_].mean()) > knee_):
+                sizes_[key_] = sizes_.get(key_, 0) + int(counts_[k_])
+    part_ = min(sizes_, key=sizes_.get) if sizes_ else ""
+    s.fumble_enable, s.fumble_parts, s.fumble_delay, s.fumble_smoke = True, part_.replace("*", "?"), 0.5, True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the fumble (%s)" % part_)
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    off_ = moment + 0.5 * fps
+    twins_ = fumble.objects(s.mask, "TWIN")
+    hidden_ = [o_ for o_ in target.meshes if o_.modifiers.get(fumble.HIDE) is not None]
+
+    def lowest(f_):
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        zs_ = [v_.co.z for t_ in twins_ for v_ in t_.evaluated_get(deps_).data.vertices]
+        return min(zs_) if zs_ else None
+
+    seen_ = {"before": (faces_of(twins_, off_ - 2), faces_of(hidden_, off_ - 2)),
+             "after": (faces_of(twins_, off_ + 2), faces_of(hidden_, off_ + 2)),
+             "end": faces_of(twins_, off_ + 4.0 * fps)}
+    falling_ = (lowest(off_ + 1), lowest(off_ + 0.15 * fps))
+    real_arm_ = resolve(target_root).armature
+    parts_ = {"objects": len(twins_) >= 1 and len(fumble.objects(s.mask, "STILL")) == 1 and bool(hidden_),
+              "nothing before, then it comes off her": seen_["before"][0] == 0 and seen_["after"][0] > 0
+              and seen_["after"][1] < seen_["before"][1],
+              "falling": None not in falling_ and falling_[1] < falling_[0],
+              "gone at the end": seen_["end"] <= 6 * 80 * 20,
+              "her armature still hers": real_arm_ is not None and real_arm_.get(fumble.P_FUMBLE) is None}
+    check(all(parts_.values()), "fumble: a part of the new outfit comes off after the moment, falls and goes "
+                                "(%s; %s %s)" % ([k_ for k_, ok_ in parts_.items() if not ok_] or "all", seen_,
+                                                 falling_))
+    check(not draw_panels(bpy.context), "panels draw with the fumble")
+    s.fumble_enable = False
+    check(not fumble.objects(s.mask) and not [o_ for o_ in target.meshes if o_.modifiers.get(fumble.HIDE)]
+          and not [o_ for o_ in target.meshes if o_.data.attributes.get(cover_nodes.ATTR_LOOSE) is not None]
+          and bpy.data.node_groups.get(cover_nodes.FUMBLE_GROUP) is None,
+          "fumble off: the twins, the still armature, the hiding, the marks and the groups gone")
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.20 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along

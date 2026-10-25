@@ -712,6 +712,13 @@ _ZH = {
     ("*", "Kabuki Flip"): "ぶっ返り",
     ("*", "Kabuki Yank"): "引抜き",
     ("*", "Peel Away"): "剥落卷起",
+    ("*", "Sticky Threads"): "藕断丝连",
+    ("*", "Thread Colour"): "丝的颜色",
+    ("*", "Lotus Threads"): "藕断丝连",
+    ("*", "Fumble"): "变身翻车",
+    ("*", "Loose Parts"): "会掉的部件",
+    ("*", "Fumble Delay"): "翻车延迟",
+    ("*", "Puff of Smoke"): "冒一团烟",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

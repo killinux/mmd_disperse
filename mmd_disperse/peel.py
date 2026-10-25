@@ -57,6 +57,9 @@ def remove(mask, models=()):
         ng = bpy.data.node_groups.get(PEEL_GROUP)
         if ng is not None and ng.users == 0:
             bpy.data.node_groups.remove(ng)
+        mat = bpy.data.materials.get(materials.THREAD_MATERIAL)
+        if mat is not None and mat.users == 0:
+            bpy.data.materials.remove(mat)
         for mat in [m for m in bpy.data.materials if m.get(materials.P_LINING)]:
             materials.remove_lining(mat)
 
@@ -243,9 +246,12 @@ def sync(settings, mask, models, moment):
         torn |= {s.material for s, on in zip(ob.material_slots, _torn_slots(ob, patterns)) if on}
         centre, size, shoulder = measure(ob, old.armature)
         twin[materials.LINING_SCALE] = 40.0 / max(size.z, 1e-3)
+        thread = materials.ensure_thread_material(tuple(settings.peel_thread_color)) \
+            if settings.peel_threads > 0.0 else None
         for name, value in (("Style", STYLES.index(settings.peel_style)), ("Centre", tuple(centre)),
                             ("Size", tuple(size)), ("Shoulder", shoulder), ("Strips", int(settings.peel_strips)),
-                            ("Hold", settings.peel_hold / max(settings.peel_time, 0.01)), ("Seed", 7)):
+                            ("Hold", settings.peel_hold / max(settings.peel_time, 0.01)), ("Seed", 7),
+                            ("Threads", float(settings.peel_threads)), ("Thread Material", thread)):
             if name in ids:
                 mod[ids[name]] = value
         path = '["%s"]' % ids["Time"]

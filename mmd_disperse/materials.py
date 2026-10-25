@@ -24,6 +24,7 @@ BAT_MATERIAL = "MMD Disperse Bat"
 INK_MATERIAL = "MMD Disperse Ink"
 RING_MATERIAL = "MMD Disperse Ring Glow"
 SMOKE_MATERIAL = "MMD Disperse Smoke"
+PUFF_MATERIAL = "MMD Disperse Puff"  # 1.20, fumble.py
 DUST_MATERIAL = "MMD Disperse Dust"  # the shockwave's dust: the smoke's puffs in a dusty grey
 OUTLINE_MATERIAL = "MMD Disperse Outline"
 SCREEN_MATERIAL = "MMD Disperse Screen"
@@ -625,6 +626,23 @@ def _plain_material(name, color, roughness, coat=0.0):
 
 
 PAPER_MATERIAL = "MMD Disperse Paper"
+THREAD_MATERIAL = "MMD Disperse Thread"  # 1.20 (peel.py): the sticky threads of the torn cloth
+
+
+def ensure_thread_material(colour):
+    """The sticky threads (藕断丝连, peel.py): a translucent, glossy lotus-root paste of `colour`, glowing a little."""
+    mat = _plain_material(THREAD_MATERIAL, colour, 0.25)
+    bsdf = mat.node_tree.nodes.get("MMDD_BSDF")
+    if bsdf is not None:
+        _set_input(bsdf, ("Base Color",), tuple(colour[:3]) + (1.0,))
+        _set_input(bsdf, ("Emission Color", "Emission"), tuple(colour[:3]) + (1.0,))
+        _set_input(bsdf, ("Emission Strength",), 0.15)
+        _set_input(bsdf, ("Alpha",), 0.7)
+    _blended(mat)
+    _no_shadow(mat)
+    mat.diffuse_color = tuple(colour[:3]) + (0.7,)
+    return mat
+
 
 
 def ensure_paper_material():
@@ -1578,6 +1596,12 @@ def ensure_smoke_material():
     """Smoke puff: soft, bright white cotton balls that fade as the smoke clears (ATTR_SMOKE on the instances, or on
     the mesh if they were realized)."""
     return _puffs(SMOKE_MATERIAL, (0.8, 0.81, 0.84, 1.0), (1.0, 1.0, 1.0, 1.0), 0.12)
+
+
+def ensure_puff_material():
+    """The fumble's puff (fumble.py): the smoke's white, soft and cloudy like the dust (thinning out towards its
+    outline and in patches), clearing as ATTR_SMOKE says."""
+    return _puffs(PUFF_MATERIAL, (0.86, 0.87, 0.9, 1.0), (1.0, 1.0, 1.0, 1.0), 0.1, soft=True)
 
 
 def ensure_dust_material():

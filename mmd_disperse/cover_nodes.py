@@ -24,8 +24,8 @@ import math
 import bpy
 
 from . import cover
-from .node_groups import (ATTR_AXIS, ATTR_DOMAIN, ATTR_GROUND, ATTR_REST, _add_socket, _Builder, _enabled,
-                          _new_group, VERSION)
+from .node_groups import (ATTR_AXIS, ATTR_DOMAIN, ATTR_GROUND, ATTR_REST, ATTR_SMOKE, _add_socket, _Builder,
+                          _enabled, _new_group, VERSION)
 
 SHATTER_GROUP = "MMDDisperse Cover Shatter"
 RIPPLE_GROUP = "MMDDisperse Cover Ripple"
@@ -61,9 +61,12 @@ ECHO_GROUP = "MMDDisperse Echo"
 ECHO_NUMBER = "mmdd_echo"  # on the multiple exposure's copies (instances): which copy, k / Count ...
 ECHO_FADE = "mmdd_fade"  # ... and how much it shows
 PEEL_GROUP = "MMDDisperse Peel"
+FUMBLE_GROUP = "MMDDisperse Fumble"
+FUMBLE_HIDE_GROUP = "MMDDisperse Fumble Hide"
+ATTR_LOOSE = "mmdd_loose"  # on the new outfit's meshes (a face attribute): 1 where fumble.py lets it fall off
 ATTR_TEAR = "mmdd_tear"  # on the old outfit's meshes (a face attribute): 1 where peel.py tears it off
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 15  # bumped when one of these groups changes
+REVISION = 16  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -1896,7 +1899,9 @@ def build_peel_group():
     3 STRIPS: it comes off in Strips strips round her, each curling down from the top in its turn and gone at the
       bottom.
     The mesh is cut between the pieces (told apart face by face), so no face stretches across two.
-    It lies a hair out along its normals (over the new outfit)."""
+    It lies a hair out along its normals (over the new outfit). With Threads (1 about one point in 250) sticky threads
+    run from some points of the torn cloth back to where they were on her (藕断丝连: Ne Zha's lotus-root body),
+    sagging, thinner as they stretch and gone past a quarter of her height, in the Thread Material."""
     ng, b = _group(PEEL_GROUP, (
         ("Time", "NodeSocketFloat", -1.0),
         ("Style", "NodeSocketInt", 0),
@@ -1908,6 +1913,8 @@ def build_peel_group():
         ("Strips", "NodeSocketInt", 12),
         ("Hold", "NodeSocketFloat", 1.0),
         ("Seed", "NodeSocketInt", 0),
+        ("Threads", "NodeSocketFloat", 0.0),
+        ("Thread Material", "NodeSocketMaterial"),
     ))
     gi = b.node("NodeGroupInput", -3400, 0)
     go = b.node("NodeGroupOutput", 3400, 0)
@@ -2163,16 +2170,78 @@ def build_peel_group():
                    b.map_range(t, 0.1, 0.3, x=1600, y=y0 + 850, smooth=True), 1800, y0 + 500)
     strips = b.switch("VECTOR", loose, strips, burst, x=2000, y=y0)
 
-    # the style's positions (only the one picked is worked out), and nothing outside the tearing
-    def picked(positions, x, y):
-        return b.set_position(cloth, position=positions, x=x, y=y)
+    # the style's positions (only the one picked is worked out), and nothing outside the tearing; each point keeps
+    # where it was on her (for the threads)
+    def picked(positions, x, y, base=None):
+        kept = b.store(cloth if base is None else base, "mmdd_from", pushed, "FLOAT_VECTOR", x=x - 200, y=y)
+        return b.set_position(kept, position=positions, x=x, y=y)
 
     shaped = picked(rip, 2000, 600)
     for k, positions, yy in ((1, flip, -2800), (2, yank, -5000), (3, strips, -7000)):
-        moved = picked(positions, 2000, yy) if k != 3 else b.set_position(strip_base, position=positions, x=2000,
-                                                                           y=yy)
+        moved = picked(positions, 2000, yy, strip_base if k == 3 else None)
         shaped = b.switch("GEOMETRY", b.compare("EQUAL", style, float(k), x=2000, y=yy + 200), shaped, moved,
                           x=2200, y=yy)
+    # --- the threads: from a few of its points (picked by where they are at rest) back to where they were on her
+    tx, ty = 2600, -9000
+    pick, _pc = b.white_noise(b.vmath("SCALE", rest, scale=b.math("DIVIDE", 97.0, h, x=tx - 600, y=ty - 200),
+                                      x=tx - 400, y=ty - 200), x=tx - 200, y=ty - 200)
+    m2p = b.node("GeometryNodeMeshToPoints", tx, ty)
+    b.feed(m2p.inputs["Mesh"], shaped)
+    b.feed(m2p.inputs["Selection"], b.compare("LESS_THAN", pick, b.math("MULTIPLY", gi.outputs["Threads"], 0.004,
+                                                                        x=tx - 200, y=ty - 400), x=tx, y=ty - 300))
+    came_from = b.named_attribute("mmdd_from", "FLOAT_VECTOR", x=tx, y=ty - 500)[0]
+    way = b.vmath("SUBTRACT", b.node("GeometryNodeInputPosition", tx, ty - 650).outputs[0], came_from, x=tx + 200,
+                  y=ty - 550)
+    ends = b.set_position(b.store(m2p.outputs["Points"], "mmdd_way", way, "FLOAT_VECTOR", x=tx + 400, y=ty),
+                          position=came_from, x=tx + 600, y=ty)
+    line = b.node("GeometryNodeCurvePrimitiveLine", tx + 400, ty - 300)
+    line.inputs["End"].default_value = (0.0, 0.0, 1.0)
+    dense = b.node("GeometryNodeResampleCurve", tx + 600, ty - 300)
+    b.feed(dense.inputs["Curve"], line.outputs["Curve"])
+    dense.inputs["Count"].default_value = 8
+    stored_way = b.named_attribute("mmdd_way", "FLOAT_VECTOR", x=tx + 600, y=ty - 600)[0]
+    span = b.vmath("LENGTH", stored_way, x=tx + 800, y=ty - 600)
+    align = b.node("FunctionNodeAlignEulerToVector", tx + 800, ty - 450, axis="Z")
+    b.feed(align.inputs["Vector"], stored_way)
+    strands = b.node("GeometryNodeInstanceOnPoints", tx + 1000, ty)
+    b.feed(strands.inputs["Points"], ends)
+    b.feed(strands.inputs["Instance"], dense.outputs["Curve"])
+    b.feed(strands.inputs["Rotation"], align.outputs[0])
+    b.feed(strands.inputs["Scale"], b.combine(1.0, 1.0, b.math("MAXIMUM", span, 1e-5, x=tx + 1000, y=ty - 600),
+                                             x=tx + 1000, y=ty - 450))
+    real = b.node("GeometryNodeRealizeInstances", tx + 1200, ty)
+    b.feed(real.inputs["Geometry"], strands.outputs["Instances"])
+    u = b.node("GeometryNodeSplineParameter", tx + 1200, ty - 300).outputs["Factor"]
+    reach = b.math("MULTIPLY", h, 0.25, x=tx + 1200, y=ty - 450)
+    length = b.vmath("LENGTH", stored_way, x=tx + 1200, y=ty - 600)
+    arc = b.math("SINE", b.math("MULTIPLY", u, 3.1416, x=tx + 1400, y=ty - 300), x=tx + 1600, y=ty - 300)
+    sagged = b.set_position(real.outputs["Geometry"], offset=b.combine(0.0, 0.0, b.math(
+        "MULTIPLY", b.math("MULTIPLY", arc, length, x=tx + 1600, y=ty - 450), -0.12, x=tx + 1800, y=ty - 450),
+        x=tx + 2000, y=ty - 400), x=tx + 2000, y=ty)
+    # thinner in the middle and the further it stretches; gone past the reach
+    thick = b.math("MULTIPLY", b.math("MULTIPLY", h, 0.0026, x=tx + 1800, y=ty - 700), b.math(
+        "SUBTRACT", 1.0, b.map_range(length, b.math("MULTIPLY", reach, 0.5, x=tx + 1600, y=ty - 850), reach,
+                                     x=tx + 1800, y=ty - 850, smooth=True), x=tx + 2000, y=ty - 850),
+        x=tx + 2200, y=ty - 750)
+    thick = b.math("MULTIPLY", thick, b.math("MULTIPLY_ADD", b.math("ABSOLUTE", b.math(
+        "MULTIPLY_ADD", u, 2.0, -1.0, x=tx + 1800, y=ty - 1000), x=tx + 2000, y=ty - 1000), 0.7, 0.3, x=tx + 2200,
+        y=ty - 1000), x=tx + 2400, y=ty - 850)
+    radius = b.node("GeometryNodeSetCurveRadius", tx + 2400, ty)
+    b.feed(radius.inputs["Curve"], sagged)
+    b.feed(radius.inputs["Radius"], thick)
+    strung = b.delete(radius.outputs["Curve"], b.compare("GREATER_THAN", length, reach, x=tx + 2400, y=ty - 1200),
+                      "CURVE", x=tx + 2600, y=ty)
+    profile = b.node("GeometryNodeCurvePrimitiveCircle", tx + 2600, ty - 300)
+    profile.inputs["Resolution"].default_value = 5
+    profile.inputs["Radius"].default_value = 1.0
+    tube = b.curve_to_mesh(strung, profile.outputs["Curve"], x=tx + 2800, y=ty)
+    dressed = b.node("GeometryNodeSetMaterial", tx + 3000, ty)
+    b.feed(dressed.inputs["Geometry"], tube)
+    b.feed(dressed.inputs["Material"], gi.outputs["Thread Material"])
+    with_threads = b.join([shaped, dressed.outputs["Geometry"]], x=tx + 3200, y=ty)
+    shaped = b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Threads"], 0.0, x=tx + 3200, y=ty - 300),
+                      shaped, with_threads, x=tx + 3400, y=ty)
+
     end = b.switch("FLOAT", b.compare("EQUAL", style, 1.0, x=2200, y=-800), 1.0,
                    b.math("ADD", gi.outputs["Hold"], 1.5, x=2200, y=-950), x=2400, y=-800)
     end = b.switch("FLOAT", b.compare("EQUAL", style, 3.0, x=2400, y=-1100), end, 1.15, x=2600, y=-1000)
@@ -2186,3 +2255,154 @@ def ensure_peel_group():
     if not _current(PEEL_GROUP):
         build_peel_group()
     return bpy.data.node_groups[PEEL_GROUP]
+
+
+# --------------------------------------------------------------------------- 1.20: the fumble (fumble.py)
+
+def build_fumble_hide_group():
+    """The new outfit's loose parts (ATTR_LOOSE, a face attribute fumble.py writes) gone once Time reaches 0 (they
+    fall off as fumble.py's twins)."""
+    ng, b = _group(FUMBLE_HIDE_GROUP, (
+        ("Time", "NodeSocketFloat", -1.0),
+    ))
+    gi = b.node("NodeGroupInput", -600, 0)
+    go = b.node("NodeGroupOutput", 400, 0)
+    loose = b.named_attribute(ATTR_LOOSE, "BOOLEAN", x=-600, y=-200)[0]
+    gone = b.boolean("AND", loose, b.compare("GREATER_EQUAL", gi.outputs["Time"], 0.0, x=-400, y=-300), x=-200,
+                     y=-200)
+    b.feed(go.inputs["Geometry"], b.delete(gi.outputs["Geometry"], gone, "FACE", x=0, y=0))
+    return ng
+
+
+def ensure_fumble_hide_group():
+    if not _current(FUMBLE_HIDE_GROUP):
+        build_fumble_hide_group()
+    return bpy.data.node_groups[FUMBLE_HIDE_GROUP]
+
+
+def build_fumble_group():
+    """The fumble (fumble.py), on a twin of a mesh of the new outfit posed by a still copy of her armature (as she is
+    the moment they fall off): only its loose parts (ATTR_LOOSE) are kept, each piece (a mesh island) falling from
+    Time 0 (seconds), tumbling and drifting a little, landing on the Floor (z), bouncing twice and lying there; a
+    little after it lands it goes in a puff of smoke (Smoke, for the bigger pieces: puffs of the Puff Material round
+    where it lies, growing and clearing: ATTR_SMOKE). Height is her height (the fall is at the speed of a real one: a
+    height is 1.6 metres). (What it moves by is kept on the points before they move: after it, their position is
+    another.)"""
+    ng, b = _group(FUMBLE_GROUP, (
+        ("Time", "NodeSocketFloat", -1.0),
+        ("Floor", "NodeSocketFloat", 0.0),
+        ("Height", "NodeSocketFloat", 1.6),
+        ("Seed", "NodeSocketInt", 0),
+        ("Smoke", "NodeSocketBool", True),
+        ("Puff Material", "NodeSocketMaterial"),
+    ))
+    gi = b.node("NodeGroupInput", -3000, 0)
+    go = b.node("NodeGroupOutput", 3000, 0)
+    t = gi.outputs["Time"]
+    h = gi.outputs["Height"]
+    loose = b.named_attribute(ATTR_LOOSE, "BOOLEAN", x=-3000, y=300)[0]
+    parts = b.delete(gi.outputs["Geometry"], b.boolean("NOT", loose, x=-2800, y=300), "FACE", x=-2800, y=0)
+    island = b.node("GeometryNodeInputMeshIsland", -3000, -600).outputs["Island Index"]
+    position = b.node("GeometryNodeInputPosition", -3000, -400).outputs[0]
+    total = b.accumulate(position, island, data_type="FLOAT_VECTOR", x=-2800, y=-400)
+    count = b.accumulate(1.0, island, x=-2800, y=-600)
+    middle = b.vmath("SCALE", total, scale=b.math("DIVIDE", 1.0, b.math("MAXIMUM", count, 1.0, x=-2600, y=-600),
+                                                  x=-2400, y=-600), x=-2400, y=-400)
+    off = b.vmath("SUBTRACT", position, middle, x=-2200, y=-400)
+    size = b.math("SQRT", b.math("DIVIDE", b.accumulate(b.vmath("DOT_PRODUCT", off, off, x=-2200, y=-700), island,
+                                                        x=-2000, y=-700),
+                                 b.math("MAXIMUM", count, 1.0, x=-2000, y=-850), x=-1800, y=-700), x=-1600, y=-700)
+    _mx, _my, mz = b.split_xyz(middle, x=-2200, y=-1000)
+    drop = b.math("MAXIMUM", b.math("SUBTRACT", b.math("SUBTRACT", mz, gi.outputs["Floor"], x=-2000, y=-1000), size,
+                                    x=-1800, y=-1000), 0.0, x=-1600, y=-1000)
+    g = b.math("MULTIPLY", h, 9.81 / 1.6, x=-1800, y=-1200)  # (a fall as fast as a real one)
+    hit = b.math("SQRT", b.math("DIVIDE", b.math("MULTIPLY", drop, 2.0, x=-1600, y=-1200), b.math(
+        "MAXIMUM", g, 1e-6, x=-1600, y=-1350), x=-1400, y=-1250), x=-1200, y=-1250)  # seconds to the floor
+    fall_t = b.math("MINIMUM", b.math("MAXIMUM", t, 0.0, x=-1400, y=-1450), hit, x=-1200, y=-1450)
+    fallen = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", fall_t, fall_t, x=-1000, y=-1450), g, x=-800,
+                                       y=-1450), 0.5, x=-600, y=-1450)
+    since = b.math("MAXIMUM", b.math("SUBTRACT", t, hit, x=-1000, y=-1650), 0.0, x=-800, y=-1650)  # after landing
+    bounce = b.math("MULTIPLY", b.math("MULTIPLY", b.math("ABSOLUTE", b.math("SINE", b.math(
+        "MULTIPLY", since, 11.0, x=-800, y=-1800), x=-600, y=-1800), x=-400, y=-1800), b.math(
+        "EXPONENT", b.math("MULTIPLY", since, -5.0, x=-600, y=-1950), x=-400, y=-1950), x=-200, y=-1850),
+        b.math("MULTIPLY", h, 0.05, x=-200, y=-2000), x=0, y=-1900)
+    rnd, rnd_c = b.white_noise(b.combine(b.math("ADD", island, 0.5, x=-1600, y=-2200), gi.outputs["Seed"], 0.71,
+                                         x=-1400, y=-2200), x=-1200, y=-2200)
+    rx_, ry_, rz_ = b.split_xyz(rnd_c, x=-1000, y=-2300)
+    axis = b.vmath("NORMALIZE", b.combine(b.math("SUBTRACT", rx_, 0.5, x=-800, y=-2300),
+                                          b.math("SUBTRACT", ry_, 0.5, x=-800, y=-2450), 0.15, x=-600, y=-2350),
+                   x=-400, y=-2350)
+    flight = b.math("DIVIDE", fall_t, b.math("MAXIMUM", hit, 1e-3, x=-800, y=-2600), x=-600, y=-2600)
+    spin = b.math("MULTIPLY", b.math("MULTIPLY", flight, b.math("MULTIPLY_ADD", rnd, 4.0, 2.5, x=-600, y=-2750),
+                                     x=-400, y=-2700), 3.1416, x=-200, y=-2700)
+    drift = b.vmath("SCALE", b.combine(b.math("SUBTRACT", rx_, 0.5, x=-600, y=-2900),
+                                       b.math("SUBTRACT", rz_, 0.5, x=-600, y=-3050), 0.0, x=-400, y=-2950),
+                    scale=b.math("MULTIPLY", flight, b.math("MULTIPLY", h, 0.12, x=-400, y=-3150), x=-200, y=-3100),
+                    x=0, y=-3000)
+    lowered = b.vmath("ADD", b.vmath("ADD", middle, drift, x=200, y=-2900),
+                      b.combine(0.0, 0.0, b.math("ADD", b.math("MULTIPLY", fallen, -1.0, x=0, y=-1450), bounce,
+                                                 x=200, y=-1600), x=400, y=-1600), x=600, y=-2000)
+    turned = b.rotate(off, (0.0, 0.0, 0.0), axis, spin, x=400, y=-2400)
+    # a little after it lands: gone in a puff (shrunk away quickly)
+    poof = b.math("ADD", hit, 0.35, x=200, y=-3300)
+    shrink = b.map_range(t, poof, b.math("ADD", poof, 0.12, x=400, y=-3400), x=600, y=-3300, smooth=True)
+    placed = b.vmath("ADD", lowered, b.vmath("SCALE", turned, scale=b.math("SUBTRACT", 1.0, shrink, x=800, y=-3300),
+                                             x=1000, y=-2400), x=1200, y=-2200)
+    kept = b.store(b.store(b.store(parts, "mmdd_land", lowered, "FLOAT_VECTOR", x=1000, y=-3500), "mmdd_poof", poof,
+                           "FLOAT", x=1100, y=-3500), "mmdd_gone", shrink, "FLOAT", x=1200, y=-3500)
+    moved = b.set_position(kept, position=placed, x=1400, y=0)
+    moved = b.delete(moved, b.compare("GREATER_THAN", b.named_attribute("mmdd_gone", "FLOAT", x=1400, y=-450)[0],
+                                      0.999, x=1400, y=-300), "FACE", x=1600, y=0)
+    # the puffs: round the first point of each bigger piece, where the piece lies, as it goes
+    first = b.boolean("AND", b.compare("EQUAL", b.accumulate(1.0, island, x=1000, y=-3700, output="Leading"), 1.0,
+                                       x=1200, y=-3700),
+                      b.compare("GREATER_THAN", size, b.math("MULTIPLY", h, 0.03, x=1000, y=-3850), x=1200, y=-3850),
+                      x=1300, y=-3750)
+    seeds = b.node("GeometryNodeMeshToPoints", 1400, -3600)
+    b.feed(seeds.inputs["Mesh"], kept)
+    b.feed(seeds.inputs["Selection"], first)
+    landed = b.set_position(seeds.outputs["Points"], position=b.named_attribute("mmdd_land", "FLOAT_VECTOR",
+                                                                                x=1400, y=-3850)[0],
+                            x=1600, y=-3600)
+    ball = b.node("GeometryNodeMeshIcoSphere", 1600, -3900)
+    ball.inputs["Radius"].default_value = 1.0
+    ball.inputs["Subdivisions"].default_value = 1
+    cloud = b.node("GeometryNodeDistributePointsOnFaces", 1800, -3900)  # (a few puff centres on a unit ball)
+    b.feed(cloud.inputs["Mesh"], ball.outputs["Mesh"])
+    cloud.inputs["Density"].default_value = 0.6
+    puff_ball = b.node("GeometryNodeMeshIcoSphere", 1800, -4150)
+    puff_ball.inputs["Radius"].default_value = 0.55
+    puff_ball.inputs["Subdivisions"].default_value = 2
+    puffs = b.node("GeometryNodeInstanceOnPoints", 2000, -3900)
+    b.feed(puffs.inputs["Points"], cloud.outputs["Points"])
+    b.feed(puffs.inputs["Instance"], puff_ball.outputs["Mesh"])
+    one_cloud = b.node("GeometryNodeRealizeInstances", 2200, -3900)
+    b.feed(one_cloud.inputs["Geometry"], puffs.outputs["Instances"])
+    since_poof = b.math("SUBTRACT", t, b.named_attribute("mmdd_poof", "FLOAT", x=1600, y=-4300)[0], x=1800,
+                        y=-4300)
+    grow = b.map_range(since_poof, 0.0, 0.5, 0.0, 1.0, x=2000, y=-4300, smooth=True)
+    clouds = b.node("GeometryNodeInstanceOnPoints", 2400, -3700)
+    b.feed(clouds.inputs["Points"], landed)
+    b.feed(clouds.inputs["Instance"], one_cloud.outputs["Geometry"])
+    scale = b.math("MULTIPLY", b.math("MULTIPLY_ADD", grow, 0.06, 0.025, x=2200, y=-4300), h, x=2400, y=-4300)
+    b.feed(clouds.inputs["Scale"], b.combine(scale, scale, scale, x=2400, y=-4450))
+    shown_puff = b.compare("GREATER_THAN", since_poof, 0.0, x=2200, y=-4500)
+    b.feed(clouds.inputs["Selection"], b.boolean("AND", shown_puff, b.compare("LESS_THAN", since_poof, 0.6, x=2200,
+                                                                               y=-4650), x=2400, y=-4600))
+    smoke = b.store(clouds.outputs["Instances"], ATTR_SMOKE, grow, "FLOAT", "INSTANCE", x=2600, y=-3700)
+    smoke_mesh = b.node("GeometryNodeRealizeInstances", 2800, -3700)
+    b.feed(smoke_mesh.inputs["Geometry"], smoke)
+    dressed = b.node("GeometryNodeSetMaterial", 3000, -3700)
+    b.feed(dressed.inputs["Geometry"], smoke_mesh.outputs["Geometry"])
+    b.feed(dressed.inputs["Material"], gi.outputs["Puff Material"])
+    with_smoke = b.join([moved, dressed.outputs["Geometry"]], x=2600, y=0)
+    out = b.switch("GEOMETRY", gi.outputs["Smoke"], moved, with_smoke, x=2800, y=0)
+    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", b.compare("GREATER_EQUAL", t, 0.0, x=2600, y=-300), None, out,
+                                           x=2900, y=0))
+    return ng
+
+
+def ensure_fumble_group():
+    if not _current(FUMBLE_GROUP):
+        build_fumble_group()
+    return bpy.data.node_groups[FUMBLE_GROUP]

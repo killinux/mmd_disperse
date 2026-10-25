@@ -24,6 +24,7 @@ DEFAULT_LOCK_PATTERNS = (
     "*mouth*;*口*;*teeth*;*歯*;*tongue*;*舌*;*inner*"
 )
 DEFAULT_KEEP = "body;*skin*;*肌*;*体*;gen;-*"  # 1.19, peel.py: not torn (skin; this model pack's hidden variants)
+DEFAULT_LOOSE = "*guard*;*armor*;*armour*;*pad*;*belt*;*buckle*;*pouch*;*earring*;*ガード*;*アーマー*;*ベルト*"  # 1.20
 
 
 class Model:
@@ -84,7 +85,7 @@ def find_armature(ob):
 # its bones): these properties mark them, they are not the model's meshes.
 HELPERS = ("mmd_disperse_picture_front", "mmd_disperse_glint", "mmd_disperse_finish", "mmd_disperse_light",
            "mmd_disperse_mist", "mmd_disperse_replay", "mmd_disperse_shell", "mmd_disperse_spirit",
-           "mmd_disperse_peel")  # (1.19: the torn cloth's twins render, beside her armature)
+           "mmd_disperse_peel", "mmd_disperse_fumble")  # (the torn cloth's twins and the fumble's render)
 
 
 def resolve(ob):

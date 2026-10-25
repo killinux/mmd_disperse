@@ -11,7 +11,7 @@ from bpy.props import (
 )
 
 from . import effect
-from .model import DEFAULT_KEEP, DEFAULT_LOCK_PATTERNS
+from .model import DEFAULT_KEEP, DEFAULT_LOCK_PATTERNS, DEFAULT_LOOSE
 
 
 def _sync(self, _context):
@@ -730,6 +730,18 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                  description="Seconds before the big moment the mirror stands up beside her")
     mirror_first: FloatProperty(name="Reflection Ahead", default=0.9, min=0.0, soft_max=4.0, update=_sync,
                                 description="Seconds before the big moment the reflection changes")
+    # --- 1.20: the fumble (fumble.py)
+    fumble_enable: BoolProperty(name="Fumble", default=False, update=_sync,
+                                description="A little after she has changed, a few loose parts of the new outfit come "
+                                            "off, tumble to the floor, bounce and go in a puff of smoke (变身翻车: "
+                                            "the paper armour of a home-made tokusatsu skit)")
+    fumble_parts: StringProperty(name="Loose Parts", default=DEFAULT_LOOSE, update=_sync,
+                                 description="Material name patterns of the parts that come off (pick parts that sit "
+                                             "on top: under gloves or boots a model may have no hands or feet)")
+    fumble_delay: FloatProperty(name="Fumble Delay", default=0.8, min=0.0, soft_max=5.0, update=_sync,
+                                description="Seconds after the big moment the parts come off")
+    fumble_smoke: BoolProperty(name="Puff of Smoke", default=True, update=_sync,
+                               description="Where a part lands it goes in a puff of smoke")
     # --- 1.19: tearing the old outfit off (peel.py)
     peel_enable: BoolProperty(name="Tear Off", default=False, update=_sync,
                               description="At the big moment the old outfit does not just vanish: its clothes come "
@@ -755,6 +767,13 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     peel_lining: FloatVectorProperty(name="Lining", subtype="COLOR", size=3, min=0.0, max=1.0,
                                      default=(0.7, 0.04, 0.06), update=_sync,
                                      description="Colour of the inside of the torn cloth (small gold crests on it)")
+    peel_threads: FloatProperty(name="Sticky Threads", default=0.0, min=0.0, soft_max=3.0, update=_sync,
+                                description="Sticky threads stretch from the torn cloth back to her, thinner and "
+                                            "thinner until they snap (藕断丝连: Ne Zha's lotus-root body); how many "
+                                            "(0: none)")
+    peel_thread_color: FloatVectorProperty(name="Thread Colour", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                           default=(1.0, 0.62, 0.74), update=_sync,
+                                           description="Colour of the sticky threads (lotus-root pink)")
     peel_keep: StringProperty(name="Keep On", default=DEFAULT_KEEP, update=_sync,
                               description="Material name patterns that are not torn (skin and the like; face, hair, "
                                           "eyes and mouth never are): they go with the old outfit as before")

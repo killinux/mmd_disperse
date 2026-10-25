@@ -972,6 +972,26 @@ class MMDDISPERSE_PT_mirror(_Panel, bpy.types.Panel):
             layout.label(text="Needs a scene camera", icon="ERROR")
 
 
+class MMDDISPERSE_PT_fumble(_Panel, bpy.types.Panel):
+    bl_label = "Fumble"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "fumble_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.fumble_enable
+        layout.prop(s, "fumble_parts")
+        col = layout.column(align=True)
+        col.prop(s, "fumble_delay")
+        col.prop(s, "fumble_smoke")
+
+
 class MMDDISPERSE_PT_peel(_Panel, bpy.types.Panel):
     bl_label = "Tear Off"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -994,6 +1014,11 @@ class MMDDISPERSE_PT_peel(_Panel, bpy.types.Panel):
         if s.peel_style == "STRIPS":
             col.prop(s, "peel_strips")
         layout.prop(s, "peel_lining")
+        row = layout.row(align=True)
+        row.prop(s, "peel_threads")
+        sub = row.row(align=True)
+        sub.active = s.peel_threads > 0.0
+        sub.prop(s, "peel_thread_color", text="")
         layout.prop(s, "peel_keep")
 
 
@@ -1336,6 +1361,7 @@ classes = (
     MMDDISPERSE_PT_title,
     MMDDISPERSE_PT_sweat,
     MMDDISPERSE_PT_peel,
+    MMDDISPERSE_PT_fumble,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

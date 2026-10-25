@@ -3809,6 +3809,97 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.18 checks")
+    # --- 1.19: tearing the old outfit off (ripped open, flipped down, yanked off, peeled off in strips)
+    import fnmatch  # noqa: E402
+
+    from mmd_disperse import model as mdl, peel  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "peel_enable", "peel_style", "peel_time", "peel_hold", "peel_strips",
+        "peel_keep", "peel_lining")}
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+    s.peel_time, s.peel_hold = 0.5, 0.5
+    keep_ = mdl.split_patterns(mdl.DEFAULT_LOCK_PATTERNS) + mdl.split_patterns(s.peel_keep) \
+        + (mdl.split_patterns(s.lock_patterns) if s.use_lock else [])
+
+    def twin_shape(twins_, f_):
+        """(faces, lowest z, highest z, how far its points are from their middle on average) of the twins at frame
+        `f_` (their own space)."""
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        pts_ = np.array([tuple(v.co) for t_ in twins_ for v in t_.evaluated_get(deps_).data.vertices])
+        faces_ = sum(len(t_.evaluated_get(deps_).data.polygons) for t_ in twins_)
+        if not len(pts_):
+            return faces_, 0.0, 0.0, 0.0
+        return (faces_, float(pts_[:, 2].min()), float(pts_[:, 2].max()),
+                float(np.linalg.norm(pts_ - pts_.mean(axis=0), axis=1).mean()))
+
+    shapes_, wrong_ = {}, []
+    for style_ in peel.STYLES:
+        s.peel_enable, s.peel_style = True, style_
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the tearing (%s)" % style_)
+        moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+        span_ = s.peel_time * fps
+        twins_ = peel.objects(s.mask, "TWIN")
+        empties_ = peel.objects(s.mask, "UPPER") + peel.objects(s.mask, "LOWER")
+        for t_ in twins_:
+            kinds_ = [m_.type for m_ in t_.modifiers]
+            if kinds_[-1:] != ["NODES"] or "ARMATURE" not in kinds_ or not t_.add_rest_position_attribute:
+                wrong_.append((style_, t_.name, kinds_))
+        end_ = (1.5 + s.peel_hold / s.peel_time) if style_ == "FLIP" else 1.15
+        shapes_[style_] = (len(twins_), len(empties_), twin_shape(twins_, moment - 2),
+                           twin_shape(twins_, moment + 0.04 * span_), twin_shape(twins_, moment + 0.6 * span_),
+                           twin_shape(twins_, moment + 0.95 * span_), twin_shape(twins_, moment + end_ * span_ + 2))
+    # what tears: every face whose material is none of the kept ones (skin, face, hair ...), and only those
+    torn_, bad_ = 0, []
+    for ob_ in base.meshes:
+        attr_ = ob_.data.attributes.get(cover_nodes.ATTR_TEAR)
+        if attr_ is None:
+            continue
+        marks_ = np.zeros(len(ob_.data.polygons), dtype=bool)
+        attr_.data.foreach_get("value", marks_)
+        index_ = np.zeros(len(ob_.data.polygons), dtype=np.int32)
+        ob_.data.polygons.foreach_get("material_index", index_)
+        for k_, slot_ in enumerate(ob_.material_slots):
+            name_ = mdl.material_key(slot_.material) if slot_.material is not None else ""
+            kept_ = slot_.material is None or any(fnmatch.fnmatchcase(name_, p_) for p_ in keep_)
+            on_ = marks_[index_ == k_]
+            if len(on_) and (on_.any() if kept_ else not on_.all()):
+                bad_.append(("kept " if kept_ else "untorn ") + name_)
+        torn_ += int(marks_.sum())
+    lined_ = {mm for mm in bpy.data.materials if mm.get(materials.P_LINING)}
+    new_mats_ = {sl.material for ob in target.meshes for sl in ob.material_slots if sl.material is not None}
+    rip_, flip_, yank_, strips_ = (shapes_[k_] for k_ in peel.STYLES)
+    parts_ = {"twins and their bodies": all(v_[0] == len([o for o in base.meshes
+                                                          if o.data.attributes.get(cover_nodes.ATTR_TEAR)])
+                                            and v_[0] > 0 and v_[1] == 2 * v_[0] for v_ in shapes_.values())
+              and not wrong_,
+              "nothing before, nothing after": all(v_[2][0] == 0 and v_[6][0] == 0 and v_[3][0] > 0
+                                                   for v_ in shapes_.values()),
+              "rip: the halves fly apart": rip_[5][3] > 1.2 * rip_[3][3],
+              "flip: the top turned down": flip_[5][2] < flip_[3][2] - 0.15 * height,
+              "yank: the top yanked up": yank_[5][2] > yank_[3][2] + 0.3 * height,
+              "strips: curled down from the top": strips_[5][2] < strips_[3][2] - 0.1 * height,
+              "only what is not kept tears": torn_ > 0 and not bad_,
+              "the lining in the torn materials only": bool(lined_) and not lined_ & new_mats_}
+    check(all(parts_.values()), "tearing off: twins of the old outfit after their armature, nothing before the "
+                                "moment or after it; ripped open, flipped down, yanked off, peeled off; only what "
+                                "is not kept (%s; %s %s %s)" % ([k_ for k_, ok_ in parts_.items() if not ok_] or "all",
+                                                                {k_: (v_[0], v_[1]) + tuple(v_[2:]) for k_, v_ in
+                                                                 shapes_.items()} if not all(parts_.values()) else "",
+                                                                wrong_, bad_[:4]))
+    check(not draw_panels(bpy.context), "panels draw with the tearing")
+    s.peel_enable = False
+    check(not peel.objects(s.mask) and bpy.data.node_groups.get(cover_nodes.PEEL_GROUP) is None
+          and not [mm for mm in bpy.data.materials if mm.get(materials.P_LINING)]
+          and not [o for o in base.meshes if o.data.attributes.get(cover_nodes.ATTR_TEAR) is not None],
+          "tearing off: the twins, their empties, the group, the lining and the marks gone")
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.19 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along

@@ -60,8 +60,10 @@ FOLD_WAY = "mmdd_fold_way"  # on the folding sheet: each point's way out from th
 ECHO_GROUP = "MMDDisperse Echo"
 ECHO_NUMBER = "mmdd_echo"  # on the multiple exposure's copies (instances): which copy, k / Count ...
 ECHO_FADE = "mmdd_fade"  # ... and how much it shows
+PEEL_GROUP = "MMDDisperse Peel"
+ATTR_TEAR = "mmdd_tear"  # on the old outfit's meshes (a face attribute): 1 where peel.py tears it off
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 14  # bumped when one of these groups changes
+REVISION = 15  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -1874,3 +1876,313 @@ def ensure_echo_group():
     if not _current(ECHO_GROUP):
         build_echo_group()
     return bpy.data.node_groups[ECHO_GROUP]
+
+
+# --------------------------------------------------------------------------- 1.19: tearing the old outfit off (peel.py)
+
+def build_peel_group():
+    """Tearing the old outfit off (peel.py), on a twin of one of its meshes AFTER its armature: the pieces are told
+    apart by where they are at rest (the rest_position attribute) and moved as she is posed now, rigidly round hinges
+    that go with her body (Upper and Lower, empties following her upper and lower body: at rest they are where the
+    twin is). Only the faces marked torn (ATTR_TEAR, a face attribute peel.py writes) are kept. Time runs 0 .. 1 over
+    the tearing (nothing before 0, nothing once it is done); Centre is the middle of her waist at rest (x, y of her
+    middle line, z of the waist), Size her half width at the shoulders, her half depth and her height, Shoulder the
+    height of her shoulders. Style:
+    0 RIP: split down the middle, each half swings open round a hinge at the back of her side and flies off (the arms'
+      cloth flies out along the arms);
+    1 FLIP: everything above the waist turns down over it inside out (round a hinge on the waist under each point),
+      hangs there for Hold, then drops (the arms', the collar's and the legs' cloth drops at once);
+    2 YANK: the top is yanked up and back, the bottom drops;
+    3 STRIPS: it comes off in Strips strips round her, each curling down from the top in its turn and gone at the
+      bottom.
+    The mesh is cut between the pieces (told apart face by face), so no face stretches across two.
+    It lies a hair out along its normals (over the new outfit)."""
+    ng, b = _group(PEEL_GROUP, (
+        ("Time", "NodeSocketFloat", -1.0),
+        ("Style", "NodeSocketInt", 0),
+        ("Upper", "NodeSocketObject"),
+        ("Lower", "NodeSocketObject"),
+        ("Centre", "NodeSocketVector", (0.0, 0.0, 1.0)),
+        ("Size", "NodeSocketVector", (0.2, 0.12, 1.6)),
+        ("Shoulder", "NodeSocketFloat", 1.4),
+        ("Strips", "NodeSocketInt", 12),
+        ("Hold", "NodeSocketFloat", 1.0),
+        ("Seed", "NodeSocketInt", 0),
+    ))
+    gi = b.node("NodeGroupInput", -3400, 0)
+    go = b.node("NodeGroupOutput", 3400, 0)
+    t = gi.outputs["Time"]
+    style = gi.outputs["Style"]
+    w, d, h = b.split_xyz(gi.outputs["Size"], x=-3200, y=-400)
+    cx, cy, cz = b.split_xyz(gi.outputs["Centre"], x=-3200, y=-600)
+    tear = b.named_attribute(ATTR_TEAR, "BOOLEAN", x=-3400, y=300)[0]
+    torn = b.delete(gi.outputs["Geometry"], b.boolean("NOT", tear, x=-3200, y=300), "FACE", x=-3200, y=0)
+    rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=-3400, y=-1100)[0]
+    shoulder_rel = b.math("SUBTRACT", gi.outputs["Shoulder"], cz, x=-3000, y=-1800)
+    count = b.math("MAXIMUM", gi.outputs["Strips"], 1.0, x=-3000, y=-1950)
+
+    def kinds(where, x, y):
+        """(side +1 her left / -1 her right, arm, lower (under the waist), collar (above the shoulders), strip) of
+        the rest point `where`."""
+        rx_, ry_, rz_ = b.split_xyz(b.vmath("SUBTRACT", where, gi.outputs["Centre"], x=x, y=y), x=x + 200, y=y)
+        side_ = b.math("SUBTRACT", b.math("MULTIPLY", b.compare("GREATER_THAN", rx_, 0.0, x=x + 400, y=y), 2.0,
+                                          x=x + 600, y=y), 1.0, x=x + 800, y=y)
+        arm_ = b.compare("GREATER_THAN", b.math("ABSOLUTE", rx_, x=x + 400, y=y - 150),
+                         b.math("MULTIPLY", w, 1.15, x=x + 400, y=y - 300), x=x + 600, y=y - 150)
+        lower_ = b.compare("LESS_THAN", rz_, 0.0, x=x + 600, y=y - 300)
+        collar_ = b.compare("GREATER_THAN", rz_, shoulder_rel, x=x + 600, y=y - 450)
+        angle_ = b.math("ARCTAN2", rx_, b.math("MULTIPLY", ry_, -1.0, x=x + 400, y=y - 600), x=x + 600, y=y - 600)
+        strip_ = b.math("FLOOR", b.math("MULTIPLY", b.math("DIVIDE", b.math("ADD", angle_, 3.1416, x=x + 800,
+                                                                            y=y - 600), 6.2832, x=x + 1000, y=y - 600),
+                                        count, x=x + 1200, y=y - 600), x=x + 1400, y=y - 600)
+        return side_, arm_, lower_, collar_, strip_
+
+    # the pieces it tears into, told apart face by face (by where its middle is at rest); the mesh is cut between
+    # them, so a face never stretches across two of them
+    # (worked out per face: averaged over an edge or a point only after that)
+    side_f, arm_f, lower_f, collar_f, strip_f = (
+        b.on_domain(k, "FACE", x=-1600, y=-2400 - 150 * i) for i, k in enumerate(kinds(
+            b.on_domain(rest, "FACE", "FLOAT_VECTOR", x=-3200, y=-2400), -3000, -2400)))
+    rip_piece = b.math("ADD", b.math("ADD", b.compare("GREATER_THAN", side_f, 0.0, x=-1400, y=-2400),
+                                     b.math("MULTIPLY", lower_f, 2.0, x=-1400, y=-2550), x=-1200, y=-2400),
+                       b.math("MULTIPLY", arm_f, 4.0, x=-1400, y=-2700), x=-1000, y=-2450)
+    flip_piece = b.math("ADD", arm_f, b.math("MULTIPLY", collar_f, 2.0, x=-1400, y=-2850), x=-1200, y=-2850)
+    piece = b.switch("FLOAT", b.compare("EQUAL", style, 1.0, x=-1000, y=-2700), rip_piece, flip_piece,
+                     x=-800, y=-2600)
+    piece = b.switch("FLOAT", b.compare("EQUAL", style, 2.0, x=-800, y=-2850), piece, b.math(
+        "SUBTRACT", 1.0, lower_f, x=-1000, y=-3000), x=-600, y=-2750)
+    piece = b.switch("FLOAT", b.compare("EQUAL", style, 3.0, x=-600, y=-3000), piece, strip_f, x=-400, y=-2900)
+    piece = b.on_domain(piece, "FACE", x=-200, y=-2750)
+    mean = b.on_domain(piece, "EDGE", x=0, y=-2900)  # an edge between two pieces: the ids of its faces differ
+    spread = b.math("SUBTRACT", b.on_domain(b.on_domain(b.math("MULTIPLY", piece, piece, x=-200, y=-3150), "FACE",
+                                                        x=0, y=-3150), "EDGE", x=200, y=-3150),
+                    b.math("MULTIPLY", mean, mean, x=200, y=-2900), x=400, y=-3000)
+    cut = b.node("GeometryNodeSplitEdges", 600, -2800)
+    b.feed(cut.inputs["Mesh"], torn)
+    b.feed(cut.inputs["Selection"], b.compare("GREATER_THAN", spread, 0.01, x=600, y=-3000))
+    cloth = cut.outputs["Mesh"]
+    # (each point now in faces of one piece only: its kinds are its faces')
+    side, arm, lower, collar, strip = (b.on_domain(k, "POINT", x=800, y=-2400 - 150 * i)
+                                       for i, k in enumerate((side_f, arm_f, lower_f, collar_f, strip_f)))
+    upper = b.compare("LESS_THAN", lower, 0.5, x=800, y=-2550)
+    arm = b.compare("GREATER_THAN", arm, 0.5, x=800, y=-2700)
+    collar = b.compare("GREATER_THAN", collar, 0.5, x=800, y=-2850)
+    posed = b.node("GeometryNodeInputPosition", -3400, -800).outputs[0]
+    normal = b.node("GeometryNodeInputNormal", -3400, -950).outputs[0]
+    rel = b.vmath("SUBTRACT", rest, gi.outputs["Centre"], x=-3000, y=-1100)
+    rx, ry, rz = b.split_xyz(rel, x=-2800, y=-1100)
+    pushed = b.vmath("ADD", posed, b.vmath("SCALE", normal, scale=b.math("MULTIPLY", h, 0.003, x=-2800, y=-1500),
+                                           x=-2600, y=-1500), x=-2400, y=-1500)
+    radial = b.vmath("NORMALIZE", b.combine(rx, ry, 0.0, x=-2600, y=-1650), x=-2400, y=-1650)
+    rad_x, rad_y, _rad_z = b.split_xyz(radial, x=-2200, y=-1650)
+
+    def frame_of(name, y):
+        info = b.node("GeometryNodeObjectInfo", -3200, y, transform_space="RELATIVE")
+        b.feed(info.inputs["Object"], gi.outputs[name])
+        return info.outputs["Location"], info.outputs["Rotation"]
+
+    upper_frame = frame_of("Upper", -2000)
+    lower_frame = frame_of("Lower", -2200)
+
+    def turned(vector, frame, x, y):
+        """`vector` (a direction at rest) as her body part of `frame` is turned now."""
+        n = b.node("ShaderNodeVectorRotate", x, y, rotation_type="EULER_XYZ")
+        b.feed(n.inputs["Vector"], vector)
+        b.feed(n.inputs["Rotation"], frame[1])
+        return n.outputs[0]
+
+    def placed(point, frame, x, y):
+        """`point` (at rest) where her body part of `frame` has taken it now."""
+        return b.vmath("ADD", turned(point, frame, x, y), frame[0], x=x + 200, y=y)
+
+    def shrunk(p, group, amount, x, y):
+        """`p` pulled to its group's middle (Accumulate Field) as `amount` goes 0 .. 1."""
+        total = b.accumulate(p, group, data_type="FLOAT_VECTOR", x=x, y=y)
+        count = b.accumulate(1.0, group, x=x, y=y - 200)
+        middle = b.vmath("SCALE", total, scale=b.math("DIVIDE", 1.0, b.math("MAXIMUM", count, 1.0, x=x + 200, y=y - 200),
+                                                      x=x + 400, y=y - 200), x=x + 600, y=y)
+        return b.vmath("ADD", middle, b.vmath("SCALE", b.vmath("SUBTRACT", p, middle, x=x + 800, y=y),
+                                              scale=b.math("SUBTRACT", 1.0, amount, x=x + 800, y=y - 200),
+                                              x=x + 1000, y=y), x=x + 1200, y=y)
+
+    def hang(p, v, x, y):
+        """`p` dropped as `v` goes 0 .. 1 (as if falling)."""
+        drop = b.math("MULTIPLY", b.math("MULTIPLY", v, v, x=x, y=y - 150), b.math("MULTIPLY", h, -0.6, x=x, y=y - 300),
+                      x=x + 200, y=y - 150)
+        return b.vmath("ADD", p, b.combine(0.0, 0.0, drop, x=x + 400, y=y - 150), x=x + 600, y=y)
+
+    # --- RIP: each half round a hinge at the back of her side, upright as her upper body is; then out to the side
+    # and back (as her upper body faces), falling
+    y0 = 600
+    theta = b.math("MULTIPLY", b.math("MULTIPLY", b.map_range(t, 0.0, 0.55, 0.0, 1.83, x=-2000, y=y0 + 200,
+                                                              smooth=True), side, x=-1800, y=y0 + 200),
+                   b.math("MULTIPLY_ADD", lower, -0.5, 1.0, x=-2000, y=y0 + 350), x=-1600, y=y0 + 200)
+    hinge = placed(b.combine(b.math("MULTIPLY_ADD", side, w, cx, x=-2000, y=y0), b.math("ADD", cy, d, x=-2000,
+                                                                                         y=y0 - 150),
+                             b.math("MULTIPLY_ADD", shoulder_rel, 0.5, cz, x=-2000, y=y0 - 300), x=-1800, y=y0),
+                   upper_frame, -1600, y0)
+    opened = b.rotate(pushed, hinge, turned((0.0, 0.0, 1.0), upper_frame, -1600, y0 - 400), theta, x=-1200, y=y0)
+    u = b.map_range(t, 0.35, 1.0, x=-1400, y=y0 - 600)
+    u2 = b.math("MULTIPLY", u, u, x=-1200, y=y0 - 600)
+    away = turned(b.combine(b.math("MULTIPLY", b.math("MULTIPLY", side, u2, x=-1200, y=y0 - 750),
+                                   b.math("MULTIPLY", h, 0.45, x=-1200, y=y0 - 900), x=-1000, y=y0 - 750),
+                            b.math("MULTIPLY", u, b.math("MULTIPLY", h, 0.35, x=-1200, y=y0 - 1050), x=-1000,
+                                   y=y0 - 1000), 0.0, x=-800, y=y0 - 850), upper_frame, -600, y0 - 850)
+    fall = b.switch("FLOAT", upper, b.map_range(t, 0.0, 0.5, x=-600, y=y0 + 300), u, x=-400, y=y0 + 300)
+    rip_body = hang(b.vmath("ADD", opened, away, x=-400, y=y0), fall, -200, y0)
+    # the arms' cloth: out along the arm from her shoulder (as it is now), falling
+    joint = placed(b.combine(b.math("MULTIPLY_ADD", side, w, cx, x=-2000, y=y0 - 1300), cy, gi.outputs["Shoulder"],
+                             x=-1800, y=y0 - 1300), upper_frame, -1600, y0 - 1300)
+    along = b.vmath("NORMALIZE", b.vmath("SUBTRACT", posed, joint, x=-1200, y=y0 - 1300), x=-1000, y=y0 - 1300)
+    ua = b.map_range(t, 0.0, 0.45, x=-1200, y=y0 - 1500)
+    rip_arm = hang(b.vmath("ADD", pushed, b.vmath("SCALE", along, scale=b.math("MULTIPLY", ua, b.math(
+        "MULTIPLY", h, 0.25, x=-1000, y=y0 - 1650), x=-800, y=y0 - 1500), x=-600, y=y0 - 1400), x=-400, y=y0 - 1300),
+        ua, -200, y0 - 1300)
+    rip = b.switch("VECTOR", arm, rip_body, rip_arm, x=400, y=y0)
+    rip_group = b.math("ADD", b.math("ADD", b.compare("GREATER_THAN", side, 0.0, x=200, y=y0 - 1800),
+                                     b.math("MULTIPLY", lower, 2.0, x=200, y=y0 - 1950), x=400, y=y0 - 1850),
+                       b.math("MULTIPLY", arm, 4.0, x=200, y=y0 - 2100), x=600, y=y0 - 1900)
+    gone = b.switch("FLOAT", upper, b.map_range(t, 0.25, 0.5, x=200, y=y0 - 2250, smooth=True),
+                    b.map_range(t, 0.7, 1.0, x=200, y=y0 - 2400, smooth=True), x=400, y=y0 - 2300)
+    gone = b.switch("FLOAT", arm, gone, b.map_range(t, 0.2, 0.45, x=400, y=y0 - 2550, smooth=True), x=600,
+                    y=y0 - 2400)
+    rip = shrunk(rip, rip_group, gone, 600, y0)
+
+    # --- FLIP: above the waist turned down over it inside out, round the waist as her hips are now; the arms'
+    # cloth drops; all of it drops after Hold
+    y0 = -2800
+    hinge = placed(b.vmath("ADD", b.combine(b.math("ADD", cx, rx, x=-2000, y=y0), b.math("ADD", cy, ry, x=-2000,
+                                                                                        y=y0 - 150),
+                                            cz, x=-1800, y=y0),
+                           b.vmath("SCALE", radial, scale=b.math("MULTIPLY", h, 0.012, x=-2000, y=y0 - 300), x=-1800,
+                                   y=y0 - 300), x=-1600, y=y0), lower_frame, -1400, y0)
+    axis = turned(b.combine(b.math("MULTIPLY", rad_y, -1.0, x=-2000, y=y0 - 450), rad_x, 0.0, x=-1800, y=y0 - 450),
+                  lower_frame, -1600, y0 - 450)
+    phi = b.map_range(t, 0.0, 1.0, 0.0, 3.0, x=-1600, y=y0 - 650, smooth=True)
+    folded = b.rotate(pushed, hinge, axis, phi, x=-1200, y=y0)
+    flip_body = b.switch("VECTOR", upper, pushed, folded, x=-1000, y=y0)
+    flip_arm = hang(pushed, b.map_range(t, 0.0, 0.8, x=-1200, y=y0 - 850), -1000, y0 - 850)
+    loose = b.boolean("OR", b.boolean("OR", arm, collar, x=-1000, y=y0 - 1000), b.boolean("NOT", upper, x=-1000,
+                                                                                           y=y0 - 1150),
+                      x=-800, y=y0 - 1000)  # (only the turned-down top stays: the rest drops at once)
+    flip = b.switch("VECTOR", loose, flip_body, flip_arm, x=-600, y=y0)
+    late = b.math("ADD", gi.outputs["Hold"], 1.0, x=-1000, y=y0 - 1150)
+    v = b.map_range(t, late, b.math("ADD", late, 0.5, x=-800, y=y0 - 1300), x=-600, y=y0 - 1150)
+    flip = hang(flip, v, -400, y0)
+    flip_group = b.math("ADD", b.math("ADD", upper, b.math("MULTIPLY", arm, 2.0, x=-200, y=y0 - 1450), x=0,
+                                      y=y0 - 1450), b.math("MULTIPLY", collar, 4.0, x=-200, y=y0 - 1600), x=200,
+                        y=y0 - 1500)
+    arm_gone = b.math("MULTIPLY", loose, b.map_range(t, 0.5, 0.8, x=0, y=y0 - 1600), x=200, y=y0 - 1600)
+    flip = shrunk(flip, flip_group, b.math("MAXIMUM", arm_gone, b.map_range(v, 0.4, 1.0, x=0, y=y0 - 1750),
+                                           x=200, y=y0 - 1750), 400, y0)
+
+    # --- YANK: the top up and back (as her upper body faces), the bottom down, faster and faster
+    y0 = -5000
+    e = b.math("MULTIPLY", t, t, x=-1600, y=y0)
+    back = turned((0.0, 1.0, 0.0), upper_frame, -1600, y0 - 150)
+    up_off = b.vmath("ADD", b.vmath("SCALE", back, scale=b.math("MULTIPLY", e, b.math("MULTIPLY", h, 0.3, x=-1600,
+                                                                                    y=y0 - 300), x=-1400, y=y0 - 300),
+                                    x=-1200, y=y0 - 200),
+                     b.combine(0.0, 0.0, b.math("MULTIPLY", e, h, x=-1400, y=y0 - 450), x=-1200, y=y0 - 450),
+                     x=-1000, y=y0 - 300)
+    down_off = b.combine(0.0, 0.0, b.math("MULTIPLY", e, b.math("MULTIPLY", h, -0.7, x=-1600, y=y0 - 600), x=-1400,
+                                          y=y0 - 600), x=-1200, y=y0 - 600)
+    yank = b.vmath("ADD", pushed, b.switch("VECTOR", upper, down_off, up_off, x=-800, y=y0 - 400), x=-600, y=y0)
+    yank = shrunk(yank, upper, b.map_range(t, 0.6, 1.0, x=-600, y=y0 - 700, smooth=True), -400, y0)
+
+    # --- STRIPS: strips round her, each in its turn curling down from the top (a roll of radius 2% of her height):
+    # a point of a strip finds where the curl is in its column at rest (the nearest point of the rest mesh to its
+    # column at the curl's height) and so where that is now and which way it faces; the roll is round that. The
+    # sleeves and the collar burst off at once.
+    y0 = -7000
+    turn, _c = b.white_noise(b.combine(strip, gi.outputs["Seed"], 0.37, x=-1200, y=y0 - 150), x=-1000, y=y0 - 150)
+    t0 = b.math("MULTIPLY", turn, 0.45, x=-800, y=y0 - 150)
+    tau = b.map_range(b.math("SUBTRACT", t, t0, x=-800, y=y0 - 300), 0.0, 0.55, x=-600, y=y0 - 300)
+    top = b.math("MULTIPLY_ADD", h, 0.08, shoulder_rel, x=-1200, y=y0 - 450)
+    bottom = b.math("MULTIPLY_ADD", h, 0.04, b.math("MULTIPLY", cz, -1.0, x=-1400, y=y0 - 600), x=-1200, y=y0 - 600)
+    front = b.math("SUBTRACT", top, b.math("MULTIPLY", tau, b.math("SUBTRACT", top, bottom, x=-1000, y=y0 - 600),
+                                           x=-800, y=y0 - 500), x=-600, y=y0 - 450)
+    held = b.store(b.store(cloth, "mmdd_posed", posed, "FLOAT_VECTOR", x=-1400, y=y0 - 900), "mmdd_posed_normal",
+                   normal, "FLOAT_VECTOR", x=-1200, y=y0 - 900)
+    at_rest = b.set_position(held, position=b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=-1400, y=y0 - 1100)[0],
+                             x=-1000, y=y0 - 900)
+    at_rest = b.store(at_rest, "mmdd_rest_normal", b.node("GeometryNodeInputNormal", -1000, y0 - 1050).outputs[0],
+                      "FLOAT_VECTOR", x=-800, y=y0 - 900)
+    strip_base = b.set_position(at_rest, position=b.named_attribute("mmdd_posed", "FLOAT_VECTOR", x=-800,
+                                                                    y=y0 - 1100)[0], x=-600, y=y0 - 900)
+    # (the column pushed a little into her along its normal at rest: on the inside of a thigh it finds its own leg)
+    rest_nx, rest_ny, _rest_nz = b.split_xyz(b.named_attribute("mmdd_rest_normal", "FLOAT_VECTOR", x=-1600,
+                                                               y=y0 - 1400)[0], x=-1400, y=y0 - 1400)
+    inward = b.vmath("SCALE", b.vmath("NORMALIZE", b.combine(rest_nx, rest_ny, 0.0, x=-1200, y=y0 - 1400), x=-1000,
+                                      y=y0 - 1400), scale=b.math("MULTIPLY", h, -0.02, x=-1000, y=y0 - 1550),
+                     x=-800, y=y0 - 1400)
+    rest_x, rest_y, _rest_z = b.split_xyz(rest, x=-1400, y=y0 - 1250)
+    column = b.vmath("ADD", b.combine(rest_x, rest_y, b.math("ADD", cz, front, x=-1200, y=y0 - 1300), x=-1000,
+                                      y=y0 - 1250), inward, x=-600, y=y0 - 1300)
+
+    def nearest(name, yy):
+        n = b.node("GeometryNodeSampleNearestSurface", -800, yy, data_type="FLOAT_VECTOR")
+        b.feed(n.inputs["Mesh"], at_rest)
+        b.feed(_enabled(n.inputs, "Value")[0], b.named_attribute(name, "FLOAT_VECTOR", x=-1000, y=yy - 150)[0])
+        b.feed(n.inputs["Sample Position"], column)
+        return _enabled(n.outputs, "Value")[0]
+
+    curl_at = nearest("mmdd_posed", y0 - 1400)
+    facing = b.vmath("NORMALIZE", nearest("mmdd_posed_normal", y0 - 1700), x=-600, y=y0 - 1700)
+    up = b.switch("VECTOR", upper, turned((0.0, 0.0, 1.0), lower_frame, -1400, y0 - 2000),
+                  turned((0.0, 0.0, 1.0), upper_frame, -1400, y0 - 2150), x=-1200, y=y0 - 2050)
+    r = b.math("MULTIPLY", h, 0.02, x=-1000, y=y0 - 2300)
+    chord = b.vmath("SUBTRACT", posed, curl_at, x=-600, y=y0 - 1900)
+    flat = b.vmath("SUBTRACT", chord, b.vmath("SCALE", facing, scale=b.vmath("DOT_PRODUCT", chord, facing, x=-400,
+                                                                               y=y0 - 2000), x=-200, y=y0 - 2000),
+                   x=0, y=y0 - 1950)
+    along = b.vmath("NORMALIZE", b.vmath("ADD", flat, b.vmath("SCALE", up, scale=r, x=0, y=y0 - 2150), x=200,
+                                         y=y0 - 2050), x=400, y=y0 - 2050)
+    lift = b.math("SUBTRACT", rz, front, x=-1000, y=y0 - 2450)  # how far up the strip from the curl
+    beta = b.math("DIVIDE", lift, r, x=-800, y=y0 - 2450)
+    centre = b.vmath("ADD", curl_at, b.vmath("SCALE", facing, scale=r, x=-400, y=y0 - 1500), x=-200, y=y0 - 1450)
+    rolled = b.vmath("ADD", centre, b.vmath("ADD", b.vmath("SCALE", facing, scale=b.math(
+        "MULTIPLY", b.math("COSINE", beta, x=-600, y=y0 - 2600), b.math("MULTIPLY", r, -1.0, x=-600, y=y0 - 2750),
+        x=-400, y=y0 - 2650), x=-200, y=y0 - 2600), b.vmath("SCALE", along, scale=b.math(
+            "MULTIPLY", b.math("SINE", beta, x=-600, y=y0 - 2900), r, x=-400, y=y0 - 2900), x=-200, y=y0 - 2900),
+        x=0, y=y0 - 2750), x=600, y=y0 - 1600)
+    peeled = b.compare("GREATER_THAN", rz, front, x=400, y=y0 - 2400)
+    strips = b.switch("VECTOR", peeled, pushed, rolled, x=800, y=y0)
+    # once the curl reaches the bottom, the roll shrinks away out from her
+    gone = b.map_range(b.math("SUBTRACT", t, b.math("ADD", t0, 0.55, x=600, y=y0 - 3100), x=800, y=y0 - 3100),
+                       0.0, 0.12, x=1000, y=y0 - 3100)
+    away = b.vmath("ADD", centre, b.vmath("SCALE", facing, scale=b.math("MULTIPLY", gone, b.math(
+        "MULTIPLY", h, 0.08, x=800, y=y0 - 3400), x=1000, y=y0 - 3400), x=1200, y=y0 - 3300), x=1400, y=y0 - 3200)
+    strips = b.vmath("ADD", away, b.vmath("SCALE", b.vmath("SUBTRACT", strips, centre, x=1200, y=y0 - 2900),
+                                          scale=b.math("SUBTRACT", 1.0, gone, x=1200, y=y0 - 3050), x=1400,
+                                          y=y0 - 2900), x=1600, y=y0)
+    loose = b.boolean("OR", arm, collar, x=1200, y=y0 + 300)
+    burst = shrunk(hang(pushed, b.map_range(t, 0.0, 0.3, x=1000, y=y0 + 500), 1200, y0 + 500),
+                   b.math("ADD", b.compare("GREATER_THAN", side, 0.0, x=1400, y=y0 + 700),
+                          b.math("MULTIPLY", collar, 2.0, x=1400, y=y0 + 850), x=1600, y=y0 + 700),
+                   b.map_range(t, 0.1, 0.3, x=1600, y=y0 + 850, smooth=True), 1800, y0 + 500)
+    strips = b.switch("VECTOR", loose, strips, burst, x=2000, y=y0)
+
+    # the style's positions (only the one picked is worked out), and nothing outside the tearing
+    def picked(positions, x, y):
+        return b.set_position(cloth, position=positions, x=x, y=y)
+
+    shaped = picked(rip, 2000, 600)
+    for k, positions, yy in ((1, flip, -2800), (2, yank, -5000), (3, strips, -7000)):
+        moved = picked(positions, 2000, yy) if k != 3 else b.set_position(strip_base, position=positions, x=2000,
+                                                                           y=yy)
+        shaped = b.switch("GEOMETRY", b.compare("EQUAL", style, float(k), x=2000, y=yy + 200), shaped, moved,
+                          x=2200, y=yy)
+    end = b.switch("FLOAT", b.compare("EQUAL", style, 1.0, x=2200, y=-800), 1.0,
+                   b.math("ADD", gi.outputs["Hold"], 1.5, x=2200, y=-950), x=2400, y=-800)
+    end = b.switch("FLOAT", b.compare("EQUAL", style, 3.0, x=2400, y=-1100), end, 1.15, x=2600, y=-1000)
+    shown = b.boolean("AND", b.compare("GREATER_EQUAL", t, 0.0, x=2600, y=-300),
+                      b.compare("LESS_THAN", t, end, x=2800, y=-1000), x=2800, y=-300)
+    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", shown, None, shaped, x=3000, y=0))
+    return ng
+
+
+def ensure_peel_group():
+    if not _current(PEEL_GROUP):
+        build_peel_group()
+    return bpy.data.node_groups[PEEL_GROUP]

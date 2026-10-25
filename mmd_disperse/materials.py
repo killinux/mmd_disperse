@@ -78,6 +78,10 @@ P_LEATHER = "mmd_disperse_leather"
 P_LEATHER_BLEND = "mmd_disperse_leather_blend"  # blend mode to put back (Hashed before 4.2)
 OIL = "MMDD Oil"  # 1.16 (shadowplay.py, into the painting): pressed flat, painted in oils on the canvas
 P_OIL = "mmd_disperse_oil"
+LINING = "MMDD Lining"  # 1.19 (peel.py): the lining inside the torn cloth, on the twins only
+P_LINING = "mmd_disperse_lining"  # on the materials it is spliced into
+LINING_ON = "mmdd_lining"  # on peel.py's twins (an object attribute the splice reads): 1 ...
+LINING_SCALE = "mmdd_lining_scale"  # ... and the crests on the lining a unit
 SWEAT = "MMDD Sweat"  # 1.18 (sweat.py): a wet sheen and beads of sweat on the old outfit, added on top
 P_SWEAT = "mmd_disperse_sweat"
 GHOST = "MMDD Ghost"  # 1.16 (ghost.py): she turns see-through from the feet up, a rim of light flowing up her
@@ -85,7 +89,7 @@ P_GHOST = "mmd_disperse_ghost"
 P_GHOST_BLEND = "mmd_disperse_ghost_blend"  # blend mode to put back once the ghost is gone (Hashed before 4.2)
 _CHAIN = ((REAL + " Mix", 1), (PORCELAIN + " Mix", 1), (LEATHER + " Mix", 1), (OIL + " Mix", 1), (SURFACE + " Mix", 1), (LAYER + " Mix", 1), (PAINT + " Mix", 1), (TINT + " Mix", 1),
           (INNER + " Mix", 1), (HOLO + " Mix", 1),
-          (HUSK + " Mix", 1), (GLOW + " Add", 0), (PRINT + " Add", 0), (SWEAT + " Add", 0), (GHOST + " Mix", 1),
+          (HUSK + " Mix", 1), (GLOW + " Add", 0), (PRINT + " Add", 0), (SWEAT + " Add", 0), (LINING + " Mix", 1), (GHOST + " Mix", 1),
           (SHADOW + " Mix", 1))
 
 
@@ -6798,3 +6802,64 @@ def remove_oil(mat):
     for node in [n for n in nt.nodes if n.name.startswith(OIL)]:
         nt.nodes.remove(node)
     del mat[P_OIL]
+
+
+# --------------------------------------------------------------------------- 1.19: the lining of the torn cloth (peel.py)
+
+def add_lining(mat, colour):
+    """Splice the lining in (LINING + " Mix", after the sweat): where the cloth of one of peel.py's twins (the object
+    attribute LINING_ON) is seen from its inside, a satin of `colour` strewn with small gold crests (a Voronoi of the
+    object's own coordinates, LINING_SCALE cells a unit); everywhere else, and on her, it is as it was. Cut-outs stay
+    cut out. Called again, it only sets the colour."""
+    nt = mat.node_tree
+    if nt is None:
+        return
+    if not mat.get(P_LINING):
+        outputs = _outputs(nt)
+        if not outputs:
+            return
+        m = _shader_math(nt, LINING)
+        x = min(n.location.x for n in outputs) - 400
+        y = min(n.location.y for n in outputs) - 13600
+        on = _new(nt, "ShaderNodeAttribute", LINING + " On", x - 1600, y + 300, attribute_type="OBJECT",
+                  attribute_name=LINING_ON)
+        inside = _new(nt, "ShaderNodeNewGeometry", LINING + " Inside", x - 1600, y + 100)
+        fac = m("MULTIPLY", on.outputs["Fac"], inside.outputs["Backfacing"], x=x - 1400, y=y + 200)
+        alpha = _alpha_source(nt)
+        if alpha is not None:
+            fac = m("MULTIPLY", fac, alpha, x=x - 1200, y=y + 200)
+        colour_node = _new(nt, "ShaderNodeRGB", LINING + " Colour", x - 1600, y - 100)
+        scale = _new(nt, "ShaderNodeAttribute", LINING + " Scale", x - 1800, y - 300, attribute_type="OBJECT",
+                     attribute_name=LINING_SCALE)
+        coords = _new(nt, "ShaderNodeTexCoord", LINING + " Coords", x - 1800, y - 500)
+        crests = _new(nt, "ShaderNodeTexVoronoi", LINING + " Crests", x - 1400, y - 400)
+        nt.links.new(coords.outputs["Object"], crests.inputs["Vector"])
+        nt.links.new(scale.outputs["Fac"], crests.inputs["Scale"])
+        crest = m("SUBTRACT", 1.0, m("DIVIDE", m("MAXIMUM", m("SUBTRACT", crests.outputs["Distance"], 0.16,
+                                                               x=x - 1200, y=y - 400), 0.0, x=x - 1000, y=y - 400),
+                                     0.06, x=x - 800, y=y - 400, clamp=True), x=x - 600, y=y - 400)
+        gold = _lerp(nt, colour_node.outputs[0], (1.0, 0.72, 0.28), crest, LINING + " Gold", x - 600, y - 200)
+        satin = _new(nt, "ShaderNodeBsdfPrincipled", LINING + " Satin", x - 200, y - 100)
+        nt.links.new(gold, satin.inputs["Base Color"])
+        _set_input(satin, ("Roughness",), 0.35)
+        nt.links.new(m("MULTIPLY", crest, 0.9, x=x - 400, y=y - 500), satin.inputs["Metallic"])
+        for i, out in enumerate(outputs):
+            mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (LINING, i), out.location.x - 180,
+                       out.location.y + 1500)
+            _splice(nt, out, mix)
+            nt.links.new(fac, mix.inputs[0])
+            nt.links.new(satin.outputs[0], mix.inputs[2])
+        mat[P_LINING] = 1
+    node = nt.nodes.get(LINING + " Colour")
+    if node is not None:
+        node.outputs[0].default_value = tuple(colour[:3]) + (1.0,)
+
+
+def remove_lining(mat):
+    nt = mat.node_tree
+    if nt is None or not mat.get(P_LINING):
+        return
+    _unsplice(nt, LINING + " Mix")
+    for node in [n for n in nt.nodes if n.name.startswith(LINING)]:
+        nt.nodes.remove(node)
+    del mat[P_LINING]

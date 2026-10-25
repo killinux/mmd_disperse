@@ -18,7 +18,7 @@ _OFF = dict(
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
     cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
     ghost_enable=False, puppet_enable=False, shadow_enable=False, shadow_style="SHADOW", mirror_enable=False,
-    echo_enable=False, title_enable=False, sweat_enable=False,
+    echo_enable=False, title_enable=False, sweat_enable=False, peel_enable=False,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -723,6 +723,23 @@ PRESETS = (
           particle_count=400, impact_enable=True, speed_lines=True, shockwave=True, finale=True, finale_white=0.5,
           particle_color=(1.0, 0.6, 0.2), particle_glow=4.0, glow_color=(1.0, 0.55, 0.15),
           frag_wind_dir=(0.0, 0.3, 1.0))),
+    ("SHIRT_RIP", "Shirt Rip", "At the moment the old outfit is ripped open down the middle and flung off round "
+                               "her sides, the new one already on under it (撕衬衫: Superman's S)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
+          peel_style="RIP", peel_time=0.5, impact_enable=True, speed_lines=True, glow_color=(1.0, 0.8, 0.5))),
+    ("KABUKI_FLIP", "Kabuki Flip", "The top of the old outfit turns down over her waist inside out, a red lining with "
+                                   "gold crests showing, hangs a moment and drops (ぶっ返り)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
+          peel_style="FLIP", peel_time=0.45, peel_hold=1.0, peel_lining=(0.7, 0.04, 0.06),
+          glow_color=(1.0, 0.75, 0.4))),
+    ("KABUKI_YANK", "Kabuki Yank", "The old outfit is yanked off in two halves, the top up and away and the bottom "
+                                   "dropping, in a few frames (引抜き)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
+          peel_style="YANK", peel_time=0.25, glow_color=(1.0, 0.8, 0.5))),
+    ("PEEL_AWAY", "Peel Away", "The old outfit comes off in strips curling down from the top one after another, "
+                               "like a sticker (剥落卷起)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
+          peel_style="STRIPS", peel_time=1.2, peel_strips=14, glow_color=(1.0, 0.85, 0.6))),
     ("DREAM_WORLD", "Dream World", "She blinks and the stage is a dream: a violet night, a great red moon, gouged and "
                                    "twisting, over a black mirror; she changes there and blinks awake on the stage in "
                                    "the new outfit (梦境领域, Kamen Rider Zeztz)",

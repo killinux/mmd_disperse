@@ -972,6 +972,31 @@ class MMDDISPERSE_PT_mirror(_Panel, bpy.types.Panel):
             layout.label(text="Needs a scene camera", icon="ERROR")
 
 
+class MMDDISPERSE_PT_peel(_Panel, bpy.types.Panel):
+    bl_label = "Tear Off"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "peel_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.peel_enable
+        col = layout.column(align=True)
+        col.prop(s, "peel_style")
+        col.prop(s, "peel_time")
+        if s.peel_style == "FLIP":
+            col.prop(s, "peel_hold")
+        if s.peel_style == "STRIPS":
+            col.prop(s, "peel_strips")
+        layout.prop(s, "peel_lining")
+        layout.prop(s, "peel_keep")
+
+
 class MMDDISPERSE_PT_sweat(_Panel, bpy.types.Panel):
     bl_label = "Sweat"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -1310,6 +1335,7 @@ classes = (
     MMDDISPERSE_PT_echo,
     MMDDISPERSE_PT_title,
     MMDDISPERSE_PT_sweat,
+    MMDDISPERSE_PT_peel,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

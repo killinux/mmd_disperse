@@ -231,12 +231,12 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.18：用 Blender 几何节点给 MMD 模型做换装变身。下面一百五十四段视频都是插件生成的
+    <p>mmd_disperse 1.19：用 Blender 几何节点给 MMD 模型做换装变身。下面一百五十八段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>154</b> 段演示</span>
-      <span><b>61</b> 组效果</span>
-      <span><b>142</b> 个一键预设</span>
+      <span><b>158</b> 段演示</span>
+      <span><b>62</b> 组效果</span>
+      <span><b>146</b> 个一键预设</span>
       <span><b>23400</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
@@ -295,7 +295,7 @@
 <section id="effects">
   <div class="wrap">
     <h2>效果演示</h2>
-    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.18 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
+    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.19 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
 
     <div class="index">
       <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
@@ -452,6 +452,10 @@
       <a href="#multi-exposure"><img src="../test_output/posters/multi_exposure.jpg" alt="" loading="lazy">迷幻多重曝光</a>
       <a href="#chest-beat"><img src="../test_output/posters/chest_beat.jpg" alt="" loading="lazy">捶胸变身</a>
       <a href="#dream-world"><img src="../test_output/posters/dream_world.jpg" alt="" loading="lazy">梦境领域</a>
+      <a href="#shirt-rip"><img src="../test_output/posters/shirt_rip.jpg" alt="" loading="lazy">撕衬衫</a>
+      <a href="#kabuki-flip"><img src="../test_output/posters/kabuki_flip.jpg" alt="" loading="lazy">ぶっ返り</a>
+      <a href="#kabuki-yank"><img src="../test_output/posters/kabuki_yank.jpg" alt="" loading="lazy">引抜き</a>
+      <a href="#peel-away"><img src="../test_output/posters/peel_away.jpg" alt="" loading="lazy">剥落卷起</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -4003,6 +4007,98 @@
         </article>
       </div>
     </section>
+    <section class="family card" id="fam-tear">
+      <div class="family-head">
+        <h3>撕开翻落</h3>
+        <p>关键时刻新衣服整套换上，旧衣服不直接消失：从中间撕开甩飞、上半截翻下来挂在腰间、一下扯走，或者一条条卷着剥落（1.19）</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="shirt-rip">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/shirt_rip.jpg">
+              <source src="../test_output/demo_v21/tifa_shirt_rip_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">撕衬衫 · 跳舞（有声音）</span><span class="ver">1.19</span><span class="tag">VMD 舞蹈</span><span class="tag">撕开翻落</span><span class="tag">撕开</span><span class="tag">瞬间换装</span><span class="tag">冲击帧</span></div>
+            <h3>撕衬衫（新预设）</h3>
+            <p class="lead">关键时刻黑色紧身衣从身体中线裂开，两半像外套前襟一样往两边甩开，露出红色衬里，飞走缩没；袖子手套往外一崩就没了，腿上的部分往下掉；里面已经是 Remake 版的蒂法（超人扯开衬衫露出 S）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">撕衬衫</span>：<span class="ui">撕开翻落</span> 勾上，<span class="ui">撕法</span> 选 <span class="v">撕开</span>，<span class="ui">撕开用时</span> <span class="v">0.5</span> 秒；<span class="ui">冲击帧</span> 勾上（<span class="ui">集中线</span>）。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>。旧衣服最好整身包住（全身紧身衣、外套、连衣裙），露得多的衣服撕下来只有窄窄的几条。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset SHIRT_RIP --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="kabuki-flip">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/kabuki_flip.jpg">
+              <source src="../test_output/demo_v21/tifa_kabuki_flip_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">ぶっ返り · 跳舞（有声音）</span><span class="ver">1.19</span><span class="tag">VMD 舞蹈</span><span class="tag">撕开翻落</span><span class="tag">翻落</span><span class="tag">瞬间换装</span></div>
+            <h3>ぶっ返り（新预设）</h3>
+            <p class="lead">关键时刻紧身衣腰部以上整圈往外翻下来，里朝外挂在腰间，成了一圈带金色小花纹的红色衬里，她挂着它接着跳，一秒后才掉下去；里面已经是 AC 版的蒂法（歌舞伎抽掉粗缝的线，上半身翻下来露出里面的花纹）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">ぶっ返り</span>：<span class="ui">撕开翻落</span> 勾上，<span class="ui">撕法</span> 选 <span class="v">翻落</span>，<span class="ui">撕开用时</span> <span class="v">0.45</span> 秒，<span class="ui">挂着的时长</span> <span class="v">1</span> 秒，<span class="ui">衬里颜色</span> 选红色。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>。旧衣服最好整身包住（全身紧身衣、外套、连衣裙），露得多的衣服撕下来只有窄窄的几条。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset KABUKI_FLIP --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="kabuki-yank">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/kabuki_yank.jpg">
+              <source src="../test_output/demo_v21/tifa_kabuki_yank_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">引抜き · 跳舞（有声音）</span><span class="ver">1.19</span><span class="tag">VMD 舞蹈</span><span class="tag">撕开翻落</span><span class="tag">扯掉</span><span class="tag">瞬间换装</span></div>
+            <h3>引抜き（新预设）</h3>
+            <p class="lead">关键时刻紧身衣在腰部分成上下两截，上半截往上、往后飞走，下半截往下掉，不到十帧就没了，里面已经是 Remake 版的蒂法（歌舞伎《京鹿子娘道成寺》里外衣一下扯走、连换几身）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">引抜き</span>：<span class="ui">撕开翻落</span> 勾上，<span class="ui">撕法</span> 选 <span class="v">扯掉</span>，<span class="ui">撕开用时</span> <span class="v">0.25</span> 秒。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>。旧衣服最好整身包住（全身紧身衣、外套、连衣裙），露得多的衣服撕下来只有窄窄的几条。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset KABUKI_YANK --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="peel-away">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/peel_away.jpg">
+              <source src="../test_output/demo_v21/tifa_peel_away_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">剥落卷起 · 跳舞（有声音）</span><span class="ver">1.19</span><span class="tag">VMD 舞蹈</span><span class="tag">撕开翻落</span><span class="tag">卷起剥落</span><span class="tag">瞬间换装</span></div>
+            <h3>剥落卷起（新预设）</h3>
+            <p class="lead">关键时刻紧身衣绕着身体分成十几条，一条接一条从肩上往下卷，卷成一圈圈红边，像把丝袜往下卷，卷到脚下就没了；里面已经是 AC 版的蒂法（撕贴纸）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">剥落卷起</span>：<span class="ui">撕开翻落</span> 勾上，<span class="ui">撕法</span> 选 <span class="v">卷起剥落</span>，<span class="ui">撕开用时</span> <span class="v">1.2</span> 秒，<span class="ui">条数</span> <span class="v">14</span>。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>。旧衣服最好整身包住（全身紧身衣、外套、连衣裙），露得多的衣服撕下来只有窄窄的几条。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset PEEL_AWAY --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
   </div>
 </section>
 
@@ -4043,7 +4139,7 @@
           <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>剪纸窗花</li><li>发光纹身</li><li>LED 屏幕</li><li>电子纸</li><li>也可以不变</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>48</b></h3>
+        <h3>叠加开关 <b>49</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行（全息 / 星空纱 / 黑剪影 / 冰晶）</li><li>故障风</li><li>光剪影</li><li>光带</li>
           <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
           <li>毒液共生体（触手、蹼、黏丝；黑色黏液或液态金属）</li>
@@ -4065,7 +4161,8 @@
           <li>雾中图腾（星形 / 心形 / 文字 / 网格物体）</li>
           <li>幽灵化（脚下飘雾、烛光）</li><li>人偶（线断在拍子上）</li><li>压成平面（皮影 / 画中人）</li>
           <li>镜里先换</li><li>迷幻多重曝光（迷幻配色 / 发光颜色）</li>
-          <li>书法大字幕（金色 / 白色 / 墨色；吹散 / 缩成印章；横排 / 竖排）</li><li>汗光</li></ul>
+          <li>书法大字幕（金色 / 白色 / 墨色；吹散 / 缩成印章；横排 / 竖排）</li><li>汗光</li>
+          <li>撕开翻落（撕开 / 翻落 / 扯掉 / 卷起剥落；衬里颜色）</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
@@ -4075,7 +4172,7 @@
       </div>
     </div>
     <p class="sum">路径 × 登场 × 退场 × 粒子 = 20 × 13 × 5 × 18 = <b>23400</b> 种基本组合，再乘旧服装表面的 13 种就是 304200 种；
-      再叠加 48 个开关（收尾闪光有两种方式，内衬有两种样式，光环有七种样式，画稿有三种，火焰有两种范围，世界有六个、三种出现方式，运镜有九种，绸带有四种，遮挡物有十二种，换色有三种，次元切换有两种，雾中图腾有四种形状，压成平面有两种，大字幕有三种颜色两种收尾）和十八种开始时机，组合多到数不过来
+      再叠加 49 个开关（收尾闪光有两种方式，内衬有两种样式，光环有七种样式，画稿有三种，火焰有两种范围，世界有六个、三种出现方式，运镜有九种，绸带有四种，遮挡物有十二种，换色有三种，次元切换有两种，雾中图腾有四种形状，压成平面有两种，大字幕有三种颜色两种收尾）和十八种开始时机，组合多到数不过来
       （「留在原地」在碎片飞散、装甲弹开、开了粒子、零件飞入或收尾星星时起作用；光环要配平面扫描或螺旋上升）。</p>
   </div>
 </section>
@@ -4230,6 +4327,10 @@
           <tr><td>迷幻多重曝光</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>迷幻多重曝光（五层，迷幻配色）、全屏闪白</td></tr>
           <tr><td>捶胸变身</td><td>球形扩散</td><td>边缘生长</td><td>碎片飞散</td><td>捶胸触发、冲击帧、集中线、地面冲击波、全屏闪白</td></tr>
           <tr><td>梦境领域</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>领域展开（梦境，眨眼进出）、全屏闪白</td></tr>
+          <tr><td>撕衬衫</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>撕开翻落（撕开）、冲击帧、集中线</td></tr>
+          <tr><td>ぶっ返り</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>撕开翻落（翻落，红色衬里）</td></tr>
+          <tr><td>引抜き</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>撕开翻落（扯掉）</td></tr>
+          <tr><td>剥落卷起</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>撕开翻落（卷起剥落，14 条）</td></tr>
         </tbody>
       </table>
     </div>

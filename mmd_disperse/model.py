@@ -23,6 +23,7 @@ DEFAULT_LOCK_PATTERNS = (
     "*face*;*顔*;*hair*;*髪*;*eye*;*目*;*瞳*;*白目*;*brow*;*眉*;*lash*;*まつ*;*睫*;"
     "*mouth*;*口*;*teeth*;*歯*;*tongue*;*舌*;*inner*"
 )
+DEFAULT_KEEP = "body;*skin*;*肌*;*体*;gen;-*"  # 1.19, peel.py: not torn (skin; this model pack's hidden variants)
 
 
 class Model:
@@ -82,7 +83,8 @@ def find_armature(ob):
 # Objects of the add-on's own that may hang in a model's hierarchy (paint on the palms and the glint in the eyes ride on
 # its bones): these properties mark them, they are not the model's meshes.
 HELPERS = ("mmd_disperse_picture_front", "mmd_disperse_glint", "mmd_disperse_finish", "mmd_disperse_light",
-           "mmd_disperse_mist", "mmd_disperse_replay", "mmd_disperse_shell", "mmd_disperse_spirit")
+           "mmd_disperse_mist", "mmd_disperse_replay", "mmd_disperse_shell", "mmd_disperse_spirit",
+           "mmd_disperse_peel")  # (1.19: the torn cloth's twins render, beside her armature)
 
 
 def resolve(ob):

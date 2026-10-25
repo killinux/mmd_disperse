@@ -697,6 +697,21 @@ _ZH = {
     ("*", "Plain Before"): "素颜平光",
     ("*", "A/B Side"): "反差 AB 面",
     ("*", "Touch to Change"): "碰饰品变身",
+    ("*", "Tear Off"): "撕开翻落",
+    ("*", "Tear"): "撕法",
+    ("*", "Rip Open"): "撕开",
+    ("*", "Flip Down"): "翻落",
+    ("*", "Yank Off"): "扯掉",
+    ("*", "Peel Off"): "卷起剥落",
+    ("*", "Tear Time"): "撕开用时",
+    ("*", "Hang"): "挂着的时长",
+    ("*", "Strips"): "条数",
+    ("*", "Lining"): "衬里颜色",
+    ("*", "Keep On"): "不撕的材质",
+    ("*", "Shirt Rip"): "撕衬衫",
+    ("*", "Kabuki Flip"): "ぶっ返り",
+    ("*", "Kabuki Yank"): "引抜き",
+    ("*", "Peel Away"): "剥落卷起",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

@@ -11,7 +11,7 @@ from bpy.props import (
 )
 
 from . import effect
-from .model import DEFAULT_LOCK_PATTERNS
+from .model import DEFAULT_KEEP, DEFAULT_LOCK_PATTERNS
 
 
 def _sync(self, _context):
@@ -730,6 +730,34 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                  description="Seconds before the big moment the mirror stands up beside her")
     mirror_first: FloatProperty(name="Reflection Ahead", default=0.9, min=0.0, soft_max=4.0, update=_sync,
                                 description="Seconds before the big moment the reflection changes")
+    # --- 1.19: tearing the old outfit off (peel.py)
+    peel_enable: BoolProperty(name="Tear Off", default=False, update=_sync,
+                              description="At the big moment the old outfit does not just vanish: its clothes come "
+                                          "apart round the new outfit, which is already on (pair it with All at "
+                                          "Once)")
+    peel_style: EnumProperty(
+        name="Tear",
+        items=(("RIP", "Rip Open", "Split down the middle, the halves swing open round her sides like the flaps of a "
+                                   "coat and fly off (撕开: Superman's shirt)"),
+               ("FLIP", "Flip Down", "Everything above the waist turns down over it inside out, its lining showing, "
+                                     "hangs a while and drops (ぶっ返り: kabuki)"),
+               ("YANK", "Yank Off", "The top is pulled up and away and the bottom drops, in a few frames (引抜き: "
+                                    "kabuki's instant change)"),
+               ("STRIPS", "Peel Off", "It comes off in strips that curl down from the top one after another (剥落卷起: "
+                                      "a sticker peeled off)")),
+        default="RIP", update=_sync)
+    peel_time: FloatProperty(name="Tear Time", default=0.6, min=0.05, soft_max=3.0, update=_sync,
+                             description="Seconds the tearing takes from the big moment")
+    peel_hold: FloatProperty(name="Hang", default=1.0, min=0.0, soft_max=5.0, update=_sync,
+                             description="Flip Down: seconds the turned-down top hangs at her waist before it drops")
+    peel_strips: IntProperty(name="Strips", default=12, min=3, soft_max=40, update=_sync,
+                             description="Peel Off: how many strips round her")
+    peel_lining: FloatVectorProperty(name="Lining", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(0.7, 0.04, 0.06), update=_sync,
+                                     description="Colour of the inside of the torn cloth (small gold crests on it)")
+    peel_keep: StringProperty(name="Keep On", default=DEFAULT_KEEP, update=_sync,
+                              description="Material name patterns that are not torn (skin and the like; face, hair, "
+                                          "eyes and mouth never are): they go with the old outfit as before")
     # --- 1.18: the sweat (sweat.py)
     sweat_enable: BoolProperty(name="Sweat", default=False, update=_sync,
                                description="As she dances towards the big moment she glistens more and more, a wet "

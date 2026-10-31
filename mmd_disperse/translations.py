@@ -727,6 +727,9 @@ _ZH = {
     ("*", "Burn Time"): "燃尽时长",
     ("*", "Inflate and Pop"): "充气爆开",
     ("*", "Melt Away"): "融化滴落",
+    ("*", "Shatter and Fuse"): "碎开再熔合",
+    ("*", "Chunks"): "碎块数",
+    ("*", "Optical Camouflage"): "光学迷彩",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

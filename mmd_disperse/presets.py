@@ -565,6 +565,12 @@ PRESETS = (
                                          "grey one by one, and the new outfit ripples in after them (ANREALAGE's SKIN)",
      dict(_OFF, path="SURFACE", seeds="ORIGIN", old_surface="EPAPER", surface_width=Height(0.5), edge_glow=False,
           glow_color=(1.0, 1.0, 1.0))),
+    ("OPTICAL_CAMO", "Optical Camouflage", "A band of invisibility sweeps down her: the old outfit turns to clear "
+                                           "glass bending what is behind it, a web of hexagons glinting on it, and "
+                                           "the new outfit decloaks out of the glass behind it (光学迷彩: the "
+                                           "Predator, Ghost in the Shell)",
+     dict(_OFF, path="DOWN", old_surface="CAMO", surface_width=Height(0.36), holo_enable=True, holo_style="CAMO",
+          holo_width=Height(0.24), holo_strength=1.5, edge_glow=True, glow_color=(0.45, 0.85, 1.0))),
     # --- 1.13: from many points
     ("IRON_SPARKS", "Iron Sparks", "On the beat a smith strikes molten iron behind her and golden sparks rain down; "
                                    "where they land on her the new outfit starts, with the lights down (打铁花)",
@@ -766,6 +772,13 @@ PRESETS = (
                                "into a shiny pool round her feet, which shrinks back under her (融化滴落)",
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
           peel_style="MELT", peel_time=1.5, peel_lining=(0.05, 0.05, 0.06), glow_color=(1.0, 0.7, 0.4))),
+    ("SHATTER_FUSE", "Shatter and Fuse", "Before the big moment the old outfit cracks into big chunks, fire in the "
+                                         "cracks; they drift out and hang round her over a glowing core, turn into "
+                                         "the new outfit's chunks and slam back onto her on the moment, the seams "
+                                         "glowing and cooling (碎开再熔合: Ne Zha reborn in the cauldron)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
+          peel_style="SHATTER", peel_time=2.4, peel_chunks=7, peel_lining=(0.12, 0.03, 0.01), impact_enable=True,
+          glow_color=(1.0, 0.42, 0.08))),
     ("TALISMANS", "Talismans", "Paper talismans fly from her fingertip, swirl round her and cover her, their "
                                "vermilion runes glowing; at the moment they all catch fire and burn away, ashes "
                                "rising, and she stands there changed (符箓燃尽)",
@@ -791,7 +804,8 @@ WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPAR
                "POWER_UP", "DIMENSION_BEATS", "SLOT_MACHINE", "TOTEM", "MARIONETTE", "SHADOW_PLAY", "PAINTING", "MIRROR_FIRST", "POLAROID",
                "WORLD_FOLD", "MULTI_EXPOSURE", "DREAM_WORLD", "BIG_TITLE", "AB_SIDE", "TOUCH_CHANGE",
                "CHEST_BEAT", "FUMBLE"}
-REFRACTION = {"ICE"}  # presets with clear ice: EEVEE's raytracing (screen space refraction before 4.2) goes on
+REFRACTION = {"ICE", "OPTICAL_CAMO"}  # presets with clear ice or optical camouflage: EEVEE's raytracing (screen
+# space refraction before 4.2) goes on
 
 
 def apply(settings, key):

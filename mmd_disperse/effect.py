@@ -666,11 +666,12 @@ def _update_shadow(ob, settings):
 
 def _update_hologram(ob, settings):
     spacing = HOLO_LINE_SPACING * max(settings.size_reference, 1e-3)
+    cell = SURFACE_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob)  # (the camouflage's hexagons)
     for mat in _glow_materials(ob, settings):
         if settings.holo_enable:
             materials.add_hologram(mat, settings.holo_style)
             materials.update_hologram(mat, settings.glow_color, settings.holo_strength, settings.holo_opacity,
-                                      spacing)
+                                      spacing, cell)
         else:
             materials.remove_hologram(mat)
 

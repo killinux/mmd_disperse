@@ -73,6 +73,8 @@ def parse_args():
                    help="turn the old model this many degrees about Z during the transformation (object animation)")
     p.add_argument("--spin-frames", default="", help="first:last frame of the turn (default: the transformation)")
     p.add_argument("--preset", default="", help="apply a preset first, e.g. MAGICAL")
+    p.add_argument("--backdrop", default="", help="STRIPES: a stage LED wall of glowing bars behind her (1.23: "
+                                                  "what bends through the optical camouflage)")
     p.add_argument("--chain", action="append", default=[],
                    help="an outfit worn before the old one: BLEND::ROOT (appended; repeat in order)")
     p.add_argument("--no-base", action="store_true",
@@ -293,6 +295,44 @@ def setup_stage(scene, bounds, args):
     fbsdf.inputs["Base Color"].default_value = (0.015, 0.016, 0.02, 1.0)
     fbsdf.inputs["Roughness"].default_value = 0.28
     floor.data.materials.append(fmat)
+
+    if args.backdrop == "STRIPES":  # a stage LED wall of glowing bars behind her (what bends through camouflage)
+        bpy.ops.mesh.primitive_plane_add(size=1.0, location=(center.x, hi.y + 1.0 * height, lo.z + 0.9 * height))
+        wall = bpy.context.active_object
+        wall.name = "Backdrop"
+        wall.scale = (3.2 * height, 2.0 * height, 1.0)
+        wall.rotation_euler = (math.radians(90.0), 0.0, 0.0)
+        wmat = bpy.data.materials.new("Backdrop")
+        if wmat.node_tree is None:
+            wmat.use_nodes = True
+        wnt = wmat.node_tree
+        wnt.nodes.clear()
+        coords = wnt.nodes.new("ShaderNodeTexCoord")
+        bars = wnt.nodes.new("ShaderNodeTexWave")
+        bars.wave_type, bars.bands_direction = "BANDS", "X"
+        bars.inputs["Scale"].default_value = 11.0
+        wnt.links.new(coords.outputs["Generated"], bars.inputs["Vector"])
+        lit = wnt.nodes.new("ShaderNodeMath")
+        lit.operation = "GREATER_THAN"
+        lit.inputs[1].default_value = 0.55
+        wnt.links.new(bars.outputs[1], lit.inputs[0])
+        across = wnt.nodes.new("ShaderNodeSeparateXYZ")
+        wnt.links.new(coords.outputs["Generated"], across.inputs[0])
+        hue = wnt.nodes.new("ShaderNodeValToRGB")
+        hue.color_ramp.elements[0].color = (0.1, 0.75, 1.0, 1.0)
+        hue.color_ramp.elements[1].color = (1.0, 0.25, 0.75, 1.0)
+        wnt.links.new(across.outputs[0], hue.inputs[0])
+        glow = wnt.nodes.new("ShaderNodeEmission")
+        wnt.links.new(hue.outputs[0], glow.inputs["Color"])
+        strength = wnt.nodes.new("ShaderNodeMath")
+        strength.operation = "MULTIPLY_ADD"
+        strength.inputs[1].default_value = 0.7  # (brighter washes the colours out to white)
+        strength.inputs[2].default_value = 0.03
+        wnt.links.new(lit.outputs[0], strength.inputs[0])
+        wnt.links.new(strength.outputs[0], glow.inputs["Strength"])
+        out = wnt.nodes.new("ShaderNodeOutputMaterial")
+        wnt.links.new(glow.outputs[0], out.inputs["Surface"])
+        wall.data.materials.append(wmat)
 
     # Camera on a slow orbit around the character.
     pivot = bpy.data.objects.new("Camera Pivot", None)

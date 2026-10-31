@@ -773,15 +773,24 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                               "gone, jerks twice, trembles and pops at the moment into rubber scraps "
                                               "and confetti (充气爆开)"),
                ("MELT", "Melt Away", "It slumps down like wax, dripping, the sleeves dropping off her arms, into a "
-                                     "shiny pool round her feet that shrinks back under her (融化滴落)")),
+                                     "shiny pool round her feet that shrinks back under her (融化滴落)"),
+               ("SHATTER", "Shatter and Fuse", "Before the big moment it cracks into big chunks, fire in the cracks; "
+                                               "they drift out and hang round her over a glowing core, each turns "
+                                               "into the new outfit's chunk there, and at the moment they all slam "
+                                               "back onto her, the seams glowing and cooling (碎开再熔合: Ne Zha "
+                                               "reborn in the cauldron; the fire in the glow colour)")),
         default="RIP", update=_sync)
     peel_time: FloatProperty(name="Tear Time", default=0.6, min=0.05, soft_max=3.0, update=_sync,
                              description="Seconds the tearing takes from the big moment (Inflate and Pop: "
-                                         "three quarters of it swelling up before the moment, the rest the pop)")
+                                         "three quarters of it swelling up before the moment, the rest the pop; "
+                                         "Shatter and Fuse: three quarters of it before the moment)")
     peel_hold: FloatProperty(name="Hang", default=1.0, min=0.0, soft_max=5.0, update=_sync,
                              description="Flip Down: seconds the turned-down top hangs at her waist before it drops")
     peel_strips: IntProperty(name="Strips", default=12, min=3, soft_max=40, update=_sync,
                              description="Peel Off: how many strips round her")
+    peel_chunks: IntProperty(name="Chunks", default=7, min=2, soft_max=20, update=_sync,
+                             description="Shatter and Fuse: how many chunks from her head to her feet (the more, the "
+                                         "smaller)")
     peel_lining: FloatVectorProperty(name="Lining", subtype="COLOR", size=3, min=0.0, max=1.0,
                                      default=(0.7, 0.04, 0.06), update=_sync,
                                      description="Colour of the inside of the torn cloth (small gold crests on it)")
@@ -1194,7 +1203,11 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                      "rings, TV snow (Beyoncé's LED dress by ANREALAGE)"),
                ("EPAPER", "Electronic Paper", "The old outfit turns into scales of electronic paper ahead of the "
                                               "edge, each flashing white once and turning grey, before the new outfit "
-                                              "comes (ANREALAGE's SKIN collection)")),
+                                              "comes (ANREALAGE's SKIN collection)"),
+               ("CAMO", "Optical Camouflage", "The old outfit turns invisible in patches ahead of the edge: clear "
+                                              "glass bending what is behind it, a web of hexagons glinting on it in "
+                                              "the glow color (光学迷彩: the Predator, Ghost in the Shell; pair it "
+                                              "with the Optical Camouflage veil)")),
         default="NONE", update=_sync)
     surface_width: _distance("Surface Reach", "How far ahead of the edge the old outfit starts to change", 3.0)
     surface_color: FloatVectorProperty(name="Surface Color", subtype="COLOR", size=3, min=0.0, max=1.0,
@@ -1247,7 +1260,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("STARS", "Starry Veil", "A dark veil of night sky full of stars: the outfit shows as a starry sky "
                                         "first (a magical girl's starry dress before it is real)"),
                ("SHADOW", "Black Silhouette", "A black shape with a thin glowing rim, which then turns into the outfit"),
-               ("ICE", "Ice", "Pale clear ice with frost, which then turns into the outfit")),
+               ("ICE", "Ice", "Pale clear ice with frost, which then turns into the outfit"),
+               ("CAMO", "Optical Camouflage", "Invisible: clear glass bending what is behind it, a web of hexagons "
+                                              "glinting on it, which decloaks into the outfit as the edge comes "
+                                              "(光学迷彩)")),
         default="SCAN", update=_sync)
     holo_width: _distance("Hologram Width", "How far ahead of the edge the hologram reaches", 2.5)
     holo_opacity: FloatProperty(name="Hologram Opacity", default=0.35, min=0.0, max=1.0, subtype="FACTOR",

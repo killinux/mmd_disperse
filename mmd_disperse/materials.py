@@ -86,6 +86,8 @@ LINING_SCALE = "mmdd_lining_scale"  # ... and the crests on the lining a unit
 LINING_ERA = "mmdd_era_amount"  # 1.21, on a layer of peel.py's: how much its outside takes the colour of its age ...
 LINING_ERA_COLOR = "mmdd_era_color"  # ... which colour
 LINING_GLOSS = "mmdd_gloss"  # 1.22, on the twins' geometry (a point attribute of the group): how glossy it has got
+LINING_HEAT = "mmdd_heat"  # 1.23, ... how hot the cracks of the chunks are (cover_nodes.ATTR_HEAT) ...
+LINING_CELLS = "mmdd_cell_co"  # ... and where it is in the cells the chunks are (cover_nodes.ATTR_CELL_CO)
 # (the balloon of Inflate and Pop, the wax of Melt Away)
 SWEAT = "MMDD Sweat"  # 1.18 (sweat.py): a wet sheen and beads of sweat on the old outfit, added on top
 P_SWEAT = "mmd_disperse_sweat"
@@ -648,6 +650,62 @@ def ensure_thread_material(colour):
     return mat
 
 
+MOLTEN_MATERIAL = "MMD Disperse Molten"  # 1.23 (peel.py): the glowing core between the chunks of Shatter and Fuse
+
+
+def ensure_molten_material(colour):
+    """The glowing core between the chunks (Shatter and Fuse, peel.py): molten fire of `colour`, yellow hot in its
+    veins and dark red where a crust floats on it (a noise of where it is in the chunks' cells, cover_nodes.
+    ATTR_CELL_CO), as bright as the geometry's heat (cover_nodes.ATTR_HEAT) says, and see-through as it cools."""
+    mat = bpy.data.materials.get(MOLTEN_MATERIAL)
+    if mat is None:
+        mat = bpy.data.materials.new(MOLTEN_MATERIAL)
+        if mat.node_tree is None:
+            mat.use_nodes = True
+        nt = mat.node_tree
+        nt.nodes.clear()
+        m = _shader_math(nt, "MMDD Molten")
+        out = _new(nt, "ShaderNodeOutputMaterial", "Output", 800, 0)
+        heat = _new(nt, "ShaderNodeAttribute", "MMDD Molten Heat", -1200, 300, attribute_type="GEOMETRY",
+                    attribute_name="mmdd_heat")
+        hot = m("MAXIMUM", heat.outputs[2], 0.0, x=-900, y=500)
+        where = _new(nt, "ShaderNodeAttribute", "MMDD Molten Where", -1600, -100, attribute_type="GEOMETRY",
+                     attribute_name="mmdd_cell_co")
+        flow = _new(nt, "ShaderNodeTexNoise", "MMDD Molten Flow", -1300, -100, noise_dimensions="3D")
+        nt.links.new(where.outputs["Vector"], flow.inputs["Vector"])
+        flow.inputs["Scale"].default_value = 2.5
+        flow.inputs["Detail"].default_value = 6.0
+        flow.inputs["Distortion"].default_value = 1.5
+        crust = _smooth_node(nt, "MMDD Molten Crust", flow.outputs[0], 0.3, 0.5, -1000, -100)
+        veins = _smooth_node(nt, "MMDD Molten Veins", flow.outputs[0], 0.55, 0.75, -1000, -300)
+        colour_node = _new(nt, "ShaderNodeRGB", "MMDD Molten Colour", -1000, 300)
+        dark = _new(nt, "ShaderNodeVectorMath", "MMDD Molten Dark", -800, 400, operation="SCALE")
+        nt.links.new(colour_node.outputs[0], dark.inputs[0])
+        dark.inputs[3].default_value = 0.12
+        lava = _lerp(nt, dark.outputs[0], colour_node.outputs[0], crust, "MMDD Molten Lava", -600, 300)
+        white = _lerp(nt, lava, (1.0, 0.62, 0.2), veins, "MMDD Molten White", -300, 200)
+        emission = _new(nt, "ShaderNodeEmission", "MMDD Molten Emission", 200, 0)
+        nt.links.new(white, emission.inputs["Color"])
+        # (not too bright: the view transform washes a bright orange out to yellow)
+        nt.links.new(m("MULTIPLY", hot, m("MULTIPLY_ADD", veins, 1.4, m("MULTIPLY_ADD", crust, 0.7, 0.2, x=-800,
+                                                                         y=-650), x=-600, y=-650), x=-300,
+                       y=-550), emission.inputs["Strength"])
+        # (gone as it cools: see-through where the heat is low)
+        clear = _new(nt, "ShaderNodeBsdfTransparent", "MMDD Molten Clear", 200, 300)
+        shader = _new(nt, "ShaderNodeMixShader", "MMDD Molten Shader", 500, 100)
+        nt.links.new(m("MULTIPLY", hot, 3.0, x=200, y=500, clamp=True), shader.inputs[0])
+        nt.links.new(clear.outputs[0], shader.inputs[1])
+        nt.links.new(emission.outputs[0], shader.inputs[2])
+        nt.links.new(shader.outputs[0], out.inputs["Surface"])
+        _blended(mat)
+        _no_shadow(mat)
+    node = mat.node_tree.nodes.get("MMDD Molten Colour")
+    if node is not None:
+        node.outputs[0].default_value = tuple(colour[:3]) + (1.0,)
+    mat.diffuse_color = tuple(colour[:3]) + (1.0,)
+    return mat
+
+
 
 def ensure_paper_material():
     """Red paper (the paper birds): matte, glowing a little so it reads on a dark stage."""
@@ -968,14 +1026,85 @@ def _outputs(nt):
     return [n for n in nt.nodes if n.bl_idname == "ShaderNodeOutputMaterial" and n.inputs["Surface"].links]
 
 
-HOLO_STYLES = ("SCAN", "STARS", "SHADOW", "ICE")
+HOLO_STYLES = ("SCAN", "STARS", "SHADOW", "ICE", "CAMO")
+CAMO_IOR = 1.12  # 1.23, optical camouflage: glass that bends what is behind it a little
+
+
+def _hex_walls(nt, prefix, rest, x, y):
+    """The walls of hexagons drawn round her (prefix + " Hex Around" of them round the up axis of the rest position,
+    prefix + " Hex Up" rows a unit up: update_surface / update_hologram size them; seamless round her when the first
+    is a whole number): 1 on a wall, 0 inside a hexagon (a socket)."""
+    m = _shader_math(nt, prefix + " Hex")
+    split = _new(nt, "ShaderNodeSeparateXYZ", prefix + " Hex Rest", x, y)
+    nt.links.new(rest, split.inputs[0])
+    around = _new(nt, "ShaderNodeValue", prefix + " Hex Around", x, y - 250)
+    around.outputs[0].default_value = 30.0
+    up = _new(nt, "ShaderNodeValue", prefix + " Hex Up", x, y - 400)
+    up.outputs[0].default_value = 30.0
+    # (u, v): round her in hexagon widths (the angle from the front, -y) and up in hexagon widths
+    u = m("MULTIPLY", m("DIVIDE", m("ARCTAN2", split.outputs[0], m("MULTIPLY", split.outputs[1], -1.0, x=x + 200,
+                                                                     y=y - 100), x=x + 400, y=y), 6.2832, x=x + 600,
+                        y=y), around.outputs[0], x=x + 800, y=y)
+    v = m("MULTIPLY", split.outputs[2], up.outputs[0], x=x + 800, y=y - 300)
+
+    def offset(su, sv, yy):
+        """(u, v) from the nearest centre of the lattice shifted by (su, sv) (hexagons a unit wide)."""
+        du = m("SUBTRACT", m("FRACT", m("SUBTRACT", u, su, x=x + 1000, y=yy), x=x + 1200, y=yy), 0.5, x=x + 1400, y=yy)
+        dv = m("SUBTRACT", m("MULTIPLY", m("FRACT", m("DIVIDE", m("SUBTRACT", v, sv, x=x + 1000, y=yy - 150), 1.7321,
+                                                      x=x + 1200, y=yy - 150), x=x + 1400, y=yy - 150), 1.7321,
+                             x=x + 1600, y=yy - 150), 0.866, x=x + 1800, y=yy - 150)
+        return du, dv
+
+    au, av = offset(0.0, 0.0, y)
+    bu, bv = offset(0.5, 0.866, y - 400)
+    nearer = m("LESS_THAN", m("ADD", m("MULTIPLY", au, au, x=x + 2000, y=y), m("MULTIPLY", av, av, x=x + 2000,
+                                                                                 y=y - 150), x=x + 2200, y=y),
+               m("ADD", m("MULTIPLY", bu, bu, x=x + 2000, y=y - 400), m("MULTIPLY", bv, bv, x=x + 2000, y=y - 550),
+                 x=x + 2200, y=y - 450), x=x + 2400, y=y - 200)
+    gu = m("ABSOLUTE", m("ADD", bu, m("MULTIPLY", m("SUBTRACT", au, bu, x=x + 2400, y=y - 400), nearer, x=x + 2600,
+                                      y=y - 400), x=x + 2800, y=y - 400), x=x + 3000, y=y - 400)
+    gv = m("ABSOLUTE", m("ADD", bv, m("MULTIPLY", m("SUBTRACT", av, bv, x=x + 2400, y=y - 600), nearer, x=x + 2600,
+                                      y=y - 600), x=x + 2800, y=y - 600), x=x + 3000, y=y - 600)
+    far = m("MAXIMUM", gu, m("MULTIPLY_ADD", gu, 0.5, m("MULTIPLY", gv, 0.866, x=x + 3000, y=y - 750), x=x + 3200,
+                             y=y - 700), x=x + 3400, y=y - 500)
+    return _smooth_node(nt, prefix + " Hex Wall", far, 0.43, 0.49, x + 3600, y - 500)
+
+
+def _camo_time(nt, name, x, y):
+    """A value node that is the scene frame (a driver), for a shimmer that runs."""
+    node = _new(nt, "ShaderNodeValue", name, x, y)
+    sock = node.outputs[0]
+    sock.driver_remove("default_value")
+    driver = sock.driver_add("default_value").driver
+    driver.type = "SCRIPTED"
+    driver.expression = "frame"
+    return sock
+
+
+def _camo_glass(nt, prefix, glow, alpha, x, y):
+    """Clear glass that bends what is behind it (optical camouflage), glowing as `glow` says in the colour of
+    prefix + " Tint" (set with the glow colour); cut-outs stay cut out (`alpha`)."""
+    tint = nt.nodes.get(prefix + " Tint") or _new(nt, "ShaderNodeRGB", prefix + " Tint", x - 300, y - 300)
+    glass = _new(nt, "ShaderNodeBsdfPrincipled", prefix + " Glass", x, y)
+    _set_input(glass, ("Base Color",), (1.0, 1.0, 1.0, 1.0))
+    _set_input(glass, ("Roughness",), 0.03)
+    _set_input(glass, ("IOR",), CAMO_IOR)
+    _set_input(glass, ("Transmission Weight", "Transmission"), 1.0)
+    _set_input(glass, ("Specular IOR Level", "Specular"), 0.6)
+    nt.links.new(tint.outputs[0], glass.inputs.get("Emission Color") or glass.inputs.get("Emission"))
+    _feed(nt, glass.inputs["Emission Strength"], glow)
+    if alpha is not None:
+        nt.links.new(alpha, glass.inputs["Alpha"])
+    return glass
 
 
 def add_hologram(mat, style="SCAN"):
     """Where `disperse_holo` > 0 (ahead of the edge) the surface turns into a see-through veil, then turns solid at the
     edge: SCAN a glowing hologram with horizontal scan lines; STARS a dark veil of night sky full of stars (a starry
-    veil first, the outfit after); SHADOW a black silhouette with a thin glowing rim; ICE pale clear ice with frost.
-    All with a bright rim and a scan ring at the front of the veil."""
+    veil first, the outfit after); SHADOW a black silhouette with a thin glowing rim; ICE pale clear ice with frost;
+    CAMO (1.23) optical camouflage, clear glass bending what is behind it with a web of hexagons glinting on it, which
+    turns into the outfit over the near part of the veil (it decloaks). All with a bright rim and a scan ring at the
+    front of the veil."""
     nt = mat.node_tree
     if nt is None:
         return
@@ -1033,6 +1162,20 @@ def add_hologram(mat, style="SCAN"):
         icy.outputs[0].default_value = (0.55, 0.85, 1.0, 1.0)
         color = icy.outputs[0]
         cover = math("MULTIPLY_ADD", level, opacity.outputs[0], 0.1, x=x - 500, y=y - 700)
+    elif style == "CAMO":
+        # a web of hexagons round her, a shimmer running up through it
+        rest = _new(nt, "ShaderNodeAttribute", HOLO + " Rest", x - 5600, y - 300, attribute_type="GEOMETRY",
+                    attribute_name=ATTR_REST).outputs["Vector"]
+        walls = _hex_walls(nt, HOLO + " Camo", rest, x - 5400, y - 300)
+        shimmer = _new(nt, "ShaderNodeTexNoise", HOLO + " Shimmer", x - 1500, y - 1500, noise_dimensions="4D")
+        nt.links.new(rest, shimmer.inputs["Vector"])
+        nt.links.new(math("MULTIPLY", _camo_time(nt, HOLO + " Time", x - 1900, y - 1600), 0.05, x=x - 1700,
+                          y=y - 1600), shimmer.inputs["W"])
+        level = math("MULTIPLY", walls, math("MULTIPLY_ADD", _smooth_node(nt, HOLO + " Shimmer Band",
+                                                                          shimmer.outputs[0], 0.5, 0.65, x - 1300,
+                                                                          y - 1500), 1.2, 0.25, x=x - 1100,
+                                             y=y - 1500), x=x - 900, y=y - 1300)
+        cover = opacity.outputs[0]
     else:  # SCAN
         lines = _new(nt, "ShaderNodeTexWave", HOLO + " Lines", x - 1100, y - 300, wave_type="BANDS",
                      bands_direction="Z")
@@ -1065,19 +1208,32 @@ def add_hologram(mat, style="SCAN"):
     nt.links.new(alpha, hologram.inputs[0])
     nt.links.new(clear.outputs[0], hologram.inputs[1])
     nt.links.new(emission.outputs[0], hologram.inputs[2])
+    shown = switch.outputs[0]
+    if style == "CAMO":  # glass instead, faintly lit (hexagons, a thin rim, the ring), turning into the outfit over
+        # the near part of the veil
+        faint = math("MULTIPLY", math("ADD", math("MULTIPLY_ADD", math("POWER", rim.outputs["Facing"], 4.0, x=x - 700,
+                                                                       y=y - 1700), 0.35, level, x=x - 500,
+                                                  y=y - 1700), math("MULTIPLY", ring.outputs[0], 4.0, x=x - 500,
+                                                                    y=y - 1850), x=x - 300, y=y - 1750),
+                     strength.outputs[0], x=x - 100, y=y - 1750)
+        hologram = _camo_glass(nt, HOLO, faint, texture_alpha, x + 200, y - 1000)
+        shown = _smooth_node(nt, HOLO + " Decloak", attr.outputs[2], 0.0, 0.4, x - 900, y + 300)
 
     for i, out in enumerate(outputs):
         mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (HOLO, i), out.location.x - 180, out.location.y + 150)
-        nt.links.new(switch.outputs[0], mix.inputs[0])
+        nt.links.new(shown, mix.inputs[0])
         nt.links.new(hologram.outputs[0], mix.inputs[2])
         _splice(nt, out, mix)
     if bpy.app.version < (4, 2, 0) and mat.blend_method == "OPAQUE":  # legacy EEVEE ignores transparency
         mat[P_BLEND] = mat.blend_method
         mat.blend_method = "HASHED"
     mat[P_HOLO] = style
+    _refraction(mat, _wants_refraction(mat))
 
 
-def update_hologram(mat, color, strength, opacity, line_spacing):
+def update_hologram(mat, color, strength, opacity, line_spacing, cell=None):
+    """The veil's colour, glow, opacity and line spacing (world units); `cell` (object units) sizes the hexagons of
+    the camouflage."""
     nodes = mat.node_tree.nodes if mat.node_tree else {}
     tint = nodes.get(HOLO + " Tint")
     if tint is not None:
@@ -1090,6 +1246,27 @@ def update_hologram(mat, color, strength, opacity, line_spacing):
     if lines is not None:  # scan bands repeat every 2*pi/20 texture units; a star every few line spacings
         scale = {"ShaderNodeTexWave": 0.31416, "ShaderNodeTexVoronoi": 0.2, "ShaderNodeTexNoise": 0.12}
         lines.inputs["Scale"].default_value = scale.get(lines.bl_idname, 0.31416) / max(line_spacing, 1e-6)
+    if cell is not None:
+        _size_hexes(nodes, HOLO + " Camo", cell)
+
+
+HEX_AROUND = 29  # 1.23: hexagons of the camouflage round her (a whole number: no seam at her back) ...
+HEX_RADIUS = 4.6  # ... on a waist this many hexagons wide in radius
+
+
+def _size_hexes(nodes, prefix, cell):
+    """Hexagons about `cell` wide (object units) round her."""
+    around, up = nodes.get(prefix + " Hex Around"), nodes.get(prefix + " Hex Up")
+    if around is not None and up is not None:
+        around.outputs[0].default_value = float(HEX_AROUND)
+        up.outputs[0].default_value = HEX_AROUND / (2.0 * math.pi * HEX_RADIUS * max(cell, 1e-6))
+
+
+def _wants_refraction(mat):
+    """True when something of ours in `mat` wants EEVEE to refract through it: clear ice, optical camouflage."""
+    clear = mat.node_tree.nodes.get(SURFACE + " Clarity") if mat.node_tree else None
+    return ((clear is not None and clear.outputs[0].default_value > 0.0) or mat.get(P_SURFACE) == "CAMO"
+            or mat.get(P_HOLO) == "CAMO")
 
 
 def remove_hologram(mat):
@@ -1098,11 +1275,14 @@ def remove_hologram(mat):
         return
     _unsplice(nt, HOLO + " Mix")
     for node in [n for n in nt.nodes if n.name.startswith(HOLO)]:
+        if node.bl_idname == "ShaderNodeValue":
+            node.outputs[0].driver_remove("default_value")
         nt.nodes.remove(node)
+    del mat[P_HOLO]
+    _refraction(mat, _wants_refraction(mat))  # (put back before the blend mode it found)
     if P_BLEND in mat:
         mat.blend_method = mat[P_BLEND]
         del mat[P_BLEND]
-    del mat[P_HOLO]
 
 
 def add_inner_glow(mat):
@@ -2245,6 +2425,25 @@ def _epaper(nt, near, rest, x, y):
     return fac, bsdf
 
 
+def _camo(nt, near, rest, x, y):
+    """Optical camouflage (光学迷彩: the Predator's cloak, Ghost in the Shell's thermo-optic camouflage) creeps over the
+    old outfit ahead of the edge in patches: clear glass that bends what is behind it (EEVEE's refraction), a web of
+    hexagons round her glinting on it in the glow colour, a shimmer running through them, brighter right at the edge.
+    Returns (factor, shader)."""
+    m = _shader_math(nt, SURFACE + " Camo")
+    fac = _creeping(nt, near, rest, 0.3, 0.7, x, y + 400)
+    walls = _hex_walls(nt, SURFACE + " Camo", rest, x - 5400, y - 300)
+    shimmer = _new(nt, "ShaderNodeTexNoise", SURFACE + " Camo Shimmer", x - 1500, y - 900, noise_dimensions="4D")
+    nt.links.new(rest, shimmer.inputs["Vector"])
+    nt.links.new(m("MULTIPLY", _camo_time(nt, SURFACE + " Camo Time", x - 1900, y - 1000), 0.05, x=x - 1700,
+                   y=y - 1000), shimmer.inputs["W"])
+    band = _smooth_node(nt, SURFACE + " Camo Band", shimmer.outputs[0], 0.5, 0.65, x - 1300, y - 900)
+    glint = m("MULTIPLY", walls, m("ADD", m("MULTIPLY_ADD", band, 1.0, 0.15, x=x - 1100, y=y - 900),
+                                   m("MULTIPLY", m("POWER", near, 4.0, x=x - 1300, y=y - 1100), 1.5, x=x - 1100,
+                                     y=y - 1100), x=x - 900, y=y - 1000), x=x - 700, y=y - 800)
+    return fac, _camo_glass(nt, SURFACE + " Camo", glint, None, x - 300, y - 600)
+
+
 def _smooth_node(nt, name, value, low, high, x, y):
     """A smoothstep Map Range node of `value` from `low` .. `high` to 0 .. 1 (each a socket or a number)."""
     n = _new(nt, "ShaderNodeMapRange", name, x, y, interpolation_type="SMOOTHSTEP")
@@ -2275,7 +2474,7 @@ def add_surface(mat, style):
                 attribute_type="GEOMETRY", attribute_name=ATTR_REST).outputs["Vector"]
     make = {"VEINS": _veins, "FROST": _frost, "CHAR": _char, "INK": _ink, "STONE": _stone, "GOLD": _gold,
             "SILK": _silk, "CODE": _code_rain, "PAPERCUT": _papercut, "TATTOO": _tattoo, "LED": _led,
-            "EPAPER": _epaper}[style]
+            "EPAPER": _epaper, "CAMO": _camo}[style]
     fac, shader = make(nt, near, rest, x, y)
     alpha = _alpha_source(nt)
     if alpha is not None:  # cut-outs stay see-through
@@ -2302,7 +2501,11 @@ def update_surface(mat, color, glow_color, cell, metallic=0.0, clarity=0.0, code
     clear = nodes.get(SURFACE + " Clarity")
     if clear is not None:
         clear.outputs[0].default_value = clarity
-    _refraction(mat, clear is not None and clarity > 0.0)
+    _refraction(mat, _wants_refraction(mat))
+    _size_hexes(nodes, SURFACE + " Camo", cell)  # 1.23: the camouflage's hexagons, glinting in the glow colour
+    tint = nodes.get(SURFACE + " Camo Tint")
+    if tint is not None:
+        tint.outputs[0].default_value = tuple(glow_color) + (1.0,)
     for name, scale in ((" Cells", 1.0), (" Fine", 2.6), (" Warp", 0.8), (" Patches", 0.7), (" Noise", 0.5),
                         (" Facets", 2.0), (" Feathers", 1.2), (" Cracks", 1.5), (" Grain", 4.0), (" Ripple", 0.9),
                         (" Fibres", 1.3), (" Paper Tiles", 0.45), (" Tattoo Swirls", 0.45), (" Tattoo Cells", 0.5)):
@@ -2339,17 +2542,21 @@ def update_surface(mat, color, glow_color, cell, metallic=0.0, clarity=0.0, code
 
 
 def remove_surface(mat):
-    _refraction(mat, False)
     nt = mat.node_tree
     if nt is None or not mat.get(P_SURFACE):
+        if nt is not None:
+            _refraction(mat, _wants_refraction(mat))
         return
     _unsplice(nt, SURFACE + " Mix")
     for node in [n for n in nt.nodes if n.name.startswith(SURFACE)]:
+        if node.bl_idname == "ShaderNodeValue":
+            node.outputs[0].driver_remove("default_value")
         nt.nodes.remove(node)
+    del mat[P_SURFACE]
+    _refraction(mat, _wants_refraction(mat))
     if P_SURFACE_BLEND in mat:
         mat.blend_method = mat[P_SURFACE_BLEND]
         del mat[P_SURFACE_BLEND]
-    del mat[P_SURFACE]
 
 
 # --------------------------------------------------------------------------- 1.10
@@ -6928,19 +7135,21 @@ def remove_oil(mat):
 
 # --------------------------------------------------------------------------- 1.19: the lining of the torn cloth (peel.py)
 
-def add_lining(mat, colour):
+def add_lining(mat, colour, fire=(1.0, 0.45, 0.1)):
     """Splice the lining in (LINING + " Mix", after the sweat): where the cloth of one of peel.py's twins (the object
     attribute LINING_ON) is seen from its inside, a satin of `colour` strewn with small gold crests (a Voronoi of the
     object's own coordinates, LINING_SCALE cells a unit); everywhere else, and on her, it is as it was. Cut-outs stay
     cut out. On a layer of the layered tearing (1.21) its outside takes the colour of its age, as much as the object
     attribute LINING_ERA says: the material as it is lit (Shader to RGB, EEVEE), its brightness (shadows lifted) in
     LINING_ERA_COLOR. Where the twin's geometry says it is glossy (LINING_GLOSS, 1.22: the balloon, the wax) it
-    shines (a Glossy BSDF added), and its inside is as its outside rather than the lining.
-    Called again, it only sets the colour (a splice from before 1.22 is made anew)."""
+    shines (a Glossy BSDF added), and its inside is as its outside rather than the lining. Where it says it is hot
+    (LINING_HEAT, 1.23: the chunks of Shatter and Fuse) the cracks between the chunks (the walls of the cells it is cut
+    in, LINING_CELLS) glow in `fire`, and so does its inside.
+    Called again, it only sets the colours (a splice from before 1.23 is made anew)."""
     nt = mat.node_tree
     if nt is None:
         return
-    if mat.get(P_LINING) and mat.get(P_LINING) < 2:
+    if mat.get(P_LINING) and mat.get(P_LINING) < 3:
         remove_lining(mat)
     if not mat.get(P_LINING):
         outputs = _outputs(nt)
@@ -6958,9 +7167,33 @@ def add_lining(mat, colour):
                           attribute_type="OBJECT", attribute_name=LINING_ERA_COLOR)
         gloss = _new(nt, "ShaderNodeAttribute", LINING + " Gloss", x - 1800, y + 900, attribute_type="GEOMETRY",
                      attribute_name=LINING_GLOSS)
+        heat = _new(nt, "ShaderNodeAttribute", LINING + " Heat", x - 2200, y + 1500, attribute_type="GEOMETRY",
+                    attribute_name=LINING_HEAT)
+        hot = m("MAXIMUM", heat.outputs[2], 0.0, x=x - 2000, y=y + 1500)
         fac = m("MULTIPLY", on.outputs["Fac"], m("MAXIMUM", inside.outputs["Backfacing"], m(
-            "MAXIMUM", era.outputs["Fac"], gloss.outputs["Fac"], x=x - 1800, y=y + 300), x=x - 1600, y=y + 300),
+            "MAXIMUM", era.outputs["Fac"], m("MAXIMUM", gloss.outputs["Fac"], m("MULTIPLY", hot, 50.0, x=x - 2000,
+                                                                                y=y + 300, clamp=True),
+                                             x=x - 1900, y=y + 300), x=x - 1800, y=y + 300), x=x - 1600, y=y + 300),
             x=x - 1400, y=y + 200)
+        # (1.23) the cracks between the chunks: the walls of the cells they are cut in, glowing as hot as they are,
+        # and the inside of them glowing too
+        cells = _new(nt, "ShaderNodeAttribute", LINING + " Cells", x - 2200, y + 1800, attribute_type="GEOMETRY",
+                     attribute_name=LINING_CELLS)
+        walls = _new(nt, "ShaderNodeTexVoronoi", LINING + " Walls", x - 2000, y + 1800, feature="DISTANCE_TO_EDGE")
+        nt.links.new(cells.outputs["Vector"], walls.inputs["Vector"])
+        walls.inputs["Scale"].default_value = 1.0
+        crack = m("SUBTRACT", 1.0, _smooth_node(nt, LINING + " Crack", walls.outputs["Distance"], 0.0, 0.022,
+                                                x - 1800, y + 1800), x=x - 1600, y=y + 1800)
+        halo = m("SUBTRACT", 1.0, _smooth_node(nt, LINING + " Halo", walls.outputs["Distance"], 0.0, 0.07,
+                                               x - 1800, y + 2000), x=x - 1600, y=y + 2000)
+        burn = m("MULTIPLY", hot, m("ADD", m("MULTIPLY_ADD", crack, 5.0, m("MULTIPLY", halo, 0.3, x=x - 1400,
+                                                                            y=y + 2000), x=x - 1200, y=y + 1900),
+                                    m("MULTIPLY", inside.outputs["Backfacing"], 1.0, x=x - 1400, y=y + 2150),
+                                    x=x - 1000, y=y + 2000), x=x - 800, y=y + 1900)
+        fire_colour = _new(nt, "ShaderNodeRGB", LINING + " Fire", x - 1000, y + 2300)
+        fire_light = _new(nt, "ShaderNodeEmission", LINING + " Fire Light", x - 600, y + 2000)
+        nt.links.new(fire_colour.outputs[0], fire_light.inputs["Color"])
+        nt.links.new(burn, fire_light.inputs["Strength"])
         alpha = _alpha_source(nt)
         if alpha is not None:
             fac = m("MULTIPLY", fac, alpha, x=x - 1200, y=y + 200)
@@ -7017,11 +7250,15 @@ def add_lining(mat, colour):
                 nt.links.new(aged_or_not.outputs[0], shining.inputs[0])
                 nt.links.new(shine.outputs[0], shining.inputs[1])
                 nt.links.new(shining.outputs[0], side.inputs[1])
-            nt.links.new(side.outputs[0], mix.inputs[2])
-        mat[P_LINING] = 2
-    node = nt.nodes.get(LINING + " Colour")
-    if node is not None:
-        node.outputs[0].default_value = tuple(colour[:3]) + (1.0,)
+            burning = _new(nt, "ShaderNodeAddShader", "%s Burning %d" % (LINING, i), x + 200, y + 400 + 300 * i)
+            nt.links.new(side.outputs[0], burning.inputs[0])
+            nt.links.new(fire_light.outputs[0], burning.inputs[1])
+            nt.links.new(burning.outputs[0], mix.inputs[2])
+        mat[P_LINING] = 3
+    for name, value in ((" Colour", colour), (" Fire", fire)):
+        node = nt.nodes.get(LINING + name)
+        if node is not None:
+            node.outputs[0].default_value = tuple(value[:3]) + (1.0,)
 
 
 def remove_lining(mat):

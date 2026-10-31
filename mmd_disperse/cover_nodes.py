@@ -62,14 +62,18 @@ ECHO_NUMBER = "mmdd_echo"  # on the multiple exposure's copies (instances): whic
 ECHO_FADE = "mmdd_fade"  # ... and how much it shows
 PEEL_GROUP = "MMDDisperse Peel"
 PEEL_POP = 0.75  # 1.22, the tearing's INFLATE: when (0 .. 1 of the tearing time) the balloon pops (the big moment)
+PEEL_LAND = 0.75  # 1.23, the tearing's SHATTER: when the new outfit's chunks have slammed back onto her (the moment)
+PEEL_HIDE_GROUP = "MMDDisperse Peel Hide"  # 1.23: on the old outfit's meshes, its torn faces gone (Shatter and Fuse)
+ATTR_HEAT = "mmdd_heat"  # 1.23, on the peel twins' geometry: how hot the chunks' cracks glow (the lining's fire) ...
+ATTR_CELL_CO = "mmdd_cell_co"  # ... and where each point is in the chunks' cells (the lining draws their cracks)
 FUMBLE_GROUP = "MMDDisperse Fumble"
 TALISMAN_GROUP = "MMDDisperse Talisman"
 ATTR_STICK = "mmdd_stick"  # on the old outfit's meshes (a face attribute): 1 where talisman.py's talismans may stick
 FUMBLE_HIDE_GROUP = "MMDDisperse Fumble Hide"
 ATTR_LOOSE = "mmdd_loose"  # on the new outfit's meshes (a face attribute): 1 where fumble.py lets it fall off
-ATTR_TEAR = "mmdd_tear"  # on the old outfit's meshes (a face attribute): 1 where peel.py tears it off
+ATTR_TEAR = "mmdd_tear"  # on the outfits' meshes (a face attribute): 1 where peel.py tears it off (cuts it, 1.23)
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 18  # bumped when one of these groups changes
+REVISION = 19  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -1907,8 +1911,15 @@ def build_peel_group():
       PEEL_POP + 0.85;
     5 MELT: it slumps to the floor like wax, some columns ahead (dripping), the sleeves dropping, and spreads into a
       pool round her feet (the higher it was the further out), smoothed out; the pool shrinks back under her from 1
-      to 1.4.
-    INFLATE and MELT store how far along they are (mmdd_gloss, 0 .. 1) for the lining's gloss.
+      to 1.4;
+    6 SHATTER (1.23): cut into big chunks (the cells of one Voronoi of where it is at rest, Cell Size big, from Cell
+      Origin, Chunks of them over her height: a twin of the new outfit (Incoming) is cut the same), its cracks glowing,
+      each chunk drifts out from her and hangs there turning a little; at its moment (the top first) the old chunk is
+      gone and the new outfit's chunk of the same cell is there instead, which slams back onto her by PEEL_LAND, its
+      seams glowing and cooling till 1. Till PEEL_LAND a glowing core (Core Material) shows where the old outfit was,
+      between the chunks.
+    INFLATE and MELT store how far along they are (mmdd_gloss, 0 .. 1) for the lining's gloss, SHATTER how hot the
+    cracks are (ATTR_HEAT) and where each point is in the cells (ATTR_CELL_CO) for the lining's cracks.
     The mesh is cut between the pieces (told apart face by face), so no face stretches across two.
     It lies a hair out along its normals (over the new outfit; Push times that: the outer of several layers further),
     and shows, still whole, from Show From (a layer of several waiting for its turn). With Threads (1 about one point in 250) sticky threads
@@ -1930,6 +1941,11 @@ def build_peel_group():
         ("Show From", "NodeSocketFloat", 0.0),
         ("Push", "NodeSocketFloat", 1.0),
         ("Confetti Material", "NodeSocketMaterial"),
+        ("Incoming", "NodeSocketBool", False),
+        ("Cell Size", "NodeSocketFloat", 0.2),
+        ("Cell Origin", "NodeSocketVector", (0.0, 0.0, 1.0)),
+        ("Chunks", "NodeSocketFloat", 7.0),
+        ("Core Material", "NodeSocketMaterial"),
     ))
     gi = b.node("NodeGroupInput", -3400, 0)
     go = b.node("NodeGroupOutput", 3400, 0)
@@ -2363,6 +2379,120 @@ def build_peel_group():
         "SUBTRACT", here_m, under, x=1400, y=y0 - 700), scale=b.math("SUBTRACT", 1.0, gather, x=1400, y=y0 - 500),
         x=1600, y=y0 - 600), x=1800, y=y0 - 600), x=1800, y=y0), "mmdd_gloss", melt, x=2000, y=y0)
 
+    # --- SHATTER (1.23, 碎开再熔合: Ne Zha reborn in the cauldron): cut into big chunks, the cells of one Voronoi of
+    # where it is at rest in cells from Cell Origin (the old outfit's twins and the new one's are cut alike), its cracks
+    # glowing; each chunk drifts out from her (along its own facing and away from her middle) and hangs there turning a
+    # little; at its moment (the top first) the old chunk is gone and the new outfit's chunk of that cell is there
+    # instead, which slams back onto her by PEEL_LAND, its seams glowing and cooling. A glowing core shows between them.
+    y0 = -21000
+    cell_size = b.math("MAXIMUM", gi.outputs["Cell Size"], 1e-5, x=-2800, y=y0 - 300)
+    tall = b.math("MULTIPLY", cell_size, gi.outputs["Chunks"], x=-2600, y=y0 - 450)  # (her height)
+    cc = b.vmath("SCALE", b.vmath("SUBTRACT", rest, gi.outputs["Cell Origin"], x=-2800, y=y0 - 150),
+                 scale=b.math("DIVIDE", 1.0, cell_size, x=-2600, y=y0 - 300), x=-2400, y=y0 - 150)
+    hot = b.store(cloth, ATTR_CELL_CO, cc, "FLOAT_VECTOR", x=-2200, y=y0)
+    lumps = b.node("ShaderNodeTexVoronoi", -2000, y0 - 600)
+    b.feed(lumps.inputs["Vector"], b.on_domain(cc, "FACE", "FLOAT_VECTOR", x=-2200, y=y0 - 600))
+    lumps.inputs["Scale"].default_value = 1.0
+    lr, lg, lb = b.split_xyz(lumps.outputs["Color"], x=-1800, y=y0 - 600)
+    _lx, _ly, lz = b.split_xyz(lumps.outputs["Position"], x=-1800, y=y0 - 800)
+    k1 = b.math("FLOOR", b.math("MULTIPLY", lr, 997.0, x=-1600, y=y0 - 500), x=-1400, y=y0 - 500)
+    k1_f = b.on_domain(k1, "FACE", x=-1200, y=y0 - 500)
+    key_f = b.on_domain(b.math("MULTIPLY_ADD", b.math("FLOOR", b.math("MULTIPLY", lg, 31.0, x=-1600, y=y0 - 650),
+                                                      x=-1400, y=y0 - 650), 997.0, k1, x=-1200, y=y0 - 650),
+                        "FACE", x=-1000, y=y0 - 650)
+    per_face = [b.on_domain(v, "FACE", x=-1200, y=y0 - 800 - 150 * i) for i, v in enumerate((lr, lg, lb, lz))]
+    # cut between the chunks (an edge between two of them: the ids of its faces differ)
+    k1_mean = b.on_domain(k1_f, "EDGE", x=-1000, y=y0 - 1500)
+    k1_spread = b.math("SUBTRACT", b.on_domain(b.on_domain(b.math("MULTIPLY", k1_f, k1_f, x=-1200, y=y0 - 1650),
+                                                           "FACE", x=-1000, y=y0 - 1650), "EDGE", x=-800, y=y0 - 1650),
+                       b.math("MULTIPLY", k1_mean, k1_mean, x=-800, y=y0 - 1500), x=-600, y=y0 - 1550)
+    split = b.node("GeometryNodeSplitEdges", -400, y0)
+    b.feed(split.inputs["Mesh"], b.store(hot, "mmdd_from", pushed, "FLOAT_VECTOR", x=-1000, y=y0))
+    b.feed(split.inputs["Selection"], b.compare("GREATER_THAN", k1_spread, 0.1, x=-400, y=y0 - 1550))
+    # (each point now in faces of one chunk only: the chunk's values are its faces')
+    chunk = b.math("ROUND", b.on_domain(key_f, "POINT", x=-200, y=y0 - 650), x=0, y=y0 - 650)
+    sr, sg, sb, sz = (b.on_domain(v, "POINT", x=-200, y=y0 - 800 - 150 * i) for i, v in enumerate(per_face))
+    here_s = b.node("GeometryNodeInputPosition", -200, y0 - 1500).outputs[0]
+    many = b.math("MAXIMUM", b.accumulate(1.0, chunk, x=0, y=y0 - 1700), 1.0, x=200, y=y0 - 1700)
+    pivot = b.vmath("SCALE", b.accumulate(here_s, chunk, data_type="FLOAT_VECTOR", x=0, y=y0 - 1500),
+                    scale=b.math("DIVIDE", 1.0, many, x=400, y=y0 - 1700), x=600, y=y0 - 1500)
+    facing_s = b.vmath("NORMALIZE", b.accumulate(normal, chunk, data_type="FLOAT_VECTOR", x=0, y=y0 - 1900),
+                       x=200, y=y0 - 1900)
+    waist_s = placed(gi.outputs["Centre"], lower_frame, 200, y0 - 2100)
+    wsx, wsy, _wsz = b.split_xyz(waist_s, x=600, y=y0 - 2100)
+    psx, psy, _psz = b.split_xyz(pivot, x=800, y=y0 - 1500)
+    away_s = b.vmath("NORMALIZE", b.combine(b.math("SUBTRACT", psx, wsx, x=1000, y=y0 - 2000),
+                                            b.math("SUBTRACT", psy, wsy, x=1000, y=y0 - 2150), 0.0, x=1200,
+                                            y=y0 - 2050), x=1400, y=y0 - 2050)
+    way_s = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("ADD", facing_s, b.vmath("SCALE", away_s, scale=0.2, x=1600,
+                                                                                y=y0 - 2050), x=1800, y=y0 - 1950),
+                                         (0.0, 0.0, 0.1), x=2000, y=y0 - 1950), x=2200, y=y0 - 1950)
+    # its moments: drifting out from 0.12 .. 0.2 (by chance) till 0.42; changed over from 0.47 (her head) to 0.55
+    # (her feet); back on her at PEEL_LAND, ever faster
+    zn = b.math("ADD", 0.5, b.math("DIVIDE", sz, b.math("MAXIMUM", gi.outputs["Chunks"], 1.0, x=-200, y=y0 - 2400),
+                                   x=0, y=y0 - 2350), x=200, y=y0 - 2350, clamp=True)
+    swap = b.math("MULTIPLY_ADD", b.math("SUBTRACT", 1.0, zn, x=400, y=y0 - 2350), 0.08, 0.47, x=600, y=y0 - 2350)
+    drift = b.map_range(t, b.math("MULTIPLY_ADD", sb, 0.08, 0.12, x=400, y=y0 - 2550), 0.42, x=600, y=y0 - 2550,
+                        smooth=True)
+    back_ = b.map_range(t, swap, PEEL_LAND, x=800, y=y0 - 2500)
+    slam = b.math("SUBTRACT", 1.0, b.math("POWER", back_, 3.0, x=1000, y=y0 - 2500), x=1200, y=y0 - 2500)
+    amount = b.switch("FLOAT", gi.outputs["Incoming"], drift, slam, x=1400, y=y0 - 2500)
+    bob = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY_ADD", t, 13.0, b.math("MULTIPLY", sg, 6.2832, x=1000,
+                                                                                     y=y0 - 2800), x=1200,
+                                                       y=y0 - 2750), x=1400, y=y0 - 2750), 0.05, 1.0, x=1600,
+                     y=y0 - 2750)
+    reach_s = b.math("MULTIPLY", b.math("MULTIPLY", tall, b.math("MULTIPLY_ADD", sg, 0.05, 0.05, x=1400, y=y0 - 2950),
+                                        x=1600, y=y0 - 2950), b.math("MULTIPLY", amount, bob, x=1800, y=y0 - 2650),
+                       x=2000, y=y0 - 2800)
+    tilt = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", way_s, b.combine(
+        b.math("ADD", sr, -0.2, x=2000, y=y0 - 3100), b.math("ADD", sg, -0.7, x=2000, y=y0 - 3250),
+        b.math("ADD", sb, -0.4, x=2000, y=y0 - 3400), x=2200, y=y0 - 3250), x=2400, y=y0 - 3150), x=2600, y=y0 - 3150)
+    turn_s = b.math("MULTIPLY", amount, b.math("MULTIPLY_ADD", sb, 0.3, 0.12, x=2400, y=y0 - 3400), x=2600,
+                    y=y0 - 3400)
+    moved_s = b.vmath("ADD", b.rotate(pushed, pivot, tilt, turn_s, x=2800, y=y0 - 1500),
+                      b.vmath("SCALE", way_s, scale=reach_s, x=2800, y=y0 - 2000), x=3000, y=y0 - 1700)
+    # how hot: the old chunks' cracks glow up at first; the new chunks flash as they come and as they land, then cool
+    hot_old = b.math("MULTIPLY", b.map_range(t, 0.0, 0.16, x=1400, y=y0 - 3700, smooth=True), b.math(
+        "MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY_ADD", t, 31.0, b.math("MULTIPLY", sr, 6.2832, x=1000,
+                                                                              y=y0 - 3900), x=1200, y=y0 - 3850),
+                               x=1400, y=y0 - 3850), 0.15, 0.85, x=1600, y=y0 - 3850), x=1800, y=y0 - 3700)
+    cooled = b.math("SUBTRACT", 1.0, b.map_range(t, PEEL_LAND + 0.02, 1.0, x=1400, y=y0 - 4100, smooth=True),
+                    x=1600, y=y0 - 4100)
+    came = b.math("SUBTRACT", 1.0, b.map_range(t, swap, b.math("ADD", swap, 0.06, x=1200, y=y0 - 4300), x=1400,
+                                               y=y0 - 4250, smooth=True), x=1600, y=y0 - 4250)
+    landed = b.math("MAXIMUM", b.math("SUBTRACT", 1.0, b.math("DIVIDE", b.math("ABSOLUTE", b.math(
+        "SUBTRACT", t, PEEL_LAND, x=1000, y=y0 - 4450), x=1200, y=y0 - 4450), 0.04, x=1400, y=y0 - 4450), x=1600,
+        y=y0 - 4450), 0.0, x=1800, y=y0 - 4450)
+    hot_new = b.math("ADD", b.math("MULTIPLY_ADD", came, 0.7, cooled, x=1800, y=y0 - 4200),
+                     b.math("MULTIPLY", landed, 0.6, x=2000, y=y0 - 4450), x=2200, y=y0 - 4300)
+    heat = b.switch("FLOAT", gi.outputs["Incoming"], hot_old, hot_new, x=2400, y=y0 - 3900)
+    flown_s = b.set_position(b.store(split.outputs["Mesh"], ATTR_HEAT, heat, x=2800, y=y0), position=moved_s,
+                             x=3200, y=y0)
+    # (an old chunk is gone from its moment on; a new one is there from then)
+    shattered = b.delete(flown_s, b.boolean("XOR", b.compare("GREATER_EQUAL", t, swap, x=3200, y=y0 - 2400),
+                                            gi.outputs["Incoming"], x=3400, y=y0 - 2400), "POINT", x=3600, y=y0)
+    # the glowing core: where the old outfit is (a hair out, under the chunks: in, a tight suit's would be inside
+    # her), hotter as the chunks drift off, flaring as they change
+    core_heat = b.math("ADD", b.map_range(t, 0.1, 0.3, x=-1000, y=y0 - 5000, smooth=True), b.math(
+        "MULTIPLY", b.math("MULTIPLY", b.map_range(t, 0.42, 0.48, x=-1000, y=y0 - 5150, smooth=True), b.math(
+            "SUBTRACT", 1.0, b.map_range(t, 0.5, 0.62, x=-1000, y=y0 - 5300, smooth=True), x=-800, y=y0 - 5300),
+                    x=-600, y=y0 - 5200), 0.8, x=-400, y=y0 - 5200), x=-200, y=y0 - 5100)
+    # (cooling and fading as the new chunks come back: where the new outfit does not cover her it is gone by then)
+    core_heat = b.math("MULTIPLY", core_heat, b.math("SUBTRACT", 1.0, b.map_range(
+        t, 0.6, PEEL_LAND - 0.01, x=-400, y=y0 - 5450, smooth=True), x=-200, y=y0 - 5450), x=0, y=y0 - 5300)
+    core_geo = b.set_position(b.store(hot, ATTR_HEAT, core_heat, x=0, y=y0 - 4800), offset=b.vmath(
+        "SCALE", normal, scale=b.math("MULTIPLY", tall, 0.0012, x=0, y=y0 - 5300), x=200, y=y0 - 5200), x=400,
+        y=y0 - 4800)
+    core_dressed = b.node("GeometryNodeSetMaterial", 600, y0 - 4800)
+    b.feed(core_dressed.inputs["Geometry"], core_geo)
+    b.feed(core_dressed.inputs["Material"], gi.outputs["Core Material"])
+    core_on = b.boolean("AND", b.boolean("AND", b.boolean("NOT", gi.outputs["Incoming"], x=400, y=y0 - 5400),
+                                         b.compare("GREATER_EQUAL", t, 0.1, x=400, y=y0 - 5550), x=600, y=y0 - 5450),
+                        b.boolean("AND", b.compare("LESS_THAN", t, PEEL_LAND, x=600, y=y0 - 5700),
+                                  b.compare("EQUAL", style, 6.0, x=600, y=y0 - 5850), x=800, y=y0 - 5750),
+                        x=1000, y=y0 - 5550)
+    core = b.switch("GEOMETRY", core_on, None, core_dressed.outputs["Geometry"], x=1200, y=y0 - 4800)
+
     # the style's positions (only the one picked is worked out), and nothing outside the tearing; each point keeps
     # where it was on her (for the threads)
     def picked(positions, x, y, base=None):
@@ -2374,7 +2504,8 @@ def build_peel_group():
         moved = picked(positions, 2000, yy, strip_base if k == 3 else None)
         shaped = b.switch("GEOMETRY", b.compare("EQUAL", style, float(k), x=2000, y=yy + 200), shaped, moved,
                           x=2200, y=yy)
-    for k, made, yy in ((4, inflate, -11000), (5, melted, -17500)):  # (these keep where they were themselves)
+    for k, made, yy in ((4, inflate, -11000), (5, melted, -17500), (6, shattered, -21000)):  # (these keep where
+        # they were themselves)
         shaped = b.switch("GEOMETRY", b.compare("EQUAL", style, float(k), x=3800, y=yy + 200), shaped, made,
                           x=4000, y=yy)
     # --- the threads: from a few of its points (picked by where they are at rest) back to where they were on her
@@ -2448,7 +2579,8 @@ def build_peel_group():
     end = b.switch("FLOAT", b.compare("EQUAL", style, 5.0, x=2800, y=-1400), end, 1.4, x=3000, y=-1300)
     shown = b.boolean("AND", b.compare("GREATER_EQUAL", t, gi.outputs["Show From"], x=2600, y=-300),
                       b.compare("LESS_THAN", t, end, x=2800, y=-1000), x=2800, y=-300)
-    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", shown, None, shaped, x=3000, y=0))
+    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", shown, None, b.join([shaped, core], x=2800, y=0), x=3000,
+                                           y=0))
     return ng
 
 
@@ -2456,6 +2588,27 @@ def ensure_peel_group():
     if not _current(PEEL_GROUP):
         build_peel_group()
     return bpy.data.node_groups[PEEL_GROUP]
+
+
+def build_peel_hide_group():
+    """The old outfit's torn faces (ATTR_TEAR) gone once Time reaches 0 (1.23, Shatter and Fuse: from then on its
+    twin's chunks are there instead, before the big moment)."""
+    ng, b = _group(PEEL_HIDE_GROUP, (
+        ("Time", "NodeSocketFloat", -1.0),
+    ))
+    gi = b.node("NodeGroupInput", -600, 0)
+    go = b.node("NodeGroupOutput", 400, 0)
+    tear = b.named_attribute(ATTR_TEAR, "BOOLEAN", x=-600, y=-200)[0]
+    gone = b.boolean("AND", tear, b.compare("GREATER_EQUAL", gi.outputs["Time"], 0.0, x=-400, y=-300), x=-200,
+                     y=-200)
+    b.feed(go.inputs["Geometry"], b.delete(gi.outputs["Geometry"], gone, "FACE", x=0, y=0))
+    return ng
+
+
+def ensure_peel_hide_group():
+    if not _current(PEEL_HIDE_GROUP):
+        build_peel_hide_group()
+    return bpy.data.node_groups[PEEL_HIDE_GROUP]
 
 # --------------------------------------------------------------------------- 1.20: the fumble (fumble.py)
 

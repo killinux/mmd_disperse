@@ -9,7 +9,12 @@ its clothes come apart over Tear Time round the new outfit, which is already on:
 - Inflate and Pop (充气爆开, 1.22): it swells up like a balloon before the big moment, shiny, its wrinkles gone, jerks
   twice, trembles and pops at the moment into rubber scraps and confetti;
 - Melt Away (融化滴落, 1.22): it slumps down like wax, dripping, the sleeves dropping off her arms, into a shiny pool
-  round her feet that shrinks back under her.
+  round her feet that shrinks back under her;
+- Shatter and Fuse (碎开再熔合, 1.23: Ne Zha reborn in the cauldron, Ne Zha 2): before the big moment it cracks into
+  big chunks, fire in the cracks; they drift out and hang round her over a glowing core, each turns into the chunk of
+  the new outfit there (the new outfit is cut the same way: twins of its meshes too) and they all slam back onto her
+  at the moment, the seams glowing and cooling. Her own old outfit is gone from the first crack (a small modifier on
+  its meshes) and the new one comes as they land.
 Skin, face, hair and whatever Keep On names are not torn (they go with the old model as before); the inside of the
 torn cloth shows the lining colour (spliced into its materials, for the twins only). Layer by layer (层层撕回, 1.21:
 Agatha All Along's ballad, each verse an earlier age): several layers of it, torn off one after another a Layer Gap
@@ -35,10 +40,12 @@ P_PEEL = "mmd_disperse_peel"  # on our twins: the mask of their effect ...
 P_SOURCE = "mmd_disperse_peel_source"  # ... the mesh it is of ...
 P_KIND = "mmd_disperse_peel_kind"  # ... TWIN, UPPER or LOWER ...
 P_LAYER = "mmd_disperse_peel_layer"  # ... and a twin's layer (0 the outer one)
+P_INCOMING = "mmd_disperse_peel_incoming"  # 1.23: on the twins of the new outfit's meshes (Shatter and Fuse)
 AGES = ((0.95, 0.62, 0.35), (0.86, 0.86, 0.86), (0.8, 0.6, 0.36), (0.55, 0.85, 1.0))  # the 70s, black and white,
 # an old photo, a faded blue print: the colours of the layers under the outer one
 NAME = "MMD Disperse Peel"
-STYLES = ("RIP", "FLIP", "YANK", "STRIPS", "INFLATE", "MELT")
+HIDE = NAME + " Hide"  # 1.23: the modifier on the old outfit's meshes (its torn faces gone while the chunks fly)
+STYLES = ("RIP", "FLIP", "YANK", "STRIPS", "INFLATE", "MELT", "SHATTER")
 CONFETTI = (1.0, 0.42, 0.62)  # Inflate and Pop: the confetti in hues round this pink (and gold and silver)
 WAIST = ("下半身", "LowerBody", "lower body", "Hips", "hips", "pelvis", "J_Bip_C_Hips")
 CHEST = ("上半身2", "上半身", "UpperBody2", "UpperBody", "upper body 2", "upper body", "Chest", "chest", "Spine2",
@@ -49,10 +56,17 @@ def objects(mask, kind=None):
     return [ob for ob in bpy.data.objects if ob.get(P_PEEL) == mask and (kind is None or ob.get(P_KIND) == kind)]
 
 
+def _unhide(ob):
+    mod = ob.modifiers.get(HIDE) if ob.type == "MESH" else None
+    if mod is not None:
+        ob.modifiers.remove(mod)
+
+
 def clear_tear(meshes):
     from .cover_nodes import ATTR_TEAR
 
     for ob in meshes:
+        _unhide(ob)
         if ob.type == "MESH" and ob.data.attributes.get(ATTR_TEAR) is not None:
             ob.data.attributes.remove(ob.data.attributes[ATTR_TEAR])
 
@@ -63,13 +77,14 @@ def remove(mask, models=()):
         bpy.data.objects.remove(ob)
     clear_tear([ob for ob in sources if ob is not None] + [ob for model in models for ob in model.meshes])
     if not any(ob.get(P_PEEL) is not None for ob in bpy.data.objects):
-        from .cover_nodes import PEEL_GROUP
+        from .cover_nodes import PEEL_GROUP, PEEL_HIDE_GROUP
 
-        ng = bpy.data.node_groups.get(PEEL_GROUP)
-        if ng is not None and ng.users == 0:
-            bpy.data.node_groups.remove(ng)
-        for name in (materials.THREAD_MATERIAL, materials.COVER_MATERIAL + " Confetti"):  # (the confetti's: unless
-            mat = bpy.data.materials.get(name)  # a cover uses it)
+        for name in (PEEL_GROUP, PEEL_HIDE_GROUP):
+            ng = bpy.data.node_groups.get(name)
+            if ng is not None and ng.users == 0:
+                bpy.data.node_groups.remove(ng)
+        for name in (materials.THREAD_MATERIAL, materials.COVER_MATERIAL + " Confetti", materials.MOLTEN_MATERIAL):
+            mat = bpy.data.materials.get(name)  # (the confetti's: unless a cover uses it)
             if mat is not None and mat.users == 0:
                 bpy.data.materials.remove(mat)
         for mat in [m for m in bpy.data.materials if m.get(materials.P_LINING)]:
@@ -240,26 +255,40 @@ def sync(settings, mask, models, moment):
     scene = settings.id_data
     fps = scene.render.fps / scene.render.fps_base
     span = max(settings.peel_time * fps, 1.0)
-    old = models[0]
+    old, new = models[0], models[1]
     collection = mask.users_collection[0] if mask.users_collection else scene.collection
     group = cover_nodes.ensure_peel_group()
     ids = input_identifiers(group)
     patterns = _patterns(settings)
-    layers = max(1, int(getattr(settings, "peel_layers", 1)))
+    shatter = settings.peel_style == "SHATTER"
+    layers = 1 if shatter else max(1, int(getattr(settings, "peel_layers", 1)))
     gap = max(getattr(settings, "peel_layer_gap", 0.5), 0.05) * fps
     keep, torn = [], set()
     thread = materials.ensure_thread_material(tuple(settings.peel_thread_color)) \
         if settings.peel_threads > 0.0 else None
     confetti = materials.ensure_cover_material("CONFETTI") if settings.peel_style == "INFLATE" else None
-    lead = cover_nodes.PEEL_POP * span if settings.peel_style == "INFLATE" else 0.0  # (it pops at the moment)
-    for ob in old.meshes:
+    core = materials.ensure_molten_material(tuple(settings.glow_color)) if shatter else None
+    # (a balloon pops at the moment; the chunks land on her then)
+    lead = span * {"INFLATE": cover_nodes.PEEL_POP, "SHATTER": cover_nodes.PEEL_LAND}.get(settings.peel_style, 0.0)
+    chunks = float(max(getattr(settings, "peel_chunks", 7), 1))
+    tall = max(settings.size_reference, 1e-3)  # (her height: the chunks' cells are a share of it)
+    hide_group = cover_nodes.ensure_peel_hide_group() if shatter else None
+    if not shatter:
+        clear_tear(new.meshes)
+    for ob, incoming in [(ob, False) for ob in old.meshes] + [(ob, True) for ob in new.meshes if shatter]:
         if not write_tear(ob, patterns):
+            _unhide(ob)
             continue
         torn |= {s.material for s, on in zip(ob.material_slots, _torn_slots(ob, patterns)) if on}
         centre, size, shoulder = measure(ob, old.armature)
+        s = ob.matrix_world.to_scale()
+        scale = abs(s.x * s.y * s.z) ** (1.0 / 3.0) or 1.0
+        origin = _bone_head(old.armature, WAIST, ob) or centre
+        _hide(ob, None if incoming else hide_group, "frame - %.2f" % (float(moment) - lead))
         upper = lower = None
         for layer in range(layers):  # (0 the outer one, torn first; the last at the big moment)
             twin, mod = _twin(ob, mask, collection, group, layer)
+            twin[P_INCOMING] = int(incoming)
             if not layer:
                 upper = _frame(twin, mask, collection, old.armature, CHEST, "UPPER", ob.matrix_world)
                 lower = _frame(twin, mask, collection, old.armature, WAIST, "LOWER", ob.matrix_world)
@@ -276,7 +305,9 @@ def sync(settings, mask, models, moment):
                                 ("Hold", settings.peel_hold / max(settings.peel_time, 0.01)), ("Seed", 7 + layer),
                                 ("Threads", float(settings.peel_threads)), ("Thread Material", thread),
                                 ("Show From", -layer * gap / span), ("Push", float(layers - layer)),
-                                ("Confetti Material", confetti)):
+                                ("Confetti Material", confetti), ("Incoming", incoming),
+                                ("Cell Size", tall / chunks / scale), ("Cell Origin", tuple(origin)),
+                                ("Chunks", chunks), ("Core Material", None if incoming else core)):
                 if name in ids:
                     mod[ids[name]] = value
             path = '["%s"]' % ids["Time"]
@@ -291,7 +322,28 @@ def sync(settings, mask, models, moment):
     for mat in [m for m in bpy.data.materials if m.get(materials.P_LINING) and m not in torn]:
         materials.remove_lining(mat)
     for mat in torn:
-        materials.add_lining(mat, tuple(settings.peel_lining))
+        materials.add_lining(mat, tuple(settings.peel_lining), tuple(settings.glow_color))
+
+
+def _hide(ob, group, expression):
+    """The modifier on one of her meshes that takes its torn faces away from the frame `expression` says (Time >= 0;
+    Shatter and Fuse: the chunks fly instead), last on the mesh; none without a `group`."""
+    from .node_groups import input_identifiers
+
+    if group is None:
+        _unhide(ob)
+        return
+    mod = ob.modifiers.get(HIDE)
+    if mod is None:
+        mod = ob.modifiers.new(HIDE, "NODES")
+        mod.node_group = group
+    elif mod.node_group != group:
+        mod.node_group = group
+    path = '["%s"]' % input_identifiers(group)["Time"]
+    mod.driver_remove(path)
+    driver = mod.driver_add(path).driver
+    driver.type = "SCRIPTED"
+    driver.expression = expression
 
 
 def _torn_slots(ob, patterns):

@@ -4095,8 +4095,10 @@ def run():
     twins_ = peel.objects(s.mask, "TWIN")
     start_ = moment - cover_nodes.PEEL_POP * span_
     confetti_ = materials.COVER_MATERIAL + " Confetti"
+    # ("full" a twentieth of the time before the moment: two frames before it were too early at 24 fps, the balloon
+    # 0.899 glossy)
     seen_ = {"before": shape_of(twins_, start_ - 2), "start": shape_of(twins_, start_ + 1),
-             "full": shape_of(twins_, moment - 2), "pop": shape_of(twins_, moment + 0.15 * span_),
+             "full": shape_of(twins_, moment - 0.05 * span_), "pop": shape_of(twins_, moment + 0.15 * span_),
              "after": shape_of(twins_, start_ + (cover_nodes.PEEL_POP + 0.85) * span_ + 3)}
     parts_ = {"nothing before, nothing after": seen_["before"][0] == 0 and seen_["after"][0] == 0
               and seen_["start"][0] > 0,
@@ -4132,6 +4134,125 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.22 checks")
+    # --- 1.23: shatter and fuse (the old outfit's chunks and the new one's); optical camouflage
+    from mmd_disperse import peel  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "peel_enable", "peel_style", "peel_time", "peel_chunks", "old_surface",
+        "surface_width", "holo_enable", "holo_style", "holo_width")}
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+
+    def faces_of(objs_, f_):
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        return sum(len(o_.evaluated_get(deps_).data.polygons) for o_ in objs_)
+
+    def heat_of(objs_, deps_):
+        hot_ = 0.0
+        for o_ in objs_:
+            attr_ = o_.evaluated_get(deps_).data.attributes.get(cover_nodes.ATTR_HEAT)
+            if attr_ is not None and len(attr_.data):
+                vals_ = np.zeros(len(attr_.data), dtype=np.float32)
+                attr_.data.foreach_get("value", vals_)
+                hot_ = max(hot_, float(vals_.max()))
+        return hot_
+
+    def chunks_at(objs_, f_):
+        """(faces, mean distance across from their middle, how hot at most) of `objs_` at frame `f_`."""
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        pts_ = np.array([tuple(v_.co) for o_ in objs_ for v_ in o_.evaluated_get(deps_).data.vertices]).reshape(-1, 3)
+        faces_ = sum(len(o_.evaluated_get(deps_).data.polygons) for o_ in objs_)
+        across_ = float(np.linalg.norm((pts_ - pts_.mean(axis=0))[:, :2], axis=1).mean()) if len(pts_) else 0.0
+        return faces_, across_, heat_of(objs_, deps_)
+
+    # shatter and fuse: from three quarters of the tearing time before the moment the old outfit's chunks (its own
+    # cloth gone), cracks glowing, drifting out over a core; the new outfit's chunks in their place, slamming back
+    # onto her by the moment and cooling; nothing before or after
+    s.peel_enable, s.peel_style, s.peel_time, s.peel_chunks = True, "SHATTER", 1.2, 6
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the tearing as shatter and fuse")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    span_ = 1.2 * fps
+    start_ = moment - cover_nodes.PEEL_LAND * span_
+    twins_ = peel.objects(s.mask, "TWIN")
+    olds_ = [t_ for t_ in twins_ if not t_.get(peel.P_INCOMING)]
+    news_ = [t_ for t_ in twins_ if t_.get(peel.P_INCOMING)]
+    hidden_ = [o_ for o_ in base.meshes if o_.modifiers.get(peel.HIDE) is not None]
+    new_cloth_ = {sl.material for o_ in target.meshes if o_.data.attributes.get(cover_nodes.ATTR_TEAR) is not None
+                  for sl, on_ in zip(o_.material_slots, peel._torn_slots(o_, peel._patterns(s))) if on_}
+    lined_ = {mm for mm in bpy.data.materials if mm.get(materials.P_LINING)}
+    seen_ = {"before": (chunks_at(olds_, start_ - 2), chunks_at(news_, start_ - 2)),
+             "start": (chunks_at(olds_, start_ + 1), chunks_at(news_, start_ + 1)),
+             "out": (chunks_at(olds_, start_ + 0.4 * span_), chunks_at(news_, start_ + 0.4 * span_)),
+             "changed": (chunks_at(olds_, start_ + 0.62 * span_), chunks_at(news_, start_ + 0.62 * span_)),
+             "landed": (chunks_at(olds_, moment + 1), chunks_at(news_, moment + 1)),
+             "cooled": (chunks_at(olds_, start_ + 0.97 * span_), chunks_at(news_, start_ + 0.97 * span_)),
+             "after": (chunks_at(olds_, start_ + span_ + 2), chunks_at(news_, start_ + span_ + 2))}
+    real_ = (faces_of(hidden_, start_ - 2), faces_of(hidden_, start_ + 1))
+    whole_ = seen_["start"][0][0]
+    parts_ = {"objects": bool(olds_) and bool(news_) and bool(hidden_) and len(hidden_) == len(olds_)
+              and bool(new_cloth_) and new_cloth_ <= lined_
+              and bpy.data.materials.get(materials.MOLTEN_MATERIAL) is not None,
+              "nothing before, nothing after": all(v_[0] == 0 for k_ in ("before", "after") for v_ in seen_[k_])
+              and whole_ > 0 and seen_["start"][1][0] == 0,
+              "her old outfit gone from the start": real_[1] < real_[0],
+              "cracks glowing, drifting out over the core": seen_["start"][0][2] < seen_["out"][0][2]
+              and seen_["out"][0][2] > 0.9 and seen_["out"][0][0] == 2 * whole_
+              and seen_["out"][0][1] > seen_["start"][0][1] + 0.015 * height,
+              "changed over: the core and the new chunks, out": seen_["changed"][0][0] == whole_
+              and seen_["changed"][1][0] > 0,
+              "slammed back by the moment, hot, cooling": seen_["landed"][0][0] == 0
+              and seen_["landed"][1][1] < seen_["changed"][1][1] and seen_["landed"][1][2] > 0.5
+              and seen_["cooled"][1][2] < 0.2}
+    check(all(parts_.values()), "shatter and fuse: the old outfit cracks into chunks before the moment, they drift "
+                                "out over a glowing core, turn into the new outfit's and slam back onto her by it, "
+                                "cooling (%s; %s %s)" % ([k_ for k_, ok_ in parts_.items() if not ok_] or "all",
+                                                         seen_, real_))
+    check(not draw_panels(bpy.context), "panels draw with shatter and fuse")
+    s.peel_enable = False
+    check(not peel.objects(s.mask) and not [o_ for o_ in base.meshes if o_.modifiers.get(peel.HIDE)]
+          and not [o_ for o_ in target.meshes if o_.data.attributes.get(cover_nodes.ATTR_TEAR) is not None]
+          and bpy.data.materials.get(materials.MOLTEN_MATERIAL) is None
+          and bpy.data.node_groups.get(cover_nodes.PEEL_HIDE_GROUP) is None
+          and not [mm for mm in bpy.data.materials if mm.get(materials.P_LINING)],
+          "shatter and fuse off: the twins, the hiding, the marks, the core and the lining gone")
+    # optical camouflage: the old outfit's surface ahead of the edge and the new one's veil, both glass EEVEE
+    # refracts through (made see-through before 4.2), hexagons sized to her; all put back when off
+    olds_ = {sl.material for o_ in base.meshes for sl in o_.material_slots if sl.material is not None}
+    news_ = {sl.material for o_ in target.meshes for sl in o_.material_slots if sl.material is not None}
+    was_ = {mm.name: (mm.blend_method, getattr(mm, "use_screen_refraction", None),
+                      getattr(mm, "use_raytrace_refraction", None)) for mm in olds_ | news_}
+    s.old_surface, s.holo_enable, s.holo_style = "CAMO", True, "CAMO"
+    s.surface_width, s.holo_width = 0.3 * height, 0.2 * height
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with optical camouflage")
+    cloaked_ = [mm for mm in olds_ if mm.get(materials.P_SURFACE) == "CAMO"]
+    veiled_ = [mm for mm in news_ if mm.get(materials.P_HOLO) == "CAMO"]
+
+    def refracts(mm):
+        if hasattr(mm, "use_raytrace_refraction"):
+            return mm.use_raytrace_refraction
+        return mm.use_screen_refraction and mm.blend_method != "OPAQUE"
+
+    hexes_ = [mm.node_tree.nodes.get(materials.SURFACE + " Camo Hex Up") for mm in cloaked_]
+    parts_ = {"the old outfit cloaked, the new one veiled": bool(cloaked_) and bool(veiled_),
+              "refracting": all(refracts(mm) for mm in cloaked_ + veiled_),
+              "hexagons sized to her": all(n_ is not None and 0.0 < n_.outputs[0].default_value for n_ in hexes_)}
+    check(all(parts_.values()), "optical camouflage: glass ahead of the edge on both outfits, refracting, hexagons "
+                                "(%s; %d %d)" % ([k_ for k_, ok_ in parts_.items() if not ok_] or "all",
+                                                 len(cloaked_), len(veiled_)))
+    check(not draw_panels(bpy.context), "panels draw with optical camouflage")
+    s.old_surface, s.holo_enable = "NONE", False
+    back_ = {mm.name: (mm.blend_method, getattr(mm, "use_screen_refraction", None),
+                       getattr(mm, "use_raytrace_refraction", None)) for mm in olds_ | news_}
+    check(back_ == was_ and not [mm for mm in olds_ | news_ if mm.get(materials.P_REFRACT) is not None
+                                 or mm.get(materials.P_SURFACE) or mm.get(materials.P_HOLO)],
+          "optical camouflage off: the materials as they were (%s)" % [k_ for k_ in was_ if back_.get(k_) != was_[k_]])
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.23 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along

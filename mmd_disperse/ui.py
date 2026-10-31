@@ -1033,10 +1033,14 @@ class MMDDISPERSE_PT_peel(_Panel, bpy.types.Panel):
             col.prop(s, "peel_hold")
         if s.peel_style == "STRIPS":
             col.prop(s, "peel_strips")
-        col = layout.column(align=True)
-        col.prop(s, "peel_layers")
-        if s.peel_layers > 1:
-            col.prop(s, "peel_layer_gap")
+        if s.peel_style == "SHATTER":  # (1.23: one layer; the fire in the glow colour)
+            col.prop(s, "peel_chunks")
+            layout.prop(s, "glow_color", text="Fire")
+        else:
+            col = layout.column(align=True)
+            col.prop(s, "peel_layers")
+            if s.peel_layers > 1:
+                col.prop(s, "peel_layer_gap")
         layout.prop(s, "peel_lining")
         row = layout.row(align=True)
         row.prop(s, "peel_threads")

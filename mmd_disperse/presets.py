@@ -19,7 +19,7 @@ _OFF = dict(
     cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
     ghost_enable=False, puppet_enable=False, shadow_enable=False, shadow_style="SHADOW", mirror_enable=False,
     echo_enable=False, title_enable=False, sweat_enable=False, peel_enable=False, peel_threads=0.0, peel_layers=1, fumble_enable=False, talisman_enable=False,
-    plume_enable=False, morph_enable=False,
+    plume_enable=False, morph_enable=False, dim_reverse=False, dim_cel=False, dim_outline=1.0, wind_style="NONE",
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -632,6 +632,11 @@ PRESETS = (
                                              "realistic (次元闪切; best with the music's beats)",
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, dim_style="BEATS", dim_length=2.5,
           dim_film=True, dim_lights=True, finale=True, finale_white=0.3, glow_color=(1.0, 1.0, 1.0))),
+    ("INTO_ANIME", "Into the Anime", "She dances realistic and the new outfit comes in as an anime drawing along the "
+                                     "front (flat cel colours, dark outlines), her head and hair turning as it passes "
+                                     "them (走进二次元, a-ha's \"Take On Me\")",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", easing="EASE", dim_style="FRONT", dim_reverse=True, dim_cel=True,
+          dim_outline=1.0, dim_film=False, dim_lights=True, glow_color=(1.0, 0.95, 0.85))),
     # --- 1.15: the slot machine, the totem in the mist
     ("SLOT_MACHINE", "Slot Machine", "A slot machine drops in front of her, the lever is pulled and the reels stop "
                                      "one by one on the beats: 7 7 7, the outfits swap behind it in a flash, coins "
@@ -717,7 +722,8 @@ PRESETS = (
                             "(反差 A/B 面 of short videos)",
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, look_style="PLAIN",
           look_length=4.0, trigger="RAISE", time_warp="SLOW", warp_length=1.0, sweat_enable=True, sweat_amount=1.0,
-          sweat_time=4.0, finale=True, finale_white=0.45, glow_color=(1.0, 0.85, 0.7))),
+          sweat_time=4.0, finale=True, finale_white=0.45, wind_style="FRONT", wind_strength=1.0, wind_time=2.0,
+          glow_color=(1.0, 0.85, 0.7))),
     ("TOUCH_CHANGE", "Touch to Change", "A fingertip touches an ear, the corner of an eye or the glasses and the "
                                         "change flows over the body from there, the old outfit bursting into "
                                         "sparkles (VRChat's outfit gimmicks: 碰饰品、扶眼镜; needs a dance)",

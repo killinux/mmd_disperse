@@ -10,7 +10,7 @@ from mathutils import Matrix, Vector
 
 from . import (arrival, beats, chain, compositor, cover, dimension, domain, finish, glint, grow, impact, launch, lights,
                echo, ghost, materials, mirror, mist, motion, origins, particles, picture, printer, puppet, pyro,
-               fumble, morph, peel, plumage, replay, sweat, talisman, title,
+               fumble, gust, morph, peel, plumage, replay, sweat, talisman, title,
                ribbons, rings, sampling, shadowplay, shell, shots, spirit, timewarp, tint, toon, totem, trails, venom)
 from . import model as mdl
 from .node_groups import (ATTR_ARRIVAL, BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups,
@@ -530,6 +530,7 @@ def _cleanup_mesh(ob):
         talisman.clear_stick([ob])
         plumage.clear_grow([ob])
         morph.clear([ob])
+        dimension.clear_outline([ob])
     saved = ob.get(P_ARM)
     if saved:
         for mod_name, arm_name in saved.to_dict().items():
@@ -616,6 +617,7 @@ def remove_effect(mask):
     talisman.remove(mask)
     plumage.remove(mask)
     morph.remove(mask)
+    gust.remove(mask)
     grow.remove(mask)
     chain.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
@@ -1315,7 +1317,9 @@ def sync(settings):
                    lambda radius: _frame_at(mask, radius))  # 1.14: toon to realistic
     origins.sync(settings, mask, _models(settings), lambda radius: _frame_at(mask, radius))
     printer.sync(settings, mask, _models(settings), lambda radius: _frame_at(mask, radius))  # 1.14
-    chain.sync(settings, mask, mdl.resolve(settings.base) if settings.base else None)
+    chain.sync(settings, mask, mdl.resolve(settings.base) if settings.base else None,
+               mdl.resolve(settings.target) if settings.target else None,
+               _frame_at(mask, big) if wave_at > 0.0 else None)  # (1.25: the variant after the big moment)
     glint.sync(settings, mask, next(iter(_models(settings)), None))  # 1.12: the star in the eyes (eye contact)
     totem.sync(settings, mask, _models(settings), lambda radius: _frame_at(mask, radius),
                _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.15: the totem in the mist
@@ -1334,6 +1338,7 @@ def sync(settings):
     talisman.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.21
     plumage.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.24
     morph.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.24
+    gust.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.25: the wind
     # 1.11: cartoon physics at the big moment (the first frame of it: the swap, or the new outfit complete), about an
     # anchor under the old model's hips; the float lands then
     landing = _frame_at(mask, big) if wave_at > 0.0 else None
@@ -1620,6 +1625,7 @@ def sync(settings):
         if role in ("TARGET", "BASE"):
             _update_inner_glow(ob, settings)
             _update_shadow(ob, settings)
+    dimension.last([ob for ob in objects if ob.type == "MESH"])  # (1.25: the cel look's outlines after all ours)
 
 
 def _beside(settings, height):

@@ -429,6 +429,14 @@ def main():
     if args.anim:
         a, b = (int(v) for v in args.anim.split(":"))
         frames += list(range(a, b + 1))
+        rbw = scene.rigidbody_world
+        cache = rbw.point_cache if rbw is not None else None
+        if cache is not None and not cache.is_baked:
+            # (1.25) the model's physics (hair, skirt) from the first frame rendered: a simulation only ever steps on
+            # from the frame before, so a clip starting part-way into the cache's range never ran it at all
+            cache.frame_start = a
+            cache.frame_end = max(cache.frame_end, b)
+            print("PHYSICS from", a, "to", cache.frame_end)
     for f in frames:
         scene.frame_set(f)
         scene.render.filepath = os.path.join(args.out, "%04d.png" % f)

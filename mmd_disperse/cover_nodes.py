@@ -78,7 +78,7 @@ MORPH_GROUP = "MMDDisperse Morph"  # 1.24 (morph.py): the new outfit from the ol
 ATTR_MORPH = "mmdd_morph"  # on the new outfit's meshes (a point vector, at rest): to the old outfit's nearest surface
 ATTR_SKIRT = "mmdd_skirt"  # ... (a point float): 1 on the skirt that drops
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 20  # bumped when one of these groups changes
+REVISION = 21  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -782,6 +782,83 @@ def ensure_chain_group():
     return bpy.data.node_groups[CHAIN_GROUP]
 
 
+VARIANT_HIDE_GROUP = "MMDDisperse Variant Hide"
+
+
+def build_variant_hide_group():
+    """The parts of the new outfit marked mmdd_variant (a face attribute, chain.py) gone from frame From on (1.25, the
+    variant: the main change and then, at a cut, the jacket off)."""
+    ng, b = _group(VARIANT_HIDE_GROUP, (
+        ("From", "NodeSocketFloat", 1.0e6),
+    ))
+    gi = b.node("NodeGroupInput", -600, 0)
+    go = b.node("NodeGroupOutput", 400, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -600, -400).outputs["Frame"]
+    gone = b.boolean("AND", b.named_attribute("mmdd_variant", "BOOLEAN", x=-600, y=-200)[0],
+                     b.compare("GREATER_EQUAL", frame, gi.outputs["From"], x=-400, y=-400), x=-200, y=-200)
+    b.feed(go.inputs["Geometry"], b.delete(gi.outputs["Geometry"], gone, "FACE", x=0, y=0))
+    return ng
+
+
+def ensure_variant_hide_group():
+    if not _current(VARIANT_HIDE_GROUP):
+        build_variant_hide_group()
+    return bpy.data.node_groups[VARIANT_HIDE_GROUP]
+
+
+CEL_OUTLINE_GROUP = "MMDDisperse Cel Outline"
+ATTR_OUTLINE = "mmdd_outline"  # (materials.CEL_OUTLINE)
+ATTR_UNLINED = "mmdd_unlined"  # (a face attribute, dimension.py) faces that make no shell
+
+
+def build_cel_outline_group():
+    """The outlines of the dimension switch's cel look (1.25, dimension.py): a shell of the mesh, without the faces
+    marked ATTR_UNLINED, turned inside out (its faces flipped) and marked ATTR_OUTLINE; her materials
+    (materials.add_real) draw only its far side, a dark line of her colour round her, where she is toon: the inverted
+    hull outlines of anime games. The shell grows out by Width as the Camera sees her (its normals with what points
+    at the camera taken out: most at her outline, hardly at all where she faces it) and is pushed back from the
+    camera by Back: the shell of an inner layer (her skin under a tight suit) stays behind the outer one rather than
+    coming out through it in creases. Without a camera, out along the normals."""
+    ng, b = _group(CEL_OUTLINE_GROUP, (
+        ("Width", "NodeSocketFloat", 0.01),
+        ("Back", "NodeSocketFloat", 0.02),
+        ("Camera", "NodeSocketObject"),
+    ))
+    gi = b.node("NodeGroupInput", -1400, 0)
+    go = b.node("NodeGroupOutput", 600, 0)
+    normal = b.node("GeometryNodeInputNormal", -1400, -300).outputs[0]
+    here = b.node("GeometryNodeInputPosition", -1400, -450).outputs[0]
+    info = b.node("GeometryNodeObjectInfo", -1400, -650, transform_space="RELATIVE")
+    b.feed(info.inputs["Object"], gi.outputs["Camera"])
+    # (no camera: Object Info gives the origin, and the view is no way at all)
+    view = b.vmath("SCALE", b.vmath("NORMALIZE", b.vmath("SUBTRACT", here, info.outputs["Location"], x=-1200,
+                                                          y=-500), x=-1000, y=-500), scale=b.compare(
+        "GREATER_THAN", b.vmath("LENGTH", info.outputs["Location"], x=-1000, y=-800), 0.0, x=-800, y=-800),
+        x=-800, y=-500)
+    side = b.vmath("SUBTRACT", normal, b.vmath("SCALE", view, scale=b.vmath("DOT_PRODUCT", normal, view, x=-800,
+                                                                           y=-350), x=-600, y=-400), x=-600, y=-300)
+    toward = b.switch("VECTOR", b.compare("GREATER_THAN", b.vmath("LENGTH", view, x=-600, y=-600), 0.5, x=-400,
+                                          y=-600), normal, side, x=-400, y=-300)
+    offset = b.vmath("ADD", b.vmath("SCALE", toward, scale=gi.outputs["Width"], x=-300, y=-300),
+                     b.vmath("SCALE", view, scale=gi.outputs["Back"], x=-300, y=-500), x=-200, y=-350)
+    parts = b.node("GeometryNodeSeparateComponents", -1000, -150)  # (only the mesh: particles stay as they are)
+    b.feed(parts.inputs["Geometry"], gi.outputs["Geometry"])
+    lined = b.delete(parts.outputs["Mesh"], b.named_attribute(ATTR_UNLINED, "BOOLEAN", x=-800, y=-1000)[0], "FACE",
+                     x=-600, y=-150)
+    pushed = b.set_position(lined, offset=offset, x=-400, y=-150)
+    flipped = b.node("GeometryNodeFlipFaces", -200, -150)
+    b.feed(flipped.inputs["Mesh"], pushed)
+    shell = b.store(flipped.outputs["Mesh"], ATTR_OUTLINE, 1.0, x=0, y=-150)
+    b.feed(go.inputs["Geometry"], b.join([gi.outputs["Geometry"], shell], x=300, y=0))
+    return ng
+
+
+def ensure_cel_outline_group():
+    if not _current(CEL_OUTLINE_GROUP):
+        build_cel_outline_group()
+    return bpy.data.node_groups[CEL_OUTLINE_GROUP]
+
+
 # --------------------------------------------------------------------------- 1.14: the print (printer.py)
 
 def _ring(radius, z, sides):
@@ -951,6 +1028,11 @@ def build_print_supports_group():
 
     top = at("top", -3000, -1000)
     bottom = at("bottom", -3000, -1700)
+    # (1.25) a support standing on the build plate: no vertices for its foot (-1), its weights are where it stands
+    foot_x, _foot_y, _foot_z = b.split_xyz(b.named_attribute("mmdd_bottom", "FLOAT_VECTOR", x=-3000, y=-2500)[0],
+                                           x=-2800, y=-2500)
+    bottom = b.switch("VECTOR", b.compare("LESS_THAN", foot_x, -0.5, x=-2600, y=-2500), bottom,
+                      b.named_attribute("mmdd_bottom_w", "FLOAT_VECTOR", x=-2800, y=-2650)[0], x=-2400, y=-1700)
     a0 = b.named_attribute("mmdd_a0", "FLOAT", x=-3000, y=-400)[0]
     a1 = b.named_attribute("mmdd_a1", "FLOAT", x=-3000, y=-550)[0]
     r = b.named_attribute("mmdd_r", "FLOAT", x=-3000, y=-700)[0]
@@ -1630,7 +1712,7 @@ def remove_unused():
             if me is not None and me.users == 0:
                 bpy.data.meshes.remove(me)
     for name in (SHATTER_GROUP, RIPPLE_GROUP, PIECES_GROUP, BALLOONS_GROUP, FAN_GROUP, CURTAIN_GROUP, ERAS_GROUP,
-                 ORIGINS_GROUP, CHAIN_GROUP, PHOTO_GROUP, FOLD_GROUP):
+                 ORIGINS_GROUP, CHAIN_GROUP, PHOTO_GROUP, FOLD_GROUP, VARIANT_HIDE_GROUP, CEL_OUTLINE_GROUP):
         ng = bpy.data.node_groups.get(name)
         if ng is not None and ng.users == 0:
             bpy.data.node_groups.remove(ng)
@@ -1964,6 +2046,21 @@ def build_peel_group():
     shoulder_rel = b.math("SUBTRACT", gi.outputs["Shoulder"], cz, x=-3000, y=-1800)
     count = b.math("MAXIMUM", gi.outputs["Strips"], 1.0, x=-3000, y=-1950)
 
+    def unshared(mesh, ids, x, y):
+        """`mesh`, cut between the pieces `ids` tells apart (a face field), with every edge at a point still in faces
+        of two pieces split as well: where two pieces only touch at a point there is no edge between them to cut, and
+        that point (an average of the two ids, neither's) went with neither, tearing them both (1.25)."""
+        off = b.math("ABSOLUTE", b.math("SUBTRACT", ids, b.on_domain(ids, "POINT", x=x, y=y - 300), x=x + 200,
+                                        y=y - 200), x=x + 400, y=y - 200)
+        mixed = b.on_domain(b.math("MULTIPLY", b.compare("GREATER_THAN", b.on_domain(b.on_domain(
+            off, "CORNER", x=x + 600, y=y - 200), "POINT", x=x + 800, y=y - 200), 0.05, x=x + 1000, y=y - 200), 1.0,
+            x=x + 1200, y=y - 200), "POINT", x=x + 1400, y=y - 200)
+        n = b.node("GeometryNodeSplitEdges", x + 1800, y)
+        b.feed(n.inputs["Mesh"], mesh)
+        b.feed(n.inputs["Selection"], b.compare("GREATER_THAN", b.on_domain(mixed, "EDGE", x=x + 1600, y=y - 200),
+                                                0.01, x=x + 1800, y=y - 200))
+        return n.outputs["Mesh"]
+
     def kinds(where, x, y):
         """(side +1 her left / -1 her right, arm, lower (under the waist), collar (above the shoulders), strip) of
         the rest point `where`."""
@@ -1994,7 +2091,16 @@ def build_peel_group():
                      x=-800, y=-2600)
     piece = b.switch("FLOAT", b.compare("EQUAL", style, 2.0, x=-800, y=-2850), piece, b.math(
         "SUBTRACT", 1.0, lower_f, x=-1000, y=-3000), x=-600, y=-2750)
-    piece = b.switch("FLOAT", b.compare("EQUAL", style, 3.0, x=-600, y=-3000), piece, strip_f, x=-400, y=-2900)
+    # (1.25: the sleeves and the collar of the strips burst off apart from the strips, each sleeve and each half of
+    # the collar a piece of its own, whole: or the faces between a falling sleeve and its strip on her, or between a
+    # sleeve and the collar pulled to two middles, stretched into long fins)
+    loose_f = b.math("MAXIMUM", arm_f, collar_f, x=-1200, y=-3300)
+    loose_piece = b.math("ADD", b.math("ADD", b.compare("GREATER_THAN", side_f, 0.0, x=-1400, y=-3450),
+                                       b.math("MULTIPLY", collar_f, 2.0, x=-1400, y=-3600), x=-1200, y=-3450),
+                         1000.0, x=-1000, y=-3450)
+    strip_piece = b.math("MULTIPLY_ADD", loose_f, b.math("SUBTRACT", loose_piece, strip_f, x=-1000, y=-3600),
+                         strip_f, x=-800, y=-3300)
+    piece = b.switch("FLOAT", b.compare("EQUAL", style, 3.0, x=-600, y=-3000), piece, strip_piece, x=-400, y=-2900)
     piece = b.switch("FLOAT", b.compare("GREATER_THAN", style, 3.5, x=-600, y=-3150), piece, 0.0, x=-400,
                      y=-3050)  # (a balloon and wax stay whole)
     piece = b.on_domain(piece, "FACE", x=-200, y=-2750)
@@ -2005,10 +2111,13 @@ def build_peel_group():
     cut = b.node("GeometryNodeSplitEdges", 600, -2800)
     b.feed(cut.inputs["Mesh"], torn)
     b.feed(cut.inputs["Selection"], b.compare("GREATER_THAN", spread, 0.01, x=600, y=-3000))
-    cloth = cut.outputs["Mesh"]
+    cloth = unshared(cut.outputs["Mesh"], piece, 600, -3400)
     # (each point now in faces of one piece only: its kinds are its faces')
     side, arm, lower, collar, strip = (b.on_domain(k, "POINT", x=800, y=-2400 - 150 * i)
                                        for i, k in enumerate((side_f, arm_f, lower_f, collar_f, strip_f)))
+    # (1.25: an average of 3s comes out 3.0000002 at some points in float32, which the strip's random turn hashes
+    # apart from 3: a strip torn across, half of it curling down long before the other half)
+    strip = b.math("ROUND", strip, x=1000, y=-3000)
     upper = b.compare("LESS_THAN", lower, 0.5, x=800, y=-2550)
     arm = b.compare("GREATER_THAN", arm, 0.5, x=800, y=-2700)
     collar = b.compare("GREATER_THAN", collar, 0.5, x=800, y=-2850)
@@ -2185,14 +2294,30 @@ def build_peel_group():
                    x=0, y=y0 - 1950)
     along = b.vmath("NORMALIZE", b.vmath("ADD", flat, b.vmath("SCALE", up, scale=r, x=0, y=y0 - 2150), x=200,
                                          y=y0 - 2050), x=400, y=y0 - 2050)
-    lift = b.math("SUBTRACT", rz, front, x=-1000, y=y0 - 2450)  # how far up the strip from the curl
-    beta = b.math("DIVIDE", lift, r, x=-800, y=y0 - 2450)
-    centre = b.vmath("ADD", curl_at, b.vmath("SCALE", facing, scale=r, x=-400, y=y0 - 1500), x=-200, y=y0 - 1450)
+    # (1.25) a roll like a rolled-up carpet, layer on layer: the strip's top end at its core, the part just peeled its
+    # outer layer, touching her at the curl. From the core outwards the radius grows a layer's thickness a turn:
+    # R(x) = sqrt(r0^2 + 2 k x), x the length from the core, k = layer / 2 pi; a point at `lift` above the curl is
+    # (peeled - lift) from the core, at angle (R_out - R) / k from where the roll touches her. (One radius for every
+    # layer, as before, put them all on one circle: crumpled red lumps.)
+    lift = b.math("MAXIMUM", b.math("SUBTRACT", rz, front, x=-1000, y=y0 - 2450), 0.0, x=-900, y=y0 - 2450)
+    peeled_len = b.math("MAXIMUM", b.math("SUBTRACT", top, front, x=-1000, y=y0 - 2350), 0.0, x=-900, y=y0 - 2350)
+    r0 = b.math("MULTIPLY", h, 0.008, x=-1000, y=y0 - 2550)
+    k = b.math("MULTIPLY", h, 0.005 / 6.2832, x=-1000, y=y0 - 2650)  # (a layer: half a percent of her height)
+    r0_sq = b.math("MULTIPLY", r0, r0, x=-800, y=y0 - 2550)
+    two_k = b.math("MULTIPLY", k, 2.0, x=-800, y=y0 - 2650)
+    r_out = b.math("SQRT", b.math("MULTIPLY_ADD", two_k, peeled_len, r0_sq, x=-700, y=y0 - 2350), x=-600, y=y0 - 2350)
+    r_here = b.math("SQRT", b.math("MULTIPLY_ADD", two_k, b.math("MAXIMUM", b.math(
+        "SUBTRACT", peeled_len, lift, x=-800, y=y0 - 2750), 0.0, x=-700, y=y0 - 2750), r0_sq, x=-600, y=y0 - 2700),
+        x=-500, y=y0 - 2700)
+    beta = b.math("DIVIDE", b.math("SUBTRACT", r_out, r_here, x=-400, y=y0 - 2500), b.math(
+        "MAXIMUM", k, 1e-9, x=-400, y=y0 - 2650), x=-300, y=y0 - 2550)
+    centre = b.vmath("ADD", curl_at, b.vmath("SCALE", facing, scale=r_out, x=-400, y=y0 - 1500), x=-200, y=y0 - 1450)
     rolled = b.vmath("ADD", centre, b.vmath("ADD", b.vmath("SCALE", facing, scale=b.math(
-        "MULTIPLY", b.math("COSINE", beta, x=-600, y=y0 - 2600), b.math("MULTIPLY", r, -1.0, x=-600, y=y0 - 2750),
-        x=-400, y=y0 - 2650), x=-200, y=y0 - 2600), b.vmath("SCALE", along, scale=b.math(
-            "MULTIPLY", b.math("SINE", beta, x=-600, y=y0 - 2900), r, x=-400, y=y0 - 2900), x=-200, y=y0 - 2900),
-        x=0, y=y0 - 2750), x=600, y=y0 - 1600)
+        "MULTIPLY", b.math("COSINE", beta, x=-200, y=y0 - 2600), b.math("MULTIPLY", r_here, -1.0, x=-200,
+                                                                        y=y0 - 2750),
+        x=0, y=y0 - 2650), x=200, y=y0 - 2600), b.vmath("SCALE", along, scale=b.math(
+            "MULTIPLY", b.math("SINE", beta, x=-200, y=y0 - 2900), r_here, x=0, y=y0 - 2900), x=200, y=y0 - 2900),
+        x=400, y=y0 - 2750), x=600, y=y0 - 1600)
     peeled = b.boolean("AND", b.compare("GREATER_THAN", rz, front, x=400, y=y0 - 2400),
                        b.compare("GREATER_THAN", tau, 0.0, x=400, y=y0 - 2550), x=600, y=y0 - 2450)
     strips = b.switch("VECTOR", peeled, pushed, rolled, x=800, y=y0)
@@ -2204,10 +2329,15 @@ def build_peel_group():
     strips = b.vmath("ADD", away, b.vmath("SCALE", b.vmath("SUBTRACT", strips, centre, x=1200, y=y0 - 2900),
                                           scale=b.math("SUBTRACT", 1.0, gone, x=1200, y=y0 - 3050), x=1400,
                                           y=y0 - 2900), x=1600, y=y0)
-    loose = b.boolean("OR", arm, collar, x=1200, y=y0 + 300)
+    # (a point is loose where its faces are: they are all of one piece; each loose piece shrinks to its own middle,
+    # the strips' points kept out of it)
+    loose = b.compare("GREATER_THAN", b.on_domain(loose_f, "POINT", x=1000, y=y0 + 300), 0.5, x=1200, y=y0 + 300)
     burst = shrunk(hang(pushed, b.map_range(t, 0.0, 0.3, x=1000, y=y0 + 500), 1200, y0 + 500),
-                   b.math("ADD", b.compare("GREATER_THAN", side, 0.0, x=1400, y=y0 + 700),
-                          b.math("MULTIPLY", collar, 2.0, x=1400, y=y0 + 850), x=1600, y=y0 + 700),
+                   b.math("MULTIPLY", loose, b.math("ADD", b.math("ADD", b.compare("GREATER_THAN", side, 0.0, x=1400,
+                                                                                   y=y0 + 700), 1.0, x=1500,
+                                                                 y=y0 + 700),
+                                                    b.math("MULTIPLY", collar, 2.0, x=1400, y=y0 + 850), x=1600,
+                                                    y=y0 + 700), x=1700, y=y0 + 700),
                    b.map_range(t, 0.1, 0.3, x=1600, y=y0 + 850, smooth=True), 1800, y0 + 500)
     strips = b.switch("VECTOR", loose, strips, burst, x=2000, y=y0)
 
@@ -2262,7 +2392,8 @@ def build_peel_group():
     scraps = b.node("GeometryNodeSplitEdges", 1000, y0)
     b.feed(scraps.inputs["Mesh"], balloon)
     b.feed(scraps.inputs["Selection"], b.compare("GREATER_THAN", cell_spread, 0.1, x=400, y=yp - 300))
-    scrap = b.on_domain(cell, "POINT", x=400, y=yp - 600)
+    scrap = b.math("ROUND", b.on_domain(cell, "POINT", x=400, y=yp - 600), x=600, y=yp - 600)  # (1.25: as the
+    # strips' ids; or a scrap's points fall into two groups and two kicks, and it tears across)
     pop = b.map_range(t, PEEL_POP, 1.0, x=600, y=yp - 800)
     here = b.node("GeometryNodeInputPosition", 600, yp - 1000).outputs[0]
     middle = b.vmath("SCALE", b.accumulate(here, scrap, data_type="FLOAT_VECTOR", x=800, y=yp - 1000),
@@ -2283,7 +2414,7 @@ def build_peel_group():
                                                y=yp - 2000), x=2600, y=yp - 2000), x=2800, y=yp - 1600)
     left_ = b.math("SUBTRACT", 1.0, b.map_range(pop, 0.15, 1.0, x=2600, y=yp - 2300, smooth=True), x=2800,
                    y=yp - 2300)
-    popped = b.set_position(scraps.outputs["Mesh"], position=b.vmath(
+    popped = b.set_position(unshared(scraps.outputs["Mesh"], cell, 800, yp - 2400), position=b.vmath(
         "ADD", b.vmath("ADD", middle, flown, x=3000, y=yp - 1300),
         b.vmath("SCALE", b.vmath("SUBTRACT", here, middle, x=2800, y=yp - 1100), scale=left_, x=3000, y=yp - 1100),
         x=3200, y=yp - 1200), x=3200, y=y0)
@@ -2471,7 +2602,8 @@ def build_peel_group():
     hot_new = b.math("ADD", b.math("MULTIPLY_ADD", came, 0.7, cooled, x=1800, y=y0 - 4200),
                      b.math("MULTIPLY", landed, 0.6, x=2000, y=y0 - 4450), x=2200, y=y0 - 4300)
     heat = b.switch("FLOAT", gi.outputs["Incoming"], hot_old, hot_new, x=2400, y=y0 - 3900)
-    flown_s = b.set_position(b.store(split.outputs["Mesh"], ATTR_HEAT, heat, x=2800, y=y0), position=moved_s,
+    flown_s = b.set_position(b.store(unshared(split.outputs["Mesh"], k1_f, -400, y0 - 2300), ATTR_HEAT, heat,
+                                     x=2800, y=y0), position=moved_s,
                              x=3200, y=y0)
     # (an old chunk is gone from its moment on; a new one is there from then)
     shattered = b.delete(flown_s, b.boolean("XOR", b.compare("GREATER_EQUAL", t, swap, x=3200, y=y0 - 2400),

@@ -72,6 +72,8 @@ PRINT = "MMDD Print"  # 1.14 (printer.py): the newest layers of the print glowin
 P_PRINT = "mmd_disperse_print"
 REAL = "MMDD Real"  # 1.14 (dimension.py): the realistic look, a Principled BSDF made from the MMD material
 P_REAL = "mmd_disperse_real"
+P_REAL_SAVED = "mmd_disperse_real_saved"  # 1.25: the blend / shadow modes the cel look's outlines changed, to put back
+CEL_OUTLINE = "mmdd_outline"  # 1.25: 1 on the cel look's outline shell (cover_nodes.ATTR_OUTLINE)
 PORCELAIN = "MMDD Porcelain"  # 1.16 (puppet.py): the marionette's old outfit turned to white porcelain
 P_PORCELAIN = "mmd_disperse_porcelain"
 LEATHER = "MMDD Leather"  # 1.16 (shadowplay.py): pressed flat, dyed leather lit from behind, flowers cut out
@@ -94,7 +96,7 @@ P_SWEAT = "mmd_disperse_sweat"
 GHOST = "MMDD Ghost"  # 1.16 (ghost.py): she turns see-through from the feet up, a rim of light flowing up her
 P_GHOST = "mmd_disperse_ghost"
 P_GHOST_BLEND = "mmd_disperse_ghost_blend"  # blend mode to put back once the ghost is gone (Hashed before 4.2)
-_CHAIN = ((REAL + " Mix", 1), (PORCELAIN + " Mix", 1), (LEATHER + " Mix", 1), (OIL + " Mix", 1), (SURFACE + " Mix", 1), (LAYER + " Mix", 1), (PAINT + " Mix", 1), (TINT + " Mix", 1),
+_CHAIN = ((REAL + " Cel Mix", 1), (REAL + " Mix", 1), (PORCELAIN + " Mix", 1), (LEATHER + " Mix", 1), (OIL + " Mix", 1), (SURFACE + " Mix", 1), (LAYER + " Mix", 1), (PAINT + " Mix", 1), (TINT + " Mix", 1),
           (INNER + " Mix", 1), (HOLO + " Mix", 1),
           (HUSK + " Mix", 1), (GLOW + " Add", 0), (PRINT + " Add", 0), (SWEAT + " Add", 0), (LINING + " Mix", 1), (GHOST + " Mix", 1),
           (SHADOW + " Mix", 1))
@@ -5478,13 +5480,45 @@ def _cover_token(name):
 
 def _cover_cut(name):
     """The card in front of the camera at the cuts of the chain of outfits (CUT): mmdd_color (the object's: white
-    glows, black stays black), shown as much as mmdd_fade says."""
+    glows, black stays black), shown as much as mmdd_fade says. As mmdd_look (the object's) says (1.25, the magic
+    trick's covers, a different one at each cut): 0 all of it, 1 a puff of white smoke, 2 a burst of confetti, 3 a
+    shower of sparkles over a soft white."""
     mat, nt, out = _fresh(name)
     s = _Nodes(nt)
+    m = s.math
     color = s.attribute("mmdd_color", -800, 200, "OBJECT").outputs["Color"]
     fade = s.attribute("mmdd_fade", -800, 0, "OBJECT").outputs[2]
-    nt.links.new(s.mix_shader(fade, s.node("ShaderNodeBsdfTransparent", -500, 0).outputs[0],
-                              s.emission(color, 4.0, -500, 200), -200, 100), out.inputs["Surface"])
+    look = s.attribute("mmdd_look", -1800, -400, "OBJECT").outputs[2]
+    where = s.node("ShaderNodeTexCoord", -2200, -800).outputs["Object"]
+    # the smoke: soft clouds over most of the picture, thinning as it clears
+    clouds = s.noise(where, 3.0, 6.0, -1800, -800)
+    smoke = s.smooth(m("ADD", clouds, m("MULTIPLY", fade, 0.25, x=-1600, y=-1000), x=-1400, y=-900), 0.42, 0.6,
+                     -1200, -900)
+    # the confetti: dots in cells, each in a hue of its own
+    bits = s.voronoi(where, 14.0, -1800, -1300)
+    dot = m("LESS_THAN", bits.outputs["Distance"], 0.32, x=-1600, y=-1300)
+    hue = s.node("ShaderNodeSeparateColor" if bpy.app.version >= (3, 3, 0) else "ShaderNodeSeparateRGB", -1600, -1500)
+    nt.links.new(bits.outputs["Color"], hue.inputs[0])
+    tint = s.node("ShaderNodeCombineColor" if bpy.app.version >= (3, 3, 0) else "ShaderNodeCombineHSV", -1400, -1500)
+    if hasattr(tint, "mode"):
+        tint.mode = "HSV"
+    nt.links.new(hue.outputs[0], tint.inputs[0])
+    tint.inputs[1].default_value = 0.75
+    tint.inputs[2].default_value = 1.0
+    # the sparkles: small bright points over a soft white
+    sparks = s.voronoi(where, 30.0, -1800, -1800)
+    spark = m("LESS_THAN", sparks.outputs["Distance"], 0.12, x=-1600, y=-1800)
+    cover = m("ADD", m("ADD", m("MULTIPLY", m("COMPARE", look, 0.0, 0.5, x=-1000, y=-500), 1.0, x=-800, y=-500),
+                       m("MULTIPLY", m("COMPARE", look, 1.0, 0.5, x=-1000, y=-700), smoke, x=-800, y=-700),
+                       x=-600, y=-600),
+              m("ADD", m("MULTIPLY", m("COMPARE", look, 2.0, 0.5, x=-1000, y=-1300), dot, x=-800, y=-1300),
+                m("MULTIPLY", m("COMPARE", look, 3.0, 0.5, x=-1000, y=-1800), m("MAXIMUM", spark, 0.45, x=-800,
+                                                                                   y=-1900), x=-800, y=-1800),
+                x=-600, y=-1500), x=-400, y=-1000)
+    shade = s.lerp(color, tint.outputs[0], m("COMPARE", look, 2.0, 0.5, x=-600, y=-1200), -400, 300)
+    nt.links.new(s.mix_shader(m("MULTIPLY", fade, cover, x=-300, y=0, clamp=True),
+                              s.node("ShaderNodeBsdfTransparent", -500, 0).outputs[0],
+                              s.emission(shade, 4.0, -500, 200), -200, 100), out.inputs["Surface"])
     _blended(mat)
     _no_shadow(mat)
     mat.diffuse_color = (1.0, 1.0, 1.0, 0.5)
@@ -5507,6 +5541,38 @@ def _cover_print_rod(name):
     nt.links.new(glow, add.inputs[1])
     nt.links.new(add.outputs[0], out.inputs["Surface"])
     mat.diffuse_color = (0.8, 0.78, 0.74, 1.0)
+    return mat
+
+
+def _cover_print_plate(name):
+    """The build plate of the print (PRINT_PLATE, printer.py, 1.25): dark brushed metal with a fine grid of lines
+    glowing in the glow colour (mmdd_color, the object's) across its top (the shape's UV 0 .. 1), brighter toward its
+    middle, where she stands."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    tint = s.attribute("mmdd_color", -1600, 300, "OBJECT").outputs["Color"]
+    u, v, _w = s.split(s.node("ShaderNodeTexCoord", -1600, -200).outputs["UV"], -1400, -200)
+
+    def line(c, y):
+        """1 on a line of the grid (40 across), 0 between them."""
+        frac = m("FRACT", m("MULTIPLY", c, 40.0, x=-1200, y=y), x=-1000, y=y)
+        return m("SUBTRACT", 1.0, s.smooth(m("ABSOLUTE", m("SUBTRACT", frac, 0.5, x=-800, y=y), x=-600, y=y),
+                                           0.0, 0.06, -400, y), x=-200, y=y)
+
+    grid = m("MAXIMUM", line(u, -200), line(v, -500), x=0, y=-350)
+    mid = m("SUBTRACT", 1.0, m("MULTIPLY", m("ADD", m("ABSOLUTE", m("SUBTRACT", u, 0.5, x=-800, y=-800), x=-600,
+                                                      y=-800),
+                                               m("ABSOLUTE", m("SUBTRACT", v, 0.5, x=-800, y=-950), x=-600, y=-950),
+                                               x=-400, y=-850), 1.1, x=-200, y=-850, clamp=True), x=0, y=-850)
+    glow = s.emission(tint, m("MULTIPLY", grid, m("MULTIPLY_ADD", mid, 2.5, 0.4, x=200, y=-850), x=400, y=-500),
+                      600, -300)
+    metal = s.principled(200, 200, color=(0.05, 0.055, 0.06), roughness=0.32, metallic=0.85)
+    add = s.node("ShaderNodeAddShader", 800, 0)
+    nt.links.new(metal, add.inputs[0])
+    nt.links.new(glow, add.inputs[1])
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    mat.diffuse_color = (0.05, 0.055, 0.06, 1.0)
     return mat
 
 
@@ -6359,7 +6425,7 @@ _COVER_MAKERS = {"TALISMAN": _cover_talisman, "ASH": _cover_ash, "PLUMAGE": _cov
                  "FRAME": _cover_frame, "CANVAS": _cover_canvas, "PETALS": _cover_pieces, "PLUMES": _cover_plumes,
                  "CONFETTI": _cover_confetti, "CANNON": _cover_cannon, "BALLOON": _cover_balloon,
                  "CURTAIN": _cover_curtain, "SPARK": _cover_spark, "SPLAT": _cover_splat, "TOKEN": _cover_token,
-                 "CUT": _cover_cut, "PRINT_ROD": _cover_print_rod, "LASER": _cover_laser, "SLOT": _cover_slot,
+                 "CUT": _cover_cut, "PRINT_ROD": _cover_print_rod, "PRINT_PLATE": _cover_print_plate, "LASER": _cover_laser, "SLOT": _cover_slot,
                  "REEL": _cover_reel, "COIN": _cover_coin, "MIST": _cover_mist,
                  "GHOST_MIST": _cover_ghost_mist, "PUPPET_BAR": _cover_puppet_bar,
                  "PUPPET_STRING": _cover_puppet_string, "SCREEN": _cover_screen, "ROD": _cover_rod,
@@ -6460,15 +6526,46 @@ REAL_KINDS = {
     "cloth": (0.62, 0.35, 0.0, 0.0, 0.15, 0.0, 1.0),
 }
 FILM_MATERIAL = "MMD Disperse Film"
+# 1.25, the cel look of the toon side: the key light (the way to it in camera space: from the upper left, in front),
+# where the shadow tone begins (the light's cosine there), the shadow tone of each kind and the line colour (both
+# times her colour), the rim of light, the kinds drawn without an outline (thin cards and small parts)
+CEL_LIGHT = (-0.45, 0.55, 0.7)
+CEL_EDGE = 0.3
+CEL_SHADE = {"skin": (0.8, 0.6, 0.66), "hair": (0.55, 0.52, 0.72), "cloth": (0.58, 0.56, 0.74)}
+CEL_LIT = 0.92  # (the lit tone: her colour a little darker and more saturated, as anime colours are)
+CEL_SATURATION = 1.18
+CEL_LINE = (0.2, 0.15, 0.18)
+CEL_RIM = 0.22
+CEL_UNLINED = {"lash", "eye", "mouth"}
+
+
+def cel_unlined(mat, kind):
+    """No outline from a material that is blended (it writes no depth: the shell's far side would show through her;
+    and a blended decal must stay layered as it is) or of a kind too thin or small for one (1.25)."""
+    if bpy.app.version >= (4, 2, 0):
+        blended = getattr(mat, "surface_render_method", None) == "BLENDED"
+    else:
+        blended = mat.blend_method == "BLEND"
+    return blended or kind in CEL_UNLINED
 
 
 def add_real(mat, kind, unit):
     """Splice the realistic look in at the surface itself (REAL + " Mix", before every other node of ours, so what
     they add stays on top): a Principled BSDF made from the material's own base texture (mmd_base_tex; else the MMD
     shader's diffuse colour) and alpha, set for its `kind` (REAL_KINDS; skin scatters light under it, `unit` the
-    distance in object space), as much of it as REAL + " On" says (dimension.py drives it)."""
+    distance in object space), as much of it as REAL + " On" says (dimension.py drives it).
+    1.25: and in front of it (REAL + " Cel Mix") the cel look of the toon side, in place of the material's own look
+    as much as REAL + " Cel" says (update_cel): her colour in two flat tones from a key light at the camera's upper
+    left (fixed to the camera: no light of the scene needed) and a thin rim of light, unlit; on the outline shell (the
+    faces marked CEL_OUTLINE, dimension.py's modifier) a dark line of her colour where the shell faces the camera (its
+    far side: it is turned inside out), nothing on its near side, in shadows or on the realistic side. A splice from
+    before 1.25 is made anew."""
     nt = mat.node_tree
-    if nt is None or mat.get(P_REAL):
+    if nt is None:
+        return
+    if mat.get(P_REAL) and nt.nodes.get(REAL + " Cel") is None:
+        remove_real(mat)
+    if mat.get(P_REAL):
         return
     outputs = _outputs(nt)
     if not outputs:
@@ -6490,6 +6587,7 @@ def add_real(mat, kind, unit):
         rgb.outputs[0].default_value = tuple(diffuse.default_value) if diffuse is not None and \
             not diffuse.is_linked else tuple(mat.diffuse_color)
         color = rgb.outputs[0]
+    plain = color
     if value < 1.0:
         color = _new(nt, "ShaderNodeVectorMath", REAL + " Darker", x - 900, y, operation="SCALE")
         nt.links.new(base.outputs["Color"] if base is not None and base.image is not None else rgb.outputs[0],
@@ -6521,12 +6619,129 @@ def add_real(mat, kind, unit):
             bsdf.inputs["Subsurface Radius"].default_value = (unit, 0.35 * unit, 0.2 * unit)
             if bsdf.inputs.get("Subsurface Color") is not None:
                 nt.links.new(color, bsdf.inputs["Subsurface Color"])
+    # (1.25) the cel look: two tones by the key light (a narrow smooth step between them), the rim on the lit side
+    cel = _new(nt, "ShaderNodeValue", REAL + " Cel", x - 1200, y + 450)
+    cel.outputs[0].default_value = 0.0
+    cy = y + 2600
+    geometry = _new(nt, "ShaderNodeNewGeometry", REAL + " Cel Geometry", x - 2600, cy)
+    view = _new(nt, "ShaderNodeVectorTransform", REAL + " Cel View", x - 2400, cy, vector_type="NORMAL",
+                convert_from="WORLD", convert_to="CAMERA")
+    nt.links.new(geometry.outputs["Normal"], view.inputs[0])
+    toward = _new(nt, "ShaderNodeVectorMath", REAL + " Cel Light", x - 2200, cy, operation="DOT_PRODUCT")
+    nt.links.new(view.outputs[0], toward.inputs[0])
+    toward.inputs[1].default_value = CEL_LIGHT
+    lit = _smooth_node(nt, REAL + " Cel Band", toward.outputs["Value"], CEL_EDGE - 0.025, CEL_EDGE + 0.025,
+                       x - 2000, cy)
+    vivid = _new(nt, "ShaderNodeHueSaturation", REAL + " Cel Vivid", x - 2200, cy - 300)
+    nt.links.new(plain, vivid.inputs["Color"])
+    vivid.inputs["Saturation"].default_value = CEL_SATURATION
+    vivid.inputs["Value"].default_value = CEL_LIT
+    shadow = _new(nt, "ShaderNodeMixRGB", REAL + " Cel Shadow", x - 2000, cy - 300, blend_type="MULTIPLY")
+    shadow.inputs[0].default_value = 1.0
+    nt.links.new(vivid.outputs[0], shadow.inputs[1])
+    shadow.inputs[2].default_value = tuple(CEL_SHADE.get(kind, CEL_SHADE["cloth"])) + (1.0,)
+    toned = _new(nt, "ShaderNodeMixRGB", REAL + " Cel Tone", x - 1800, cy, blend_type="MIX")
+    nt.links.new(lit, toned.inputs[0])
+    nt.links.new(shadow.outputs[0], toned.inputs[1])
+    nt.links.new(vivid.outputs[0], toned.inputs[2])
+    facing = _new(nt, "ShaderNodeSeparateXYZ", REAL + " Cel Facing", x - 2200, cy - 500)
+    nt.links.new(view.outputs[0], facing.inputs[0])
+    rim = m("MULTIPLY", m("MULTIPLY", _smooth_node(nt, REAL + " Cel Rim", facing.outputs["Z"], 0.3, 0.24, x - 2000,
+                                                   cy - 500), lit, x=x - 1800, y=cy - 500), CEL_RIM,
+            x=x - 1600, y=cy - 500)
+    rimmed = _new(nt, "ShaderNodeMixRGB", REAL + " Cel Rimmed", x - 1600, cy, blend_type="ADD")
+    nt.links.new(rim, rimmed.inputs[0])
+    nt.links.new(toned.outputs[0], rimmed.inputs[1])
+    rimmed.inputs[2].default_value = (1.0, 1.0, 1.0, 1.0)
+    flat = _new(nt, "ShaderNodeEmission", REAL + " Cel Flat", x - 1400, cy)
+    nt.links.new(rimmed.outputs[0], flat.inputs["Color"])
+    flat.inputs["Strength"].default_value = 1.0
+    clear = _new(nt, "ShaderNodeBsdfTransparent", REAL + " Cel Clear", x - 1400, cy - 250)
+    drawn = flat.outputs[0]
+    if alpha is not None:
+        cut = _new(nt, "ShaderNodeMixShader", REAL + " Cel Drawn", x - 1200, cy)
+        nt.links.new(alpha, cut.inputs[0])
+        nt.links.new(clear.outputs[0], cut.inputs[1])
+        nt.links.new(flat.outputs[0], cut.inputs[2])
+        drawn = cut.outputs[0]
+    # the outline shell: the line where it faces the camera, of her colour darkened
+    shell = _new(nt, "ShaderNodeAttribute", REAL + " Cel Shell", x - 1600, cy - 800, attribute_type="GEOMETRY",
+                 attribute_name=CEL_OUTLINE)
+    shell_fac = shell.outputs[2]  # ("Fac", "Factor" from 5.0)
+    if cel_unlined(mat, kind):  # (no shell from it: dimension.py leaves its faces out)
+        line = clear.outputs[0]
+    else:
+        ink = _new(nt, "ShaderNodeMixRGB", REAL + " Cel Ink", x - 1600, cy - 1000, blend_type="MULTIPLY")
+        ink.inputs[0].default_value = 1.0
+        nt.links.new(plain, ink.inputs[1])
+        ink.inputs[2].default_value = CEL_LINE + (1.0,)
+        inked = _new(nt, "ShaderNodeEmission", REAL + " Cel Inked", x - 1400, cy - 1000)
+        nt.links.new(ink.outputs[0], inked.inputs["Color"])
+        inked.inputs["Strength"].default_value = 1.0
+        path = _new(nt, "ShaderNodeLightPath", REAL + " Cel Path", x - 1800, cy - 1200)
+        seen = m("MULTIPLY", m("SUBTRACT", 1.0, geometry.outputs["Backfacing"], x=x - 1600, y=cy - 1200),
+                 m("SUBTRACT", 1.0, path.outputs["Is Shadow Ray"], x=x - 1600, y=cy - 1350), x=x - 1400,
+                 y=cy - 1250)
+        if alpha is not None:
+            seen = m("MULTIPLY", seen, alpha, x=x - 1300, y=cy - 1250)
+        drawn_line = _new(nt, "ShaderNodeMixShader", REAL + " Cel Line", x - 1200, cy - 1000)
+        nt.links.new(seen, drawn_line.inputs[0])
+        nt.links.new(clear.outputs[0], drawn_line.inputs[1])
+        nt.links.new(inked.outputs[0], drawn_line.inputs[2])
+        line = drawn_line.outputs[0]
+    toon = _new(nt, "ShaderNodeMixShader", REAL + " Cel Toon", x - 1000, cy - 400)
+    nt.links.new(shell_fac, toon.inputs[0])
+    nt.links.new(drawn, toon.inputs[1])
+    nt.links.new(line, toon.inputs[2])
+    real_side = _new(nt, "ShaderNodeMixShader", REAL + " Cel Real", x - 300, y)  # (no shell on the realistic side)
+    nt.links.new(shell_fac, real_side.inputs[0])
+    nt.links.new(bsdf.outputs[0], real_side.inputs[1])
+    nt.links.new(clear.outputs[0], real_side.inputs[2])
+    shown = m("MAXIMUM", cel.outputs[0], shell_fac, x=x - 1000, y=y + 450)
     for i, out in enumerate(outputs):
+        cel_mix = _new(nt, "ShaderNodeMixShader", "%s Cel Mix %d" % (REAL, i), out.location.x - 360,
+                       out.location.y + 1200)
+        _splice(nt, out, cel_mix)
+        nt.links.new(shown, cel_mix.inputs[0])
+        nt.links.new(toon.outputs[0], cel_mix.inputs[2])
         mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (REAL, i), out.location.x - 180, out.location.y + 1200)
         _splice(nt, out, mix)
         nt.links.new(on.outputs[0], mix.inputs[0])
-        nt.links.new(bsdf.outputs[0], mix.inputs[2])
+        nt.links.new(real_side.outputs[0], mix.inputs[2])
     mat[P_REAL] = kind
+
+
+def update_cel(mat, on):
+    """The cel look in place of the material's own on the toon side (1.25), or not. With it the material lets its
+    outline shell's near side vanish: Alpha Hashed (from Opaque) with hashed shadows before 4.2, transparent shadows
+    from 4.2; put back without it. (A blended material makes no shell: cel_unlined.)"""
+    node = mat.node_tree.nodes.get(REAL + " Cel") if mat.node_tree else None
+    if node is None:
+        return
+    node.outputs[0].default_value = 1.0 if on else 0.0
+    _cel_modes(mat, on)
+
+
+def _cel_modes(mat, on):
+    if not on:
+        saved = mat.get(P_REAL_SAVED)
+        if saved is not None:
+            for key, value in saved.to_dict().items():
+                if hasattr(mat, key):
+                    setattr(mat, key, bool(value) if key == "use_transparent_shadow" else value)
+            del mat[P_REAL_SAVED]
+        return
+    if bpy.app.version < (4, 2, 0):
+        if mat.get(P_REAL_SAVED) is None:
+            mat[P_REAL_SAVED] = {"blend_method": mat.blend_method, "shadow_method": mat.shadow_method}
+        if mat.blend_method == "OPAQUE":  # (legacy EEVEE ignores transparency)
+            mat.blend_method = "HASHED"
+        if mat.shadow_method == "OPAQUE":
+            mat.shadow_method = "HASHED"
+    elif hasattr(mat, "use_transparent_shadow"):
+        if mat.get(P_REAL_SAVED) is None:
+            mat[P_REAL_SAVED] = {"use_transparent_shadow": int(mat.use_transparent_shadow)}
+        mat.use_transparent_shadow = True
 
 
 def update_real(mat, expression):
@@ -6551,10 +6766,12 @@ def remove_real(mat):
     node = nt.nodes.get(REAL + " On")
     if node is not None:
         node.outputs[0].driver_remove("default_value")
+    _unsplice(nt, REAL + " Cel Mix")
     _unsplice(nt, REAL + " Mix")
     for node in [n for n in nt.nodes if n.name.startswith(REAL)]:
         nt.nodes.remove(node)
     del mat[P_REAL]
+    _cel_modes(mat, False)
 
 
 def ensure_film_material():

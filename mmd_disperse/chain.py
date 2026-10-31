@@ -3,8 +3,10 @@ Each outfit of the chain is a model of its own that follows the old model like t
 the old root, its meshes deform with the old armature, effect.build binds them); it shows from the cut before it to
 its own cut, the first from the start, and the old outfit from the last cut on, a little before the transformation,
 which brings the new outfit with all its front. Each cut is a hard cut hidden behind a flash of white (or a black
-frame) on a card in front of the camera. The cuts come every beat, bar or four bars (on the beats with beat sync, the
-last one Lead before the start).
+frame) on a card in front of the camera (1.25: or, the magic trick, a different cover each time: a puff of smoke, a
+burst of confetti, a flash, sparkles). The cuts come every beat, bar, two bars or four bars (on the beats with beat
+sync, the last one Lead before the start). And (1.25, 主换加差分: a main change and then its variant) a while after the
+big moment some parts of the new outfit (by material name: the jacket, the gloves ...) go at a cut of their own.
 
 Showing and hiding is a small Geometry Nodes modifier at the end of each mesh (cover_nodes' Chain Show: its geometry
 only between From and To), so it works the same in the viewport and the render, with nothing driven. Removing the
@@ -20,10 +22,13 @@ P_MODELS = "mmd_disperse_chain_models"  # on the mask: the roots of the chain's 
 P_CARD = "mmd_disperse_chain_card"  # on the card: the mask
 MOD = "MMD Disperse Chain"
 CARD = "MMD Disperse Chain Cut"
-BEATS_APART = {"BEAT": 1, "BAR": 4, "PHRASE": 16}  # beats between two cuts ...
-SECONDS_APART = {"BEAT": 0.45, "BAR": 1.8, "PHRASE": 7.2}  # ... or seconds without beats
+BEATS_APART = {"BEAT": 1, "BAR": 4, "TWO_BARS": 8, "PHRASE": 16}  # beats between two cuts ...
+SECONDS_APART = {"BEAT": 0.45, "BAR": 1.8, "TWO_BARS": 3.6, "PHRASE": 7.2}  # ... or seconds without beats
 LEAD = 0.5  # the last cut (to the old outfit) this many seconds before the transformation starts
-FADE = {"FLASH": 4, "BLACK": 2}  # frames the card takes to clear after a cut
+FADE = {"FLASH": 4, "BLACK": 2, "MAGIC": 7}  # frames the card takes to clear after a cut
+LOOKS = (1, 2, 0, 3)  # 1.25, the magic trick's covers in turn: smoke, confetti, a flash, sparkles
+VARIANT_HIDE = "MMD Disperse Variant"  # 1.25: the modifier on the new outfit's meshes that takes the variant's parts
+ATTR_VARIANT = "mmdd_variant"  # ... (a face attribute): 1 on those parts
 FOREVER = 1.0e6
 
 
@@ -111,13 +116,19 @@ def _card(scene, mask, cuts, style):
     card.location = (centre.x, centre.y, -depth)
     card.rotation_euler = (0.0, 0.0, 0.0)
     card.scale = (width * 1.2, height * 1.2, 1.0)
-    card["mmdd_color"] = (1.0, 1.0, 1.0) if style == "FLASH" else (0.0, 0.0, 0.0)
+    card["mmdd_color"] = (0.0, 0.0, 0.0) if style == "BLACK" else (1.0, 1.0, 1.0)
+    card["mmdd_look"] = 0.0
     _clear_keys(card)
     fade = FADE[style]
     keys = [(cuts[0] - 2.0, 0.0)]
     for c in cuts:
         keys += [(c - 1.0, 0.0), (c, 1.0)] + ([(c + 1.0, 1.0)] if style == "BLACK" else []) + [(c + fade, 0.0)]
     _key(card, '["mmdd_fade"]', keys)
+    if style == "MAGIC":  # (each cut its own cover, kept while it shows)
+        looks = []
+        for k, c in enumerate(cuts):
+            looks += [(c - 1.0, float(LOOKS[k % len(LOOKS)])), (c + fade, float(LOOKS[k % len(LOOKS)]))]
+        _key(card, '["mmdd_look"]', looks)
 
 
 def _delete(ob):
@@ -127,31 +138,84 @@ def _delete(ob):
         bpy.data.meshes.remove(me)
 
 
-def sync(settings, mask, base):
+def sync(settings, mask, base, new=None, moment=None):
     """Show each outfit of the chain from the cut before it to its own, the old outfit (`base`) from the last cut on,
-    and hide the cuts behind the card; nothing without a chain."""
+    and hide the cuts behind the card; take the variant's parts off the new outfit (`new`) a while after the big
+    moment (frame `moment`), at a cut of their own; nothing without a chain or a variant."""
     names = list(mask.get(P_MODELS, [])) if mask is not None else []
     links = [mdl.resolve(bpy.data.objects[n]) for n in names if n in bpy.data.objects]
     links = [m for m in links if m.meshes]
-    if not links or base is None or not base.meshes:
+    if base is None or not base.meshes:
+        links = []
+    scene = settings.id_data
+    fps = scene.render.fps / scene.render.fps_base
+    cuts = cut_frames(settings, len(links)) if links else []
+    after = None if moment is None else float(moment) + getattr(settings, "chain_variant_after", 4.0) * fps
+    variant = _variant(settings, mask, new, after)
+    if not links and variant is None:
         _unshow(mask)
         return
-    scene = settings.id_data
-    cuts = cut_frames(settings, len(links))
     for k, link in enumerate(links):
         for ob in link.meshes:
             _show(ob, mask, cuts[k - 1] if k > 0 else -FOREVER, cuts[k])
-    for ob in base.meshes:
-        _show(ob, mask, cuts[-1], FOREVER)
-    _card(scene, mask, cuts, settings.chain_cut)
+    if links:
+        for ob in base.meshes:
+            _show(ob, mask, cuts[-1], FOREVER)
+    else:
+        for ob in [o for o in bpy.data.objects if o.get(P_CHAIN) == mask and o.modifiers.get(MOD)]:
+            ob.modifiers.remove(ob.modifiers[MOD])
+    _card(scene, mask, cuts + ([variant] if variant is not None else []), settings.chain_cut)
+
+
+def _variant(settings, mask, new, frame):
+    """Take the parts of the new outfit whose material matches Variant (the panel's patterns) off from `frame` on (a
+    small modifier at the end of its meshes); that frame, or None (no variant: all of it taken off)."""
+    import fnmatch
+
+    import numpy as np
+
+    from . import cover_nodes
+    from .node_groups import input_identifiers
+
+    patterns = mdl.split_patterns(getattr(settings, "chain_variant", ""))
+    meshes = list(new.meshes) if new is not None else []
+    found = False
+    for ob in meshes:
+        me = ob.data
+        if me.attributes.get(ATTR_VARIANT) is not None:
+            me.attributes.remove(me.attributes[ATTR_VARIANT])
+        mod = ob.modifiers.get(VARIANT_HIDE)
+        hit = np.array([sl.material is not None and any(fnmatch.fnmatchcase(mdl.material_key(sl.material), pat)
+                                                        for pat in patterns) for sl in ob.material_slots] or [False],
+                       dtype=bool)
+        index = np.zeros(len(me.polygons), dtype=np.int32)
+        me.polygons.foreach_get("material_index", index)
+        values = hit[np.clip(index, 0, len(hit) - 1)] if len(me.polygons) else np.zeros(0, dtype=bool)
+        if frame is None or not patterns or not values.any():
+            if mod is not None:
+                ob.modifiers.remove(mod)
+            continue
+        attr = me.attributes.new(ATTR_VARIANT, "BOOLEAN", "FACE")
+        attr.data.foreach_set("value", values)
+        if mod is None:
+            mod = ob.modifiers.new(VARIANT_HIDE, "NODES")
+        mod.node_group = cover_nodes.ensure_variant_hide_group()
+        mod[input_identifiers(mod.node_group)["From"]] = float(frame)
+        ob[P_CHAIN] = mask
+        ob.update_tag()
+        found = True
+    return frame if found else None
 
 
 def _unshow(mask):
     """The showing and hiding off every mesh, the card away (the chain's outfits stay bound)."""
     for ob in [o for o in bpy.data.objects if o.get(P_CHAIN) == mask]:
-        mod = ob.modifiers.get(MOD)
-        if mod is not None:
-            ob.modifiers.remove(mod)
+        for name in (MOD, VARIANT_HIDE):
+            mod = ob.modifiers.get(name)
+            if mod is not None:
+                ob.modifiers.remove(mod)
+        if ob.type == "MESH" and ob.data.attributes.get(ATTR_VARIANT) is not None:
+            ob.data.attributes.remove(ob.data.attributes[ATTR_VARIANT])
     for ob in [o for o in bpy.data.objects if o.get(P_CARD) == mask]:
         _delete(ob)
 

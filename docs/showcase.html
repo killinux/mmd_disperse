@@ -231,12 +231,12 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.24：用 Blender 几何节点给 MMD 模型做换装变身。下面一百七十段视频都是插件生成的
+    <p>mmd_disperse 1.25：用 Blender 几何节点给 MMD 模型做换装变身。下面一百七十三段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>170</b> 段演示</span>
+      <span><b>173</b> 段演示</span>
       <span><b>67</b> 组效果</span>
-      <span><b>158</b> 个一键预设</span>
+      <span><b>159</b> 个一键预设</span>
       <span><b>23400</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
@@ -295,7 +295,7 @@
 <section id="effects">
   <div class="wrap">
     <h2>效果演示</h2>
-    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.24 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
+    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.25 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
 
     <div class="index">
       <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
@@ -468,6 +468,9 @@
       <a href="#spider-lilies"><img src="../test_output/posters/spider_lilies.jpg" alt="" loading="lazy">开满彼岸花</a>
       <a href="#morph-shape"><img src="../test_output/posters/morph_shape.jpg" alt="" loading="lazy">从旧形状变过来</a>
       <a href="#skirt-drop"><img src="../test_output/posters/skirt_drop.jpg" alt="" loading="lazy">裙摆落下</a>
+      <a href="#into-anime"><img src="../test_output/posters/into_anime.jpg" alt="" loading="lazy">走进二次元</a>
+      <a href="#magic-variant"><img src="../test_output/posters/magic_variant.jpg" alt="" loading="lazy">魔术遮挡和主换加差分</a>
+      <a href="#laser-print-plate"><img src="../test_output/posters/laser_print_plate.jpg" alt="" loading="lazy">紧身衣的打印底板</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -2510,18 +2513,18 @@
         <article class="effect variant" id="ab-side">
           <figure class="clip">
             <video controls loop playsinline preload="metadata" poster="../test_output/posters/ab_side.jpg">
-              <source src="../test_output/demo_v20/tifa_ab_side_hd.mp4" type="video/mp4">
+              <source src="../test_output/demo_v27/tifa_ab_side_hd.mp4" type="video/mp4">
             </video>
             <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
           </figure>
           <div class="info">
-            <div class="meta"><span class="mode">反差 AB 面 · 跳舞（有声音）</span><span class="ver">1.18</span><span class="tag">VMD 舞蹈</span><span class="tag">素颜平光</span><span class="tag">汗光</span><span class="tag">举手向天</span><span class="tag">慢放</span><span class="tag">全屏闪白</span></div>
+            <div class="meta"><span class="mode">反差 AB 面 · 跳舞（有声音）</span><span class="ver">1.18</span><span class="tag">VMD 舞蹈</span><span class="tag">素颜平光</span><span class="tag">汗光</span><span class="tag">举手向天</span><span class="tag">慢放</span><span class="tag">全屏闪白</span><span class="tag">换装吹风</span></div>
             <h3>反差 AB 面（新预设）</h3>
-            <p class="lead">灰扑扑的素颜平光里，她越跳越出汗，皮肤和衣服湿亮；手一举、舞蹈慢下来，一道白光换成 AC 版的蒂法，画面一下切回全彩（抖音的反差变装）。</p>
+            <p class="lead">灰扑扑的素颜平光里，她越跳越出汗，皮肤和衣服湿亮；手一举、舞蹈慢下来，一道白光换成 AC 版的蒂法，画面一下切回全彩，一阵风迎面吹起她的头发（抖音的反差变装；1.25 加了这阵风）。</p>
             <h4>手动操作</h4>
             <ol class="steps">
             <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
-            <li><span class="ui">预设</span> 选 <span class="v">反差 AB 面</span>：<span class="ui">画面风格</span> 选 <span class="v">素颜平光</span>，<span class="ui">风格时长</span> <span class="v">4</span> 秒；<span class="ui">汗光</span> 勾上，<span class="ui">出汗时长</span> <span class="v">4</span> 秒；<span class="ui">开始时机</span> 选 <span class="v">举手向天</span>；<span class="ui">时间</span> 选 <span class="v">慢放</span>。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">反差 AB 面</span>：<span class="ui">画面风格</span> 选 <span class="v">素颜平光</span>，<span class="ui">风格时长</span> <span class="v">4</span> 秒；<span class="ui">汗光</span> 勾上，<span class="ui">出汗时长</span> <span class="v">4</span> 秒；<span class="ui">开始时机</span> 选 <span class="v">举手向天</span>；<span class="ui">时间</span> 选 <span class="v">慢放</span>；<span class="ui">换装吹风</span> 选 <span class="v">迎面吹来</span>（吹的是模型的刚体，要先用 mmd_tools 构建物理）。</li>
             <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>；<span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset AB_SIDE --white-flash --vmd "回レ！雪月花.vmd" --wave 120:200 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"</code></p>
@@ -3483,21 +3486,21 @@
         <article class="effect variant" id="mirror-ball">
           <figure class="clip">
             <video controls loop playsinline preload="metadata" poster="../test_output/posters/mirror_ball.jpg">
-              <source src="../test_output/demo_v15/tifa_mirror_ball_hd.mp4" type="video/mp4">
+              <source src="../test_output/demo_v27/tifa_mirror_ball_hd.mp4" type="video/mp4">
             </video>
             <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
           </figure>
           <div class="info">
             <div class="meta"><span class="mode">镜面球 · 跳舞（有声音）</span><span class="ver">1.13</span><span class="tag">VMD 舞蹈</span><span class="tag">镜面球光斑</span><span class="tag">熄灯</span><span class="tag">闪粉</span></div>
             <h3>镜面球（新预设）</h3>
-            <p class="lead">灯光暗下来，她前上方一个镜面球转起来，彩色光斑扫过她，光斑扫到哪儿哪儿就换（光之美少女偶像篇的镜面球）。</p>
+            <p class="lead">灯光暗下来，她前上方一个镜面球转起来，彩色光斑扫过她，光斑扫到哪儿哪儿就换（光之美少女偶像篇的镜面球）。1.25 重新渲染：画面放大，镜面球拍进了画面。</p>
             <h4>手动操作</h4>
             <ol class="steps">
             <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
             <li><span class="ui">预设</span> 选 <span class="v">镜面球</span>：<span class="ui">路径</span> <span class="v">镜面球光斑</span>，<span class="ui">熄灯</span> 勾上，<span class="ui">粒子</span> <span class="v">闪粉</span>。</li>
             <li>生成时把舞播一遍，记下每处第一次被光斑照到的那一帧，前沿按自己的速度走，结束帧跟着变。</li>
             </ol>
-            <p class="cmd">演示参数：<code>--preset MIRROR_BALL --vmd "回レ！雪月花.vmd" --wave 140:260 --view 1.3</code></p>
+            <p class="cmd">演示参数：<code>--preset MIRROR_BALL --vmd "回レ！雪月花.vmd" --wave 140:260 --view 2.3 --aim 0.95</code></p>
           </div>
         </article>
 
@@ -3746,6 +3749,29 @@
             <p class="cmd">演示参数：<code>--preset NANOTECH --vmd "回レ！雪月花.vmd" --wave 200:270 --chain "Remake V2.blend::Tifa Lockhart Remake 18 V2" --chain "AC V1.blend::Tifa Lockhart FFVII Advent Children 18 V1" --music "回レ！雪月花.mp3" --set beat_sync=1</code></p>
           </div>
         </article>
+
+        <article class="effect variant" id="magic-variant">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/magic_variant.jpg">
+              <source src="../test_output/demo_v27/tifa_magic_variant_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">魔术遮挡 + 差分 · 跳舞（有声音）</span><span class="ver">1.25</span><span class="tag">VMD 舞蹈</span><span class="tag">前面的几套服装</span><span class="tag">魔术</span><span class="tag">主换加差分</span><span class="tag">卡音乐节拍</span></div>
+            <h3>魔术遮挡和主换加差分</h3>
+            <p class="lead">Remake V1 的蒂法跳着，一团烟挡住镜头，换成 AC 版；一阵彩纸，换成 Gantz 的紧身衣；纳米线框扫过换上 Remake V2 的衣服，过了一秒一道闪光，右臂红色的护臂没了（主换加差分）。每次切换换一种遮挡。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li>把要先穿的模型导入场景（和旧模型同一套骨骼；演示用的是 Remake V1 和 AC V1），<span class="ui">前面的几套服装</span> 面板点「+」按顺序加进列表。</li>
+            <li><span class="ui">换装节奏</span> <span class="v">每小节一换</span>，<span class="ui">硬切遮挡</span> <span class="v">魔术（每次换一种遮挡）</span>（每次换一种：烟、彩纸、闪光、星光）。</li>
+            <li><span class="ui">差分（之后藏掉的部件）</span> 填 <span class="v">*arm guard*</span>，<span class="ui">差分在关键时刻后</span> <span class="v">1</span> 秒：关键时刻之后一秒，这些部件在单独的一次切换里拿掉（挑下面还有东西的部件：这个模型手套下面没有整只手）。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">纳米战衣</span>，点 <span class="ui">找节拍</span>，打开 <span class="ui">卡音乐节拍</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset NANOTECH %s --wave 180:240 --chain "Remake V1.blend::Tifa Lockhart Remake 18 V1" --chain "AC V1.blend::Tifa Lockhart FFVII Advent Children 18 V1" --music "回レ！雪月花.mp3" --set beat_sync=1 --set chain_pace=BAR --set chain_cut=MAGIC --set "chain_variant=*arm guard*" --set chain_variant_after=1.0（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
       </div>
     </section>
     <section class="family card" id="fam-dimension">
@@ -3798,6 +3824,27 @@
             <p class="cmd">演示参数：<code>--preset DIMENSION_BEATS --keep-toon --white-flash --vmd "回レ！雪月花.vmd" --wave 140:220 --music "回レ！雪月花.mp3" --set beat_sync=1 --set dim_lights=0</code></p>
           </div>
         </article>
+
+        <article class="effect variant" id="into-anime">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/into_anime.jpg">
+              <source src="../test_output/demo_v27/tifa_into_anime_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">走进二次元 · 跳舞（有声音）</span><span class="ver">1.25</span><span class="tag">VMD 舞蹈</span><span class="tag">次元切换</span><span class="tag">赛璐璐动画风</span><span class="tag">描边</span><span class="tag">反向</span></div>
+            <h3>走进二次元（新预设）</h3>
+            <p class="lead">黑色紧身衣是写实的（乳胶的高光、补光），前沿从胸口扫开，AC 版蒂法的衣服以动画的样子出现：两阶平涂、亮面一圈轮廓光、深色描边；头和头发被前沿扫过时也变成动画（a-ha《Take On Me》）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">走进二次元</span>：<span class="ui">次元切换</span> 选 <span class="v">随前沿变写实</span>，<span class="ui">反向（写实→原样）</span> 勾上，<span class="ui">赛璐璐动画风（二次元）</span> 勾上，<span class="ui">描边粗细</span> <span class="v">1</span>。</li>
+            <li><span class="ui">路径</span> 选 <span class="v">沿体表流动</span>、<span class="ui">出发点</span> 选 <span class="v">只从起点</span>。动画那一面的主光固定在相机左上方，和场景的灯无关；写实那一面用补光。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset INTO_ANIME --vmd "回レ！雪月花.vmd" --wave 140:230 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
       </div>
     </section>
     <section class="family card" id="fam-print">
@@ -3826,6 +3873,27 @@
             <li>演示把新衣服换成了 Remake 版蒂法（有短裙，裙摆下的支撑柱多）；紧身衣朝下的地方少，支撑柱就少。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset LASER_PRINT --vmd "回レ！雪月花.vmd" --wave 130:250 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="laser-print-plate">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/laser_print_plate.jpg">
+              <source src="../test_output/demo_v27/tifa_laser_print_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">紧身衣的打印底板 · 跳舞（有声音）</span><span class="ver">1.25</span><span class="tag">VMD 舞蹈</span><span class="tag">逐层打印</span><span class="tag">支撑柱</span><span class="tag">打印底板</span></div>
+            <h3>紧身衣的打印底板</h3>
+            <p class="lead">打印一身紧身衣：张开的手臂下面没有身体可撑，支撑柱一直落到脚下一块带发光网格的打印底板上；打完支撑柱断开、碎成方块，底板也跟着消失。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">激光打印</span>：<span class="ui">支撑柱</span> 勾上（底板随支撑柱一起出现）。</li>
+            <li>新衣服是紧身衣也行：下面没有身体的地方，支撑柱落到底板上。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset LASER_PRINT --vmd "回レ！雪月花.vmd" --wave 130:250 --target-blend "Gantz V1.blend" --target-root "Tifa Gantz 18 V1"（演示打开 Gantz V2.blend：<code>--base-root "Tifa Gantz 18 V2"</code>）</code></p>
           </div>
         </article>
       </div>
@@ -4092,14 +4160,14 @@
         <article class="effect variant" id="peel-away">
           <figure class="clip">
             <video controls loop playsinline preload="metadata" poster="../test_output/posters/peel_away.jpg">
-              <source src="../test_output/demo_v21/tifa_peel_away_hd.mp4" type="video/mp4">
+              <source src="../test_output/demo_v27/tifa_peel_away_hd.mp4" type="video/mp4">
             </video>
             <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
           </figure>
           <div class="info">
             <div class="meta"><span class="mode">剥落卷起 · 跳舞（有声音）</span><span class="ver">1.19</span><span class="tag">VMD 舞蹈</span><span class="tag">撕开翻落</span><span class="tag">卷起剥落</span><span class="tag">瞬间换装</span></div>
             <h3>剥落卷起（新预设）</h3>
-            <p class="lead">关键时刻紧身衣绕着身体分成十几条，一条接一条从肩上往下卷，卷成一圈圈红边，像把丝袜往下卷，卷到脚下就没了；里面已经是 AC 版的蒂法（撕贴纸）。</p>
+            <p class="lead">关键时刻紧身衣绕着身体分成十几条，一条接一条从肩上往下卷，卷成一圈圈红边，像把丝袜往下卷，卷到脚下就没了；里面已经是 AC 版的蒂法（撕贴纸）。1.25 重新渲染：布条像卷地毯一样一层层卷起来，袖子和领口整块崩开。</p>
             <h4>手动操作</h4>
             <ol class="steps">
             <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
@@ -4443,7 +4511,7 @@
           <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>剪纸窗花</li><li>发光纹身</li><li>LED 屏幕</li><li>电子纸</li><li>光学迷彩</li><li>也可以不变</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>53</b></h3>
+        <h3>叠加开关 <b>55</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行（全息 / 星空纱 / 黑剪影 / 冰晶 / 光学迷彩）</li><li>故障风</li><li>光剪影</li><li>光带</li>
           <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
           <li>毒液共生体（触手、蹼、黏丝；黑色黏液或液态金属）</li>
@@ -4467,7 +4535,7 @@
           <li>镜里先换</li><li>迷幻多重曝光（迷幻配色 / 发光颜色）</li>
           <li>书法大字幕（金色 / 白色 / 墨色；吹散 / 缩成印章；横排 / 竖排）</li><li>汗光</li>
           <li>撕开翻落（撕开 / 翻落 / 扯掉 / 卷起剥落 / 充气爆开 / 融化滴落 / 碎开再熔合；衬里颜色；藕断丝连；层层撕回）</li><li>变身翻车</li>
-          <li>符箓燃尽</li><li>长出羽毛和花（羽毛 / 花）</li><li>形变（从旧形状 / 裙摆落下）</li></ul>
+          <li>符箓燃尽</li><li>长出羽毛和花（羽毛 / 花）</li><li>形变（从旧形状 / 裙摆落下）</li><li>次元切换的赛璐璐动画风</li><li>换装吹风（迎面 / 上升气流 / 旋风）</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
@@ -4648,6 +4716,7 @@
           <tr><td>开满彼岸花</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>长出羽毛和花（花，深红）</td></tr>
           <tr><td>从旧形状变过来</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>形变（从旧形状，1.4 秒）、收尾闪光</td></tr>
           <tr><td>裙摆落下</td><td>球形扩散</td><td>瞬间换装</td><td>碎片飞散</td><td>形变（裙摆落下）、星光粒子</td></tr>
+          <tr><td>走进二次元</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>次元切换：随前沿、反向、赛璐璐动画风，补光</td></tr>
         </tbody>
       </table>
     </div>

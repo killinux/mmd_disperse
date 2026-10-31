@@ -4,8 +4,10 @@ Layers, so each layer comes at once), the newest layers glowing hot in the glow 
 (materials.add_print). Round the dancer laser heads shoot beams at the layer being printed (each frame a point of it at
 random, the beam stopping at the first part of her in its way), and a light in the glow colour rides up with it.
 Thin supports hold up what hangs over: each from a face of the new outfit that looks down, straight down to the part
-of her below it (both ends on her, so they dance along), printed with the layers; once the print is done they snap
-off one after another and break into little cubes that fall and fade.
+of her below it (both ends on her, so they dance along), or (1.25) where nothing of her is below it, down to the build
+plate under her feet (its foot stays there), printed with the layers from the plate up; once the print is done they
+snap off one after another and break into little cubes that fall and fade. The plate glows under her while she is
+printed.
 
 The supports are picked at build on the rest pose (a record on the mask: for each mesh of the new outfit, the three
 vertices and weights of each end of each support and the two layers it runs between). They hang on a hidden twin of
@@ -44,6 +46,10 @@ HEADS_UP = 1.15  # ... this high
 BEAM = 0.0013  # radius of a beam (model heights)
 SPOT = 0.012  # the glowing spot where a beam hits (model heights)
 LIGHT_POWER = 6.0  # the light on the layer, watts per square model height
+PLATE = 0.85  # (1.25) the build plate under her: this wide (model heights); supports down to it: at most ...
+PLATE_MOST = 12  # ... these a mesh, ...
+PLATE_SPACING = 0.08  # ... this far apart (model heights) ...
+PLATE_REACH = 0.6  # ... from no higher up her than this (model heights: not from her shoulders or bust)
 
 
 def objects(mask, kind=None):
@@ -146,6 +152,7 @@ def _supports(ob, axis, lo, height, layer, lead, patterns, rng):
     main, parents = _bones(ob)
     cell = SPACING * height
     taken = {}
+    on_plate = []
     out = ([], [], [], [], [], [])
     up = Vector(axis.tolist())
     for k in range(len(pick)):
@@ -156,7 +163,24 @@ def _supports(ob, axis, lo, height, layer, lead, patterns, rng):
         if any((p - top).length < cell for p in near):
             continue
         hit, normal, index, dist = tree.ray_cast(top - up * (0.003 * height), -up, LONGEST * height)
-        if hit is None or dist < SHORTEST * height or normal.dot(up) < -0.2:
+        if hit is None:
+            # (1.25) nothing of her right below it: down to the build plate if nothing of her is in the way at all
+            drop = top.dot(up) - lo
+            if drop < SHORTEST * height or drop > PLATE_REACH * height or len(on_plate) >= PLATE_MOST or any(
+                    (q - top).length < PLATE_SPACING * height for q in on_plate):
+                continue
+            if tree.ray_cast(top - up * (0.003 * height), -up, drop)[0] is not None:
+                continue
+            taken[key] = top
+            on_plate.append(top)
+            out[0].extend(int(i) for i in tris[pick[k]])
+            out[1].extend(float(w) for w in weights[k])
+            out[2].extend((-1, -1, -1))  # (its foot on the plate: where, in place of the weights)
+            out[3].extend(float(c) for c in top - up * drop)
+            out[4].append(float(lead))
+            out[5].append(float(math.floor((top.dot(up) - lo) / layer + 1e-6) * layer + lead))
+            continue
+        if dist < SHORTEST * height or normal.dot(up) < -0.2:
             continue
         below = tris[index]
         if not _together(main(tris[pick[k]][0]), main(below[0]), parents):
@@ -194,7 +218,7 @@ def build_record(settings, target, meshes, frame, height, layer, lead):
             found.append((ob, sup))
     total = sum(len(sup[4]) for _ob, sup in found)
     rec = {"layer": layer, "lead": lead, "lo": lo, "axis": [float(v) for v in axis], "height": height,
-           "meshes": [], "supports": 0}
+           "meshes": [], "supports": 0, "plate": bool(settings.print_supports)}
     for ob, sup in found:
         keep = len(sup[4]) if total <= MOST else max(1, int(round(MOST * len(sup[4]) / float(total))))
         order = np.random.default_rng(41).permutation(len(sup[4]))[:keep] if keep < len(sup[4]) else range(keep)
@@ -417,6 +441,35 @@ def sync(settings, mask, models, frame_at):
             "Head Size": 0.035 * height, "Material": materials.ensure_cover_material("LASER")})
         _light(mask, collection, rec, centre, color, height, (first, last))
         keep.update(o.name for o in objects(mask, "LIGHT"))
+    # (1.25) the build plate under her feet, while she is printed and her supports crumble
+    if sources and rec.get("plate", False):  # (with the supports: chosen at building time)
+        plate = _ours(NAME + " Plate", collection, mask, "PLATE")
+        keep.add(plate.name)
+        # (its top a little above her soles: she stands on it, and a floor at her feet does not hide it)
+        _plate_mesh(plate, Vector(((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, float(rec["lo"]) + 0.004 * height)),
+                    PLATE * height)
+        plate["mmdd_color"] = color
+        if not plate.data.materials:
+            plate.data.materials.append(materials.ensure_cover_material("PRINT_PLATE"))
+        _modifier(plate, cover_nodes.ensure_chain_group(), {
+            "From": first - 3.0, "To": last + (SNAP + SNAP_SPREAD + CRUMBLE) * fps + 6.0})
     for ob in objects(mask):
         if ob.name not in keep:
             _delete(ob)
+
+
+def _plate_mesh(ob, centre, size):
+    """The build plate: a thin square `size` wide on the floor at `centre`, its edge bevelled."""
+    half, rim, depth = 0.5 * size, 0.47 * size, 0.012 * size
+    x, y, z = centre
+    top = [(x + sx * half, y + sy * half, z) for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    low = [(x + sx * rim, y + sy * rim, z - depth) for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    me = ob.data
+    me.clear_geometry()
+    me.from_pydata(top + low, [], [(0, 1, 2, 3), (4, 5, 1, 0), (5, 6, 2, 1), (6, 7, 3, 2), (7, 4, 0, 3),
+                                   (7, 6, 5, 4)])
+    layer = me.uv_layers.new(name="UVMap") if not me.uv_layers else me.uv_layers[0]
+    for loop in me.loops:  # (the top face across the plate 0 .. 1: the material draws its grid)
+        vx, vy, _vz = me.vertices[loop.vertex_index].co
+        layer.data[loop.index].uv = ((vx - x) / size + 0.5, (vy - y) / size + 0.5)
+    me.update()

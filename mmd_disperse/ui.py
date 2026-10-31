@@ -139,6 +139,11 @@ class MMDDISPERSE_PT_chain(_Panel, bpy.types.Panel):
         col.active = len(s.chain) > 0
         col.prop(s, "chain_pace")
         col.prop(s, "chain_cut")
+        col = layout.column()
+        col.prop(s, "chain_variant")
+        sub = col.column()
+        sub.active = bool(s.chain_variant.strip())
+        sub.prop(s, "chain_variant_after")
         if s.chain and s.mask is not None:
             built = list(s.mask.get("mmd_disperse_chain_models", []))
             wanted = [m.root.name for m in chain.models(s)]
@@ -845,6 +850,10 @@ class MMDDISPERSE_PT_dimension(_Panel, bpy.types.Panel):
         if s.dim_style == "BEATS":
             col.prop(s, "dim_length")
         col = layout.column(align=True)
+        col.prop(s, "dim_cel")
+        if s.dim_cel:
+            col.prop(s, "dim_outline")
+        col = layout.column(align=True)
         col.prop(s, "dim_film")
         col.prop(s, "dim_lights")
         if s.dim_style == "BEATS" and not s.beat_sync:
@@ -1032,6 +1041,28 @@ class MMDDISPERSE_PT_morph(_Panel, bpy.types.Panel):
         col.prop(s, "morph_time")
         if s.morph_style == "SKIRT":
             layout.prop(s, "morph_parts")
+
+
+class MMDDISPERSE_PT_wind(_Panel, bpy.types.Panel):
+    bl_label = "Wind at the Change"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        from . import gust
+
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.prop(s, "wind_style")
+        if s.wind_style == "NONE":
+            return
+        col = layout.column(align=True)
+        col.prop(s, "wind_strength")
+        col.prop(s, "wind_time")
+        if not gust.bodies(context.scene):
+            layout.label(text="Blows the model's physics: build it with mmd_tools", icon="INFO")
 
 
 class MMDDISPERSE_PT_fumble(_Panel, bpy.types.Panel):
@@ -1435,6 +1466,7 @@ classes = (
     MMDDISPERSE_PT_talisman,
     MMDDISPERSE_PT_plumage,
     MMDDISPERSE_PT_morph,
+    MMDDISPERSE_PT_wind,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

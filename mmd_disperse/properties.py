@@ -641,6 +641,12 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     dim_lights: BoolProperty(name="Studio Lights", default=True, update=_sync,
                              description="A key light and two rim lights come up as she turns realistic (turn off "
                                          "when the scene is lit already)")
+    dim_cel: BoolProperty(name="Cel Look", default=False, update=_sync,
+                          description="Her toon side as an anime drawing rather than her materials as they are: her "
+                                      "colours in two flat tones (a key light at the camera's upper left), a thin rim "
+                                      "of light and dark outlines (二次元; EEVEE)")
+    dim_outline: FloatProperty(name="Line Weight", default=1.0, min=0.0, soft_max=4.0, update=_sync,
+                               description="How thick the cel look's outlines are (0: none)")
 
     # --- 1.15: the totem in the mist (totem.py)
     totem_enable: BoolProperty(name="Totem in the Mist", default=False, update=_sync,
@@ -776,6 +782,21 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                               description="Seconds the morph takes from the big moment")
     morph_parts: StringProperty(name="Skirt", default="*skirt*;*スカート*;*裙*;*dress*;*ドレス*;*frill*;*フリル*",
                                 update=_sync, description="Skirt Drop: material name patterns of the skirt")
+    # --- 1.25: the wind at the change (gust.py)
+    wind_style: EnumProperty(
+        name="Wind at the Change",
+        items=(("NONE", "None", "No wind"),
+               ("FRONT", "From the Front", "A gust from the camera's side, a little from her left, as the outfits "
+                                           "change: her hair streams back and out to her right"),
+               ("UP", "Updraft", "A gust from under her: hair and skirt lift (the magical girl's updraft)"),
+               ("WHIRL", "Whirlwind", "A whirlwind round her: hair and skirt swirl about her")),
+        default="NONE", update=_sync,
+        description="A gust of wind rising to the big moment and dying away blows her hair and skirt about (换装吹风; "
+                    "it blows the model's rigid bodies: build its physics with mmd_tools)")
+    wind_strength: FloatProperty(name="Wind Strength", default=1.0, min=0.0, soft_max=5.0, update=_sync,
+                                 description="How hard the gust blows")
+    wind_time: FloatProperty(name="Wind Time", default=2.0, min=0.2, soft_max=8.0, update=_sync,
+                             description="Seconds the gust takes to die away after the big moment")
     # --- 1.20: the fumble (fumble.py)
     fumble_enable: BoolProperty(name="Fumble", default=False, update=_sync,
                                 description="A little after she has changed, a few loose parts of the new outfit come "
@@ -1522,6 +1543,8 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
         name="Pace",
         items=(("BEAT", "Every Beat", "A new outfit on every beat (a carousel; 0.45 s apart without beats)"),
                ("BAR", "Every Bar", "A new outfit every bar of four beats (1.8 s without beats)"),
+               ("TWO_BARS", "Every Two Bars", "A new outfit every two bars (3.6 s without beats): the magic trick's "
+                                              "pace with the Magic Trick cuts"),
                ("PHRASE", "Every Phrase", "A new outfit every four bars (7.2 s without beats)")),
         default="BAR", update=_sync,
         description="How far apart the cuts come; the last one (to the old outfit) half a second before the start, "
@@ -1529,8 +1552,16 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     chain_cut: EnumProperty(
         name="Cut",
         items=(("FLASH", "Flash of White", "The picture flashes white at each cut and clears over a few frames"),
-               ("BLACK", "Black Frame", "A frame or two of black at each cut, like a magic trick's blackout")),
+               ("BLACK", "Black Frame", "A frame or two of black at each cut, like a magic trick's blackout"),
+               ("MAGIC", "Magic Trick", "A different cover at each cut, in turn: a puff of smoke, a burst of "
+                                        "confetti, a flash of white, a shower of sparkles (魔术)")),
         default="FLASH", update=_sync, description="What hides each cut from one outfit to the next")
+    chain_variant: StringProperty(name="Variant Parts", default="", update=_sync,
+                                  description="The main change and then its variant (主换加差分): the parts of the new "
+                                              "outfit whose materials match these patterns (a jacket, gloves ...) go "
+                                              "a while after the big moment, at a cut of their own; empty: none")
+    chain_variant_after: FloatProperty(name="Variant After", default=4.0, min=0.2, soft_max=30.0, update=_sync,
+                                       description="Seconds after the big moment the variant comes")
 
 
 def register():

@@ -623,6 +623,16 @@ _ZH = {
     ("*", "Dimension Time"): "闪切时长",
     ("*", "Film Look"): "胶片质感",
     ("*", "Studio Lights"): "补光",
+    ("*", "Cel Look"): "赛璐璐动画风（二次元）",
+    ("*", "Line Weight"): "描边粗细",
+    ("*", "Into the Anime"): "走进二次元",
+    ("*", "Wind at the Change"): "换装吹风",
+    ("*", "From the Front"): "迎面吹来",
+    ("*", "Updraft"): "上升气流",
+    ("*", "Whirlwind"): "旋风",
+    ("*", "Wind Strength"): "风力",
+    ("*", "Wind Time"): "风停用时",
+    ("*", "Blows the model's physics: build it with mmd_tools"): "吹的是模型的物理（刚体）：先用 mmd_tools 构建物理",
     ("*", "Into the Real"): "次元切换",
     ("*", "Dimension Flicker"): "次元闪切",
     # 1.15
@@ -745,6 +755,10 @@ _ZH = {
     ("*", "Black Swan"): "黑天鹅",
     ("*", "Spider Lilies"): "开满彼岸花",
     ("*", "From the Old Shape"): "从旧形状变过来",
+    ("*", "Every Two Bars"): "每两小节一换",
+    ("*", "Magic Trick"): "魔术（每次换一种遮挡）",
+    ("*", "Variant Parts"): "差分（之后藏掉的部件）",
+    ("*", "Variant After"): "差分在关键时刻后",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

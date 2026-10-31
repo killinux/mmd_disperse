@@ -4405,6 +4405,205 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.24 checks")
+    # --- 1.25: the follow-ups (tidier strips, the build plate, the magic trick's covers, the variant)
+    import fnmatch  # noqa: E402
+
+    from mmd_disperse import chain as outfit_chain, model as mdl, peel, printer  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "peel_enable", "peel_style", "peel_time", "peel_strips", "noise_amount",
+        "print_layers", "print_supports", "print_lasers", "chain_cut", "chain_variant", "chain_variant_after",
+        "dim_style", "dim_reverse", "dim_cel", "dim_outline", "dim_film", "dim_lights", "wind_style",
+        "wind_strength", "wind_time")}
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+    made_camera_ = None
+    if scene.camera is None:  # (the cuts' card hangs in front of the camera)
+        made_camera_ = bpy.data.objects.new("Test Camera 1.25", bpy.data.cameras.new("Test Camera 1.25"))
+        scene.collection.objects.link(made_camera_)
+        made_camera_.location = (0.0, -3.0 * height, 0.55 * height)
+        made_camera_.rotation_euler = (1.5708, 0.0, 0.0)
+        scene.camera = made_camera_
+
+    def faces_of(objs_, f_):
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        return sum(len(o_.evaluated_get(deps_).data.polygons) for o_ in objs_)
+
+    def longest_edge(objs_, f_):
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        out_ = 0.0
+        for o_ in objs_:
+            me_ = o_.evaluated_get(deps_).data
+            if not len(me_.edges):
+                continue
+            co_ = np.zeros(len(me_.vertices) * 3, dtype=np.float32)
+            me_.vertices.foreach_get("co", co_)
+            co_ = co_.reshape(-1, 3)
+            ed_ = np.zeros(len(me_.edges) * 2, dtype=np.int32)
+            me_.edges.foreach_get("vertices", ed_)
+            ed_ = ed_.reshape(-1, 2)
+            out_ = max(out_, float(np.linalg.norm(co_[ed_[:, 0]] - co_[ed_[:, 1]], axis=1).max()))
+        return out_
+
+    # tidier strips: the sleeves and the collar burst off apart from the strips (no faces stretched between them)
+    s.peel_enable, s.peel_style, s.peel_time, s.peel_strips = True, "STRIPS", 1.0, 12
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the strips")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    twins_ = peel.objects(s.mask, "TWIN")
+    still_ = longest_edge(twins_, moment + 1)
+    torn_ = max(longest_edge(twins_, moment + f_ * fps) for f_ in (0.2, 0.35, 0.5))
+    check(still_ > 0.0 and torn_ < max(3.0 * still_, 0.2 * height),  # (the fins were most of her height long)
+          "strips: no face stretched between the bursting sleeves and the strips (longest edge %.3f, %.3f at the "
+          "start)" % (torn_, still_))
+    # ... and no scrap of the popped balloon torn across (its points kicked apart)
+    s.peel_style = "INFLATE"
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the balloon")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    twins_ = peel.objects(s.mask, "TWIN")
+    still_ = longest_edge(twins_, moment - 0.3 * fps)  # (swollen)
+    torn_ = max(longest_edge(twins_, moment + f_ * fps) for f_ in (0.1, 0.2, 0.3))
+    check(still_ > 0.0 and torn_ < max(3.0 * still_, 0.2 * height),
+          "inflate: no scrap torn across as it pops (longest edge %.3f, %.3f before)" % (torn_, still_))
+    s.peel_enable = False
+    # the build plate: supports standing on it where nothing of her is below, the plate only while she is printed
+    s.path, s.entrance, s.exit_style, s.noise_amount = "PRINT", "GROW", "SHRINK", 0.0
+    s.print_layers, s.print_supports, s.print_lasers = 30, True, 0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build printed layer by layer")
+    rec_ = printer.record(s.mask) or {}
+    on_plate_ = sum(1 for e_ in rec_.get("meshes", []) for i_ in range(0, len(e_["bottom"]), 3)
+                    if e_["bottom"][i_] < 0)
+    plates_ = printer.objects(s.mask, "PLATE")
+
+    def plate_faces(f_):
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        return sum(len(o_.evaluated_get(deps_).data.polygons) for o_ in plates_)
+
+    first_ = effect._frame_at(s.mask, float(rec_.get("lead", 0.0))) if rec_ else None
+    check(on_plate_ > 0 and len(plates_) == 1 and first_ is not None and plate_faces(first_ - 6) == 0
+          and plate_faces(first_ + 4) > 0 and plate_faces(s.frame_end + 4.0 * fps) == 0,
+          "build plate: %d supports stand on it, there while she is printed only" % on_plate_)
+    s.print_supports = False
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"} and not printer.objects(s.mask, "PLATE"),
+          "build plate gone when built without supports")
+    s.print_supports = True
+    # the variant: a part of the new outfit (its smallest above her knees) goes a while after the big moment, at a cut
+    # of the magic trick (a cover of its own)
+    s.path, s.entrance, s.exit_style = "SPHERE", "SWAP", "SHRINK"
+    sizes_ = {}
+    for ob_ in target.meshes:
+        index_ = np.zeros(len(ob_.data.polygons), dtype=np.int32)
+        ob_.data.polygons.foreach_get("material_index", index_)
+        counts_ = np.bincount(index_, minlength=len(ob_.material_slots))
+        locks_ = mdl.split_patterns(mdl.DEFAULT_LOCK_PATTERNS) + mdl.split_patterns(mdl.DEFAULT_KEEP)
+        for k_, slot_ in enumerate(ob_.material_slots):
+            key_ = mdl.material_key(slot_.material) if slot_.material is not None else ""
+            if key_ and counts_[k_] > 50 and not any(fnmatch.fnmatchcase(key_, p_) for p_ in locks_):
+                sizes_[key_] = sizes_.get(key_, 0) + int(counts_[k_])
+    part_ = min(sizes_, key=sizes_.get) if sizes_ else ""
+    s.chain_cut, s.chain_variant, s.chain_variant_after = "MAGIC", "".join("?" if c_ in "[]*?" else c_
+                                                                           for c_ in part_), 0.5
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with a variant (%s)" % part_)
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    hidden_ = [o_ for o_ in target.meshes if o_.modifiers.get(outfit_chain.VARIANT_HIDE) is not None]
+    at_ = moment + 0.5 * fps
+    card_ = [o_ for o_ in bpy.data.objects if o_.get(outfit_chain.P_CARD) == s.mask]
+    looks_ = [fc_ for c_ in card_ for fc_ in (c_.animation_data.action.fcurves if c_.animation_data
+                                               and c_.animation_data.action
+                                               and hasattr(c_.animation_data.action, "fcurves") else [])
+              if fc_.data_path == '["mmdd_look"]']
+    seen_ = (faces_of(hidden_, at_ - 2), faces_of(hidden_, at_ + 2))
+    check(bool(part_) and bool(hidden_) and seen_[1] < seen_[0] and len(card_) == 1
+          and (looks_ or bpy.app.version >= (5, 0, 0)),
+          "variant: %s goes %.1f s after the moment (%s faces), behind a cover of the magic trick"
+          % (part_, 0.5, seen_))
+    check(not draw_panels(bpy.context), "panels draw with the 1.25 options")
+    s.chain_variant = ""
+    check(not [o_ for o_ in target.meshes if o_.modifiers.get(outfit_chain.VARIANT_HIDE)
+               or o_.data.attributes.get(outfit_chain.ATTR_VARIANT) is not None]
+          and not [o_ for o_ in bpy.data.objects if o_.get(outfit_chain.P_CARD) == s.mask],
+          "variant off: the hiding, the marks and the card gone")
+    # the cel look of the dimension switch: her own look as an anime drawing (two tones, a rim), outlined by a shell
+    # turned inside out, the last modifier of each mesh; all of it gone with the look
+    from mmd_disperse import cover_nodes, dimension  # noqa: E402
+    s.chain_variant = ""
+    s.dim_style, s.dim_reverse, s.dim_cel, s.dim_outline, s.dim_film, s.dim_lights =         "FRONT", False, True, 1.0, False, False
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the cel look")
+    meshes_ = list(base.meshes) + list(target.meshes)
+    mats_ = {m_ for o_ in meshes_ for m_ in dimension._materials(o_)}
+
+    def cel_of(m_):
+        n_ = m_.node_tree.nodes.get(materials.REAL + " Cel") if m_.node_tree else None
+        return n_.outputs[0].default_value if n_ is not None else None
+
+    lined_ = [o_ for o_ in meshes_ if o_.modifiers.get(dimension.OUTLINE_MOD) is not None
+              and o_.modifiers[-1].name == dimension.OUTLINE_MOD]
+    scene.frame_set(s.frame_start)
+    deps_ = bpy.context.evaluated_depsgraph_get()
+    probe_ = max(base.meshes, key=lambda o_: len(o_.data.polygons))
+    me_ = probe_.evaluated_get(deps_).data
+    shell_ = me_.attributes.get(cover_nodes.ATTR_OUTLINE)
+    marked_ = np.zeros(len(me_.vertices), dtype=np.float32)
+    if shell_ is not None and shell_.domain == "POINT":
+        shell_.data.foreach_get("value", marked_)
+    modes_ = {(m_.blend_method, m_.shadow_method) for m_ in mats_} if bpy.app.version < (4, 2, 0) else {
+        (m_.surface_render_method, m_.use_transparent_shadow) for m_ in mats_}
+    unlined_ = [m_ for m_ in mats_ if materials.cel_unlined(m_, dimension.kind_of(m_))]
+    check(mats_ and all(cel_of(m_) == 1.0 for m_ in mats_) and len(lined_) == len(meshes_)
+          and 0.3 < float(marked_.mean()) < 0.5 and not {"OPAQUE", "False"} & set(
+              str(v_) for mode_ in modes_ for v_ in mode_) and len(unlined_) < len(mats_),
+          "cel look: %d materials drawn as cels (%d without an outline), outlines last on %d of %d meshes (%.0f%% of "
+          "the points a shell; modes %s)" % (len(mats_), len(unlined_), len(lined_), len(meshes_),
+                                             100.0 * float(marked_.mean()), sorted(map(str, modes_))))
+    s.dim_outline = 0.0
+    check(not [o_ for o_ in meshes_ if o_.modifiers.get(dimension.OUTLINE_MOD) is not None]
+          and all(cel_of(m_) == 1.0 for m_ in mats_), "cel look without outlines: no shell")
+    s.dim_outline, s.dim_cel = 1.0, False
+    check(not [o_ for o_ in meshes_ if o_.modifiers.get(dimension.OUTLINE_MOD) is not None]
+          and all(cel_of(m_) == 0.0 for m_ in mats_) and not [m_ for m_ in mats_ if m_.get(materials.P_REAL_SAVED)],
+          "cel look off: her own look back, no shell, the blend modes as they were")
+    s.dim_cel = True
+    check(not draw_panels(bpy.context), "panels draw with the cel look")
+    s.dim_style = "NONE"
+    check(not [o_ for o_ in meshes_ if o_.modifiers.get(dimension.OUTLINE_MOD) is not None]
+          and not [m_ for m_ in bpy.data.materials if m_.get(materials.P_REAL) or m_.get(materials.P_REAL_SAVED)],
+          "dimension switch off: the cel look and its outlines gone")
+    # the wind at the change: a gust rising to the big moment and dying away (a field of ours: wind, or a vortex)
+    from mmd_disperse import gust  # noqa: E402
+    s.wind_style, s.wind_strength, s.wind_time = "FRONT", 1.0, 1.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the wind")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    fields_ = gust.objects(s.mask)
+
+    def blowing(f_):
+        scene.frame_set(int(round(f_)))
+        return [round(o_.field.strength, 3) for o_ in fields_ if o_.field is not None]
+
+    gusts_ = [blowing(moment - 1.0 * fps), blowing(moment), blowing(moment + 1.5 * fps)]
+    front_ = (fields_[0].rotation_euler.to_matrix() @ Vector((0.0, 0.0, 1.0))) if fields_ else None
+    check(len(fields_) == 1 and fields_[0].field.type == "WIND" and gusts_[0] == [0.0] and gusts_[1][0] > 1.0
+          and gusts_[2] == [0.0] and front_ is not None and front_.z > 0.05,
+          "wind from the front: one field, still before, %s at the moment, gone after (blowing %s; %d bodies to blow)"
+          % (gusts_[1], tuple(round(v_, 2) for v_ in front_) if front_ is not None else None, gust.bodies(scene)))
+    s.wind_style = "WHIRL"
+    check(len(gust.objects(s.mask)) == 1 and gust.objects(s.mask)[0].field.type == "VORTEX",
+          "whirlwind: a vortex round her")
+    s.wind_style = "UP"
+    up_ = gust.objects(s.mask)[0].rotation_euler.to_matrix() @ Vector((0.0, 0.0, 1.0))
+    check(gust.objects(s.mask)[0].field.type == "WIND" and up_.z > 0.99, "updraft: the wind blows upwards")
+    check(not draw_panels(bpy.context), "panels draw with the wind")
+    s.wind_style = "NONE"
+    check(not gust.objects(s.mask), "wind off: the field gone")
+    if made_camera_ is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera_)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.25 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along

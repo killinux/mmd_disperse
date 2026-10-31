@@ -9,6 +9,10 @@ camera) and studio lights coming up with it (Studio Lights):
 * BEATS (on the beats): the whole of her flips between the two looks on every beat (every Flip seconds without beat
   sync) in the Dimension Time before the big moment, and stays realistic from then on.
 
+Cel Look (1.25) makes the toon side an anime drawing rather than the materials as they are: her colours in two flat
+tones from a key light at the camera's upper left, a thin rim of light and dark outlines (a shell of each mesh turned
+inside out, the last of its modifiers; materials.add_real draws its far side as a line where she is toon).
+
 Reverse goes the other way, from realistic to toon. The timing is in drivers on the frame (short simple expressions,
 which Blender runs without Python) on a value in each material, the film sheet and the lights. Removing the effect
 takes it all away."""
@@ -33,6 +37,9 @@ FLIP = 0.4  # seconds between two flips without beats
 MOST_FLIPS = 13  # (a driver expression is at most 255 characters long)
 SWITCH = 4.0  # frames a part of her takes to turn as the front passes it
 SCATTER = 0.006  # how far light scatters under the skin (model heights): about a centimetre
+OUTLINE = 0.0028  # (1.25) how thick the cel look's outlines are at Line Weight 1 (model heights): 4-5 mm ...
+OUTLINE_BACK = 0.012  # ... and how far the shell is pushed back from the camera (behind a tight suit over her skin)
+OUTLINE_MOD = NAME + " Outline"  # ... the modifier on her meshes that makes them
 # the studio lights: sun lights at (degrees round from the way to the camera, degrees down), their strength
 LIGHTS = (("KEY", -35.0, 50.0, 3.0, (1.0, 0.96, 0.92)), ("RIM_LEFT", -150.0, 20.0, 3.5, (0.55, 0.8, 1.0)),
           ("RIM_RIGHT", 150.0, 20.0, 2.5, (0.75, 0.82, 1.0)))
@@ -77,12 +84,72 @@ def _materials(ob):
 
 
 def remove(mask, meshes=()):
-    """Our sheet and lights, and with `meshes` the realistic look in their materials."""
+    """Our sheet and lights, and with `meshes` the realistic look in their materials and their outlines."""
     for ob in objects(mask):
         _delete(ob)
+    clear_outline(meshes)
     for ob in meshes:
         for mat in _materials(ob):
             materials.remove_real(mat)
+
+
+def clear_outline(meshes):
+    from .cover_nodes import ATTR_UNLINED
+
+    for ob in meshes:
+        mod = ob.modifiers.get(OUTLINE_MOD)
+        if mod is not None:
+            ob.modifiers.remove(mod)
+        if ob.type == "MESH" and ob.data.attributes.get(ATTR_UNLINED) is not None:
+            ob.data.attributes.remove(ob.data.attributes[ATTR_UNLINED])
+
+
+def _last(ob, mod):
+    here = ob.modifiers.find(mod.name)
+    if here != len(ob.modifiers) - 1:
+        ob.modifiers.move(here, len(ob.modifiers) - 1)
+
+
+def last(meshes):
+    """The outline shell after every other modifier (it outlines what they made of her: called once all are set)."""
+    for ob in meshes:
+        mod = ob.modifiers.get(OUTLINE_MOD)
+        if mod is not None:
+            _last(ob, mod)
+
+
+def _outline(ob, width, camera=None):
+    """The cel look's outline shell on `ob` (cover_nodes' Cel Outline group, the last modifier), `width` thick in its
+    own space, without the faces of materials that make none (materials.cel_unlined: marked ATTR_UNLINED), grown
+    out as `camera` sees her and pushed back from it (OUTLINE_BACK); none at 0."""
+    from . import cover_nodes
+    from .node_groups import input_identifiers
+
+    mod = ob.modifiers.get(OUTLINE_MOD)
+    if width <= 0.0:
+        clear_outline([ob])
+        return
+    me = ob.data
+    unlined = np.array([sl.material is not None and materials.cel_unlined(sl.material, kind_of(sl.material))
+                        for sl in ob.material_slots] or [False], dtype=bool)
+    index = np.zeros(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get("material_index", index)
+    values = unlined[np.clip(index, 0, len(unlined) - 1)] if len(me.polygons) else np.zeros(0, dtype=bool)
+    attr = me.attributes.get(cover_nodes.ATTR_UNLINED)
+    if attr is None:
+        attr = me.attributes.new(cover_nodes.ATTR_UNLINED, "BOOLEAN", "FACE")
+    attr.data.foreach_set("value", values)
+    if mod is None:
+        mod = ob.modifiers.new(OUTLINE_MOD, "NODES")
+    group = cover_nodes.ensure_cel_outline_group()
+    if mod.node_group != group:
+        mod.node_group = group
+    ids = input_identifiers(group)
+    mod[ids["Width"]] = float(width)
+    mod[ids["Back"]] = float(width) * OUTLINE_BACK / OUTLINE
+    mod[ids["Camera"]] = camera
+    _last(ob, mod)
+    ob.update_tag()
 
 
 def _num(value):
@@ -272,9 +339,15 @@ def sync(settings, mask, models, moment, frame_at):
         everyone = None
         real = _flip("smoothstep(%s,%s,frame)" % (_num(float(settings.frame_start)), _num(max(
             moment, settings.frame_start + 1.0))), reverse)
+    cel = bool(getattr(settings, "dim_cel", False))
+    width = OUTLINE * height * max(getattr(settings, "dim_outline", 1.0), 0.0) if cel else 0.0
+    camera = shots.carrier(scene, mask) if cel else None
+    camera = camera if camera is not None and camera.type == "CAMERA" else None
     for ob, role in meshes:
         scale = ob.matrix_world.to_scale()
-        unit = SCATTER * height / max((abs(scale.x) + abs(scale.y) + abs(scale.z)) / 3.0, 1e-9)
+        size = max((abs(scale.x) + abs(scale.y) + abs(scale.z)) / 3.0, 1e-9)
+        unit = SCATTER * height / size
+        _outline(ob, width / size, camera)
         for mat in _materials(ob):
             if everyone is not None:
                 expression = everyone
@@ -287,6 +360,7 @@ def sync(settings, mask, models, moment, frame_at):
                 expression = _flip(_step(at) if at is not None else "0", reverse)
             materials.add_real(mat, kind_of(mat), unit)
             materials.update_real(mat, expression)
+            materials.update_cel(mat, cel)
     collection = mask.users_collection[0] if mask.users_collection else scene.collection
     middle = Vector(((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z + 0.55 * height))
     _film(settings, mask, scene, collection, real)

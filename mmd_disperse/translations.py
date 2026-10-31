@@ -730,6 +730,21 @@ _ZH = {
     ("*", "Shatter and Fuse"): "碎开再熔合",
     ("*", "Chunks"): "碎块数",
     ("*", "Optical Camouflage"): "光学迷彩",
+    ("*", "Feathers and Flowers"): "长出羽毛和花",
+    ("*", "Grows"): "长出来的",
+    ("*", "Flowers"): "花",
+    ("*", "Feather Count"): "羽毛数量",
+    ("*", "Growing Time"): "生长时长",
+    ("*", "Feather Colour"): "羽毛 / 花的颜色",
+    ("*", "Morph"): "形变",
+    ("*", "Morph From"): "形变方式",
+    ("*", "The Old Shape"): "从旧衣服的形状变过来",
+    ("*", "Skirt Drop"): "裙摆落下",
+    ("*", "Morph Time"): "形变用时",
+    ("*", "Skirt"): "裙子的材质",
+    ("*", "Black Swan"): "黑天鹅",
+    ("*", "Spider Lilies"): "开满彼岸花",
+    ("*", "From the Old Shape"): "从旧形状变过来",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

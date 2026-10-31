@@ -6280,7 +6280,81 @@ def _cover_ash(name):
     return mat
 
 
-_COVER_MAKERS = {"TALISMAN": _cover_talisman, "ASH": _cover_ash, "MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS": _cover_glass,
+def _cover_plumage(name):
+    """The feathers growing on her (PLUMAGE, plumage.py; the Black Swan): sleek, mmdd_color (the object's) darkest at
+    the quill and a little lighter along the shaft (the shape's UV: x 1 along the shaft, 0.3 at the rim; y from quill to
+    tip), a coat that catches the light and a faint sheen of blue and violet as they turn (iridescence, by how much
+    they face away); the vane frays a little at its rim and tip; fading as they blow away (mmdd_age 0.75 .. 1).
+    Dithered, so the many feathers overlap right."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    tint = s.attribute("mmdd_color", -1800, 400, "OBJECT").outputs["Color"]
+    age = s.attribute("mmdd_age", -1800, 200).outputs[2]
+    coords = s.node("ShaderNodeTexCoord", -1800, -400)
+    u, v, _w = s.split(coords.outputs["UV"], -1600, -400)
+    edge = m("DIVIDE", m("SUBTRACT", 1.0, u, x=-1400, y=-400), 0.7, x=-1200, y=-400)  # 0 on the shaft, 1 at the rim
+    wisps = s.noise(coords.outputs["Object"], 18.0, 4.0, -1200, -650)
+    fray = m("ADD", m("ADD", edge, m("MULTIPLY", s.smooth(v, 0.85, 1.0, -1000, -850), 0.6, x=-800, y=-850),
+                      x=-600, y=-800), m("MULTIPLY", m("SUBTRACT", wisps, 0.5, x=-1000, y=-650), 0.5, x=-800,
+                                         y=-650), x=-400, y=-700)
+    alpha = m("MULTIPLY", m("SUBTRACT", 1.0, s.smooth(fray, 0.8, 1.05, -200, -700), x=0, y=-700),
+              m("SUBTRACT", 1.0, s.smooth(age, 0.75, 1.0, -200, -900), x=0, y=-900), x=200, y=-800)
+    shaft = s.smooth(u, 0.88, 1.0, -1000, 300)
+    color = s.lerp(s.scaled(tint, m("MULTIPLY_ADD", v, 0.6, 0.4, x=-1000, y=100), -800, 200), (0.55, 0.52, 0.5),
+                   m("MULTIPLY", shaft, 0.35, x=-800, y=0), -600, 300)
+    facing = s.node("ShaderNodeLayerWeight", -1000, 600)
+    facing.inputs["Blend"].default_value = 0.3
+    sheen = s.ramp(facing.outputs["Facing"], ((0.0, (0.0, 0.0, 0.0, 1.0)), (0.55, (0.012, 0.024, 0.03, 1.0)),
+                                              (0.8, (0.028, 0.016, 0.034, 1.0)), (1.0, (0.04, 0.04, 0.045, 1.0))),
+                   -800, 600)  # (faint: the feathers stay black, not blue)
+    lit = s.principled(-300, 300, color=color, roughness=0.32, emission=sheen, strength=1.0)
+    for names, value in ((("Coat Weight", "Clearcoat"), 0.6), (("Coat Roughness", "Clearcoat Roughness"), 0.15),
+                         (("Specular IOR Level", "Specular"), 0.6)):
+        _set_input(lit.node, names, value)
+    nt.links.new(s.mix_shader(alpha, s.node("ShaderNodeBsdfTransparent", -300, 0).outputs[0], lit, 600, 0),
+                 out.inputs["Surface"])
+    if hasattr(mat, "surface_render_method"):
+        mat.surface_render_method = "DITHERED"
+    if bpy.app.version < (4, 2, 0):
+        mat.blend_method = "HASHED"
+    _two_sided(mat)
+    mat.diffuse_color = (0.03, 0.03, 0.035, 1.0)
+    return mat
+
+
+def _cover_blossom(name):
+    """The flowers blooming on her (BLOSSOM, plumage.py): mmdd_color (the object's), deep at the heart and lighter to
+    the tips (the shape's UV y: 0 at the heart, 1 at a tip), a pale line down the middle of each petal (UV x 0.5),
+    glowing a little (mmdd_glow) as light comes through petals; fading as they blow away (mmdd_age 0.75 .. 1).
+    Dithered, so the many flowers overlap right."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    tint = s.attribute("mmdd_color", -1600, 400, "OBJECT").outputs["Color"]
+    glow = s.attribute("mmdd_glow", -1600, 200, "OBJECT").outputs[2]
+    age = s.attribute("mmdd_age", -1600, 0).outputs[2]
+    u, v, _w = s.split(s.node("ShaderNodeTexCoord", -1600, -300).outputs["UV"], -1400, -300)
+    heart = s.scaled(tint, m("MULTIPLY_ADD", s.smooth(v, 0.0, 0.5, -1200, -100), 0.75, 0.25, x=-1000, y=-100),
+                     -800, 300)
+    middle = m("SUBTRACT", 1.0, s.smooth(m("ABSOLUTE", m("SUBTRACT", u, 0.5, x=-1200, y=-450), x=-1000, y=-450),
+                                         0.0, 0.18, -800, -450), x=-600, y=-450)
+    color = s.lerp(heart, (1.0, 0.9, 0.85), m("MULTIPLY", m("MULTIPLY", middle, v, x=-600, y=-300), 0.25, x=-400,
+                                              y=-300), -400, 300)
+    alpha = m("SUBTRACT", 1.0, s.smooth(age, 0.75, 1.0, -600, -700), x=-400, y=-700)
+    lit = s.principled(-100, 300, color=color, roughness=0.45, emission=color, strength=glow)
+    nt.links.new(s.mix_shader(alpha, s.node("ShaderNodeBsdfTransparent", -100, 0).outputs[0], lit, 300, 0),
+                 out.inputs["Surface"])
+    if hasattr(mat, "surface_render_method"):
+        mat.surface_render_method = "DITHERED"
+    if bpy.app.version < (4, 2, 0):
+        mat.blend_method = "HASHED"
+    _two_sided(mat)
+    mat.diffuse_color = (0.75, 0.05, 0.08, 1.0)
+    return mat
+
+
+_COVER_MAKERS = {"TALISMAN": _cover_talisman, "ASH": _cover_ash, "PLUMAGE": _cover_plumage, "BLOSSOM": _cover_blossom, "MIRRORBALL": _cover_mirrorball, "FLAME": _cover_flame, "GLASS": _cover_glass,
                  "CLOTH": _cover_cloth, "UMBRELLA": _cover_umbrella, "FAN": _cover_fan, "EMOJI": _cover_emoji,
                  "FRAME": _cover_frame, "CANVAS": _cover_canvas, "PETALS": _cover_pieces, "PLUMES": _cover_plumes,
                  "CONFETTI": _cover_confetti, "CANNON": _cover_cannon, "BALLOON": _cover_balloon,

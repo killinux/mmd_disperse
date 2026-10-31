@@ -30,9 +30,10 @@ GLYPH = "MMD Disperse Glyphs"
 PEBBLE = "MMD Disperse Pebble"
 PAPER_BIRD = "MMD Disperse Paper Bird"
 GLITTER = "MMD Disperse Glitter"
+BLOSSOM = "MMD Disperse Blossom"  # 1.24 (plumage.py): the flowers blooming on her
 NAMES = {"PETAL": PETAL, "BUTTERFLY": BUTTERFLY, "STAR": STAR, "CUBE": CUBE, "COIN": COIN, "SHARD": SHARD,
          "EMBER": EMBER, "CRYSTAL": CRYSTAL, "NOTE": NOTE, "CARD": CARD, "FEATHER": FEATHER, "BAT": BAT, "INK": INK,
-         "GLYPH": GLYPH, "PEBBLE": PEBBLE, "PAPER_BIRD": PAPER_BIRD, "GLITTER": GLITTER}
+         "GLYPH": GLYPH, "PEBBLE": PEBBLE, "PAPER_BIRD": PAPER_BIRD, "GLITTER": GLITTER, "BLOSSOM": BLOSSOM}
 FLAPPING = ("BUTTERFLY", "BAT", "PAPER_BIRD")  # shapes with two wings in the XY plane (x > 0, x < 0) that flap
 UPRIGHT = ("NOTE", "GLYPH")  # shapes that stand facing the front (-Y) and only sway
 VARIANTS = ("GLYPH",)  # shapes made of several (ATTR_VARIANT on their faces), one shown at a time
@@ -245,6 +246,43 @@ def _feather(steps=12, length=1.3):
     return verts, faces, uvs
 
 
+def _blossom(petals=6, steps=6):
+    """A red spider lily (彼岸花) about 2 units across in the XY plane, facing +Z: `petals` narrow petals from a small
+    heart, rising and curling back at their tips, and as many long stamens between them reaching out past the petals
+    and curving up; UV x across a petal or stamen (0.5 on its middle), y from the heart (0) to the tip (1)."""
+    verts, faces, uvs = [(0.0, 0.0, 0.05)], [], [(0.5, 0.0)]
+
+    def strip(angle, reach, width, rise, x0=0.1):
+        """A strip out from the heart at `angle`: from x0 to `reach`, half `width(t)` wide, `rise(t)` high."""
+        ca, sa = math.cos(angle), math.sin(angle)
+        rows = []
+        for i in range(1, steps + 1):
+            t = i / steps
+            r = x0 + (reach - x0) * t
+            half = width(t)
+            z = rise(t)
+            row = []
+            for side in (-1.0, 0.0, 1.0):
+                w = side * half
+                verts.append((r * ca - w * sa, r * sa + w * ca, z + (0.02 if side == 0.0 else 0.0)))
+                uvs.append((0.5 + 0.5 * side, t))
+                row.append(len(verts) - 1)
+            rows.append(row)
+        faces.append((0, rows[0][0], rows[0][1]))
+        faces.append((0, rows[0][1], rows[0][2]))
+        for a_, b_ in zip(rows, rows[1:]):
+            faces.append((a_[0], b_[0], b_[1], a_[1]))
+            faces.append((a_[1], b_[1], b_[2], a_[2]))
+
+    for k in range(petals):
+        a = 2.0 * math.pi * k / petals
+        strip(a, 0.85, lambda t: 0.085 * math.sin(math.pi * min(1.0, 1.05 * t)) ** 0.6 + 0.008,
+              lambda t: 0.45 * t - 0.5 * t ** 3)  # (narrow, curling back at the tip)
+        strip(a + math.pi / petals, 1.15, lambda t: 0.014 * (1.0 - 0.5 * t) + 0.004,
+              lambda t: 0.25 * t + 0.45 * t * t, x0=0.05)  # (a stamen, reaching out and up)
+    return verts, faces, uvs
+
+
 def _bat(size=3.5):
     """Bat about 3.9 units across (a dark shape has to be big to read): wings in the XY plane (x > 0 right, x < 0
     left) with a scalloped trailing edge, a small body with ears along Y (the wings flap like the butterfly's)."""
@@ -346,7 +384,8 @@ def _pebble():
 
 _SHAPES = {"PETAL": _petal, "BUTTERFLY": _butterfly, "STAR": _star, "CUBE": _cube, "COIN": _coin, "SHARD": _shard,
            "EMBER": _ember, "CRYSTAL": _crystal, "NOTE": _note, "CARD": _card, "FEATHER": _feather, "BAT": _bat,
-           "INK": _ink_drop, "GLYPH": _glyphs, "PEBBLE": _pebble, "PAPER_BIRD": _paper_bird, "GLITTER": _sequin}
+           "INK": _ink_drop, "GLYPH": _glyphs, "PEBBLE": _pebble, "PAPER_BIRD": _paper_bird, "GLITTER": _sequin,
+           "BLOSSOM": _blossom}
 
 
 def _material(kind):

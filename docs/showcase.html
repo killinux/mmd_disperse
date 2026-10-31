@@ -231,12 +231,12 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.23：用 Blender 几何节点给 MMD 模型做换装变身。下面一百六十六段视频都是插件生成的
+    <p>mmd_disperse 1.24：用 Blender 几何节点给 MMD 模型做换装变身。下面一百七十段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>166</b> 段演示</span>
-      <span><b>65</b> 组效果</span>
-      <span><b>154</b> 个一键预设</span>
+      <span><b>170</b> 段演示</span>
+      <span><b>67</b> 组效果</span>
+      <span><b>158</b> 个一键预设</span>
       <span><b>23400</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
@@ -295,7 +295,7 @@
 <section id="effects">
   <div class="wrap">
     <h2>效果演示</h2>
-    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.23 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
+    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.24 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
 
     <div class="index">
       <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
@@ -464,6 +464,10 @@
       <a href="#inflate-pop"><img src="../test_output/posters/inflate_pop.jpg" alt="" loading="lazy">充气爆开</a>
       <a href="#shatter-fuse"><img src="../test_output/posters/shatter_fuse.jpg" alt="" loading="lazy">碎开再熔合</a>
       <a href="#optical-camo"><img src="../test_output/posters/optical_camo.jpg" alt="" loading="lazy">光学迷彩</a>
+      <a href="#black-swan"><img src="../test_output/posters/black_swan.jpg" alt="" loading="lazy">黑天鹅</a>
+      <a href="#spider-lilies"><img src="../test_output/posters/spider_lilies.jpg" alt="" loading="lazy">开满彼岸花</a>
+      <a href="#morph-shape"><img src="../test_output/posters/morph_shape.jpg" alt="" loading="lazy">从旧形状变过来</a>
+      <a href="#skirt-drop"><img src="../test_output/posters/skirt_drop.jpg" alt="" loading="lazy">裙摆落下</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -4299,6 +4303,106 @@
         </article>
       </div>
     </section>
+    <section class="family card" id="fam-grow">
+      <div class="family-head">
+        <h3>长出羽毛和花</h3>
+        <p>关键时刻前旧衣服上长出一片片羽毛或者开满花，盖住全身，关键时刻一齐被吹散，里面已经是新衣服（1.24，《黑天鹅》、彼岸花）。</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="black-swan">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/black_swan.jpg">
+              <source src="../test_output/demo_v26/tifa_black_swan_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">黑天鹅 · 跳舞（有声音）</span><span class="ver">1.24</span><span class="tag">VMD 舞蹈</span><span class="tag">长出羽毛和花</span><span class="tag">羽毛</span><span class="tag">瞬间换装</span></div>
+            <h3>黑天鹅（新预设）</h3>
+            <p class="lead">关键时刻前两秒，黑紧身衣上从背后开始起一层鸡皮疙瘩，一片片黑羽毛钻出来长大，身上的顺着身体往下贴，手臂上的朝着手，越长越密，整身像一件羽衣；关键时刻羽毛一齐被吹飞，漫天翻滚，里面已经是 Remake 版的蒂法（《黑天鹅》）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">黑天鹅</span>：<span class="ui">长出羽毛和花</span> 勾上，<span class="ui">长出来的</span> 选 <span class="v">羽毛</span>，<span class="ui">羽毛数量</span> <span class="v">2400</span>，<span class="ui">生长时长</span> <span class="v">2.2</span> 秒，颜色近黑。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset BLACK_SWAN --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="spider-lilies">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/spider_lilies.jpg">
+              <source src="../test_output/demo_v26/tifa_spider_lilies_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">开满彼岸花 · 跳舞（有声音）</span><span class="ver">1.24</span><span class="tag">VMD 舞蹈</span><span class="tag">长出羽毛和花</span><span class="tag">花</span><span class="tag">瞬间换装</span></div>
+            <h3>开满彼岸花（新预设）</h3>
+            <p class="lead">关键时刻前两秒多，红色的彼岸花从背后开始一朵朵开出来，细长的花瓣往后卷、花蕊长长地伸出去，开满全身；关键时刻花朵一齐被吹散，里面已经是 Remake 版的蒂法。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">开满彼岸花</span>：<span class="ui">长出羽毛和花</span> 勾上，<span class="ui">长出来的</span> 选 <span class="v">花</span>，<span class="ui">生长时长</span> <span class="v">2.4</span> 秒，颜色深红。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset SPIDER_LILIES --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
+    <section class="family card" id="fam-morph">
+      <div class="family-head">
+        <h3>形变</h3>
+        <p>新衣服不是直接出现：从旧衣服的形状变过来，或者裙子先收在腰上再落下甩开（1.24，《风云际会》、《Black or White》、《灰姑娘》）。</p>
+        <button type="button" class="together">▶ 一起播放</button>
+      </div>
+      <div class="variants">
+        <article class="effect variant" id="morph-shape">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/morph_shape.jpg">
+              <source src="../test_output/demo_v26/tifa_morph_shape_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">从旧形状变过来 · 跳舞（有声音）</span><span class="ver">1.24</span><span class="tag">VMD 舞蹈</span><span class="tag">形变</span><span class="tag">瞬间换装</span><span class="tag">收尾闪光</span></div>
+            <h3>从旧形状变过来（新预设）</h3>
+            <p class="lead">关键时刻一道白光，AC 版蒂法的衣服先贴着紧身衣的样子出现，裙子和下摆收在腿上，再慢慢张开、落成自己的形状，稍微冲过一点再回来（《风云际会》的 MORF、《Black or White》）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">从旧形状变过来</span>：<span class="ui">形变</span> 勾上，<span class="ui">形变方式</span> 选 <span class="v">从旧衣服的形状变过来</span>，<span class="ui">形变用时</span> <span class="v">1.4</span> 秒；<span class="ui">收尾闪光</span> 打开（闪一下白，盖住刚出现那几帧）。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>。两套衣服形状差得越多越看得出来，从紧身衣变成带裙子的衣服最明显。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset MORPH_SHAPE --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="skirt-drop">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/skirt_drop.jpg">
+              <source src="../test_output/demo_v26/tifa_skirt_drop_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">裙摆落下 · 跳舞（有声音）</span><span class="ver">1.24</span><span class="tag">VMD 舞蹈</span><span class="tag">形变</span><span class="tag">裙摆落下</span><span class="tag">瞬间换装</span><span class="tag">星光</span></div>
+            <h3>裙摆落下（新预设）</h3>
+            <p class="lead">关键时刻紧身衣化成星光散开，AC 版蒂法的裙子先短短地收在腰上，再「哗」地落下、往外甩开，弹一下落定（《灰姑娘》转圈时裙摆绽开）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">裙摆落下</span>：<span class="ui">形变</span> 勾上，<span class="ui">形变方式</span> 选 <span class="v">裙摆落下</span>，<span class="ui">形变用时</span> <span class="v">0.8</span> 秒，<span class="ui">裙子的材质</span> 按名字找裙子（默认带 skirt、スカート、裙、dress 的材质）。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>，<span class="ui">粒子</span> 选 <span class="v">星光</span>（旧衣服化成星光）。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset SKIRT_DROP --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
+          </div>
+        </article>
+      </div>
+    </section>
   </div>
 </section>
 
@@ -4339,7 +4443,7 @@
           <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>剪纸窗花</li><li>发光纹身</li><li>LED 屏幕</li><li>电子纸</li><li>光学迷彩</li><li>也可以不变</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>51</b></h3>
+        <h3>叠加开关 <b>53</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行（全息 / 星空纱 / 黑剪影 / 冰晶 / 光学迷彩）</li><li>故障风</li><li>光剪影</li><li>光带</li>
           <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
           <li>毒液共生体（触手、蹼、黏丝；黑色黏液或液态金属）</li>
@@ -4363,7 +4467,7 @@
           <li>镜里先换</li><li>迷幻多重曝光（迷幻配色 / 发光颜色）</li>
           <li>书法大字幕（金色 / 白色 / 墨色；吹散 / 缩成印章；横排 / 竖排）</li><li>汗光</li>
           <li>撕开翻落（撕开 / 翻落 / 扯掉 / 卷起剥落 / 充气爆开 / 融化滴落 / 碎开再熔合；衬里颜色；藕断丝连；层层撕回）</li><li>变身翻车</li>
-          <li>符箓燃尽</li></ul>
+          <li>符箓燃尽</li><li>长出羽毛和花（羽毛 / 花）</li><li>形变（从旧形状 / 裙摆落下）</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
@@ -4540,6 +4644,10 @@
           <tr><td>充气爆开</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>撕开翻落（充气爆开）、冲击帧</td></tr>
           <tr><td>碎开再熔合</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>撕开翻落（碎开再熔合）、冲击帧</td></tr>
           <tr><td>光学迷彩</td><td>从上往下扫</td><td>边缘生长</td><td>收缩消失</td><td>旧服装表面：光学迷彩（身高的 0.36），纱：光学迷彩（身高的 0.24），青色发光；打开 EEVEE 折射</td></tr>
+          <tr><td>黑天鹅</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>长出羽毛和花（羽毛，近黑）</td></tr>
+          <tr><td>开满彼岸花</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>长出羽毛和花（花，深红）</td></tr>
+          <tr><td>从旧形状变过来</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>形变（从旧形状，1.4 秒）、收尾闪光</td></tr>
+          <tr><td>裙摆落下</td><td>球形扩散</td><td>瞬间换装</td><td>碎片飞散</td><td>形变（裙摆落下）、星光粒子</td></tr>
         </tbody>
       </table>
     </div>

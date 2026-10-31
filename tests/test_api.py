@@ -4253,6 +4253,158 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.23 checks")
+    # --- 1.24: feathers and flowers growing on her; the morph
+    import fnmatch  # noqa: E402
+
+    from mmd_disperse import model as mdl, morph, plumage  # noqa: E402
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "plume_enable", "plume_style", "plume_count", "plume_time", "morph_enable",
+        "morph_style", "morph_time", "morph_parts")}
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+
+    def grown_at(objs_, f_):
+        """(faces, mean distance of the points from their middle, materials) of `objs_` at frame `f_`."""
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        evs_ = [o_.evaluated_get(deps_).data for o_ in objs_]
+        pts_ = np.array([tuple(v_.co) for me_ in evs_ for v_ in me_.vertices]).reshape(-1, 3)
+        spread_ = float(np.linalg.norm(pts_ - pts_.mean(axis=0), axis=1).mean()) if len(pts_) else 0.0
+        return (sum(len(me_.polygons) for me_ in evs_), spread_,
+                {m_.name for me_ in evs_ for m_ in me_.materials if m_ is not None})
+
+    # feathers: none before they start, growing (more and more of them), all of them by the moment, blown off it
+    # (out and away) and gone; flowers in their own material
+    s.plume_enable, s.plume_style, s.plume_count, s.plume_time = True, "FEATHERS", 600, 1.2
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with feathers")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    lead_ = 1.2 * fps
+    twins_ = plumage.objects(s.mask)
+    marked_ = [o_ for o_ in base.meshes if o_.data.attributes.get(cover_nodes.ATTR_GROW) is not None]
+    seen_ = {"before": grown_at(twins_, moment - lead_ - 2), "half": grown_at(twins_, moment - 0.55 * lead_),
+             "full": grown_at(twins_, moment - 2), "blown": grown_at(twins_, moment + 0.5 * plumage.BLOW * fps),
+             "after": grown_at(twins_, moment + 1.25 * plumage.BLOW * fps + 2)}
+    parts_ = {"objects": bool(twins_) and bool(marked_),
+              "none before, growing, all by the moment": seen_["before"][0] == 0
+              and 0 < seen_["half"][0] < seen_["full"][0],
+              "blown off her and gone": seen_["blown"][1] > seen_["full"][1] and seen_["after"][0] == 0,
+              "feathers": materials._cover_name("PLUMAGE") in seen_["full"][2]}
+    s.plume_style = "FLOWERS"
+    flowers_ = grown_at(plumage.objects(s.mask), moment - 2)
+    parts_["flowers"] = flowers_[0] > 0 and materials._cover_name("BLOSSOM") in flowers_[2]
+    check(all(parts_.values()), "feathers and flowers: grown out of her old outfit on the way to the moment, blown "
+                                "off at it (%s; %s %s)" % ([k_ for k_, ok_ in parts_.items() if not ok_] or "all",
+                                                         {k_: v_[:2] for k_, v_ in seen_.items()}, flowers_[:2]))
+    check(not draw_panels(bpy.context), "panels draw with feathers and flowers")
+    s.plume_enable = False
+    check(not plumage.objects(s.mask) and bpy.data.node_groups.get(cover_nodes.PLUMAGE_GROUP) is None
+          and not [o_ for o_ in base.meshes if o_.data.attributes.get(cover_nodes.ATTR_GROW) is not None]
+          and bpy.data.materials.get(materials._cover_name("PLUMAGE")) is None
+          and bpy.data.materials.get(materials._cover_name("BLOSSOM")) is None,
+          "feathers and flowers off: the twins, the group, the marks and their materials gone")
+
+    # the morph from the old shape: a modifier before the new outfit's armature; its cloth comes in on the old outfit
+    # (moved at the moment), in its own place again once the morph is over
+    def new_points(f_, off_=False):
+        scene.frame_set(int(round(f_)))
+        mods_ = [o_.modifiers.get(morph.NAME) for o_ in target.meshes]
+        for m_ in mods_:
+            if m_ is not None and off_:
+                m_.show_viewport = False
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        pts_ = np.array([tuple(v_.co) for o_ in target.meshes for v_ in o_.evaluated_get(deps_).data.vertices])
+        for m_ in mods_:
+            if m_ is not None:
+                m_.show_viewport = True
+        return pts_.reshape(-1, 3)
+
+    s.morph_enable, s.morph_style, s.morph_time = True, "SHAPE", 0.5
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the morph from the old shape")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    span_ = 0.5 * fps
+    morphed_ = [o_ for o_ in target.meshes if o_.modifiers.get(morph.NAME) is not None]
+    order_ = [[m_.type if m_.name != morph.NAME else "MORPH" for m_ in o_.modifiers] for o_ in morphed_]
+    offsets_ = []
+    for o_ in morphed_:
+        attr_ = o_.data.attributes.get(cover_nodes.ATTR_MORPH)
+        if attr_ is not None:
+            vals_ = np.zeros(len(attr_.data) * 3, dtype=np.float32)
+            attr_.data.foreach_get("vector", vals_)
+            offsets_.append(float(np.abs(vals_).max()))
+    moved_ = float(np.linalg.norm(new_points(moment + 1) - new_points(moment + 1, off_=True), axis=1).max())
+    settled_ = float(np.linalg.norm(new_points(moment + span_ + 2) - new_points(moment + span_ + 2, off_=True),
+                                    axis=1).max())
+    parts_ = {"before her armature": bool(morphed_) and all(r_.index("MORPH") < r_.index("ARMATURE")
+                                                            for r_ in order_ if "ARMATURE" in r_),
+              "where to come from": bool(offsets_) and max(offsets_) > 0.0,
+              "moved at the moment, its own after": moved_ > 1e-4 * height and settled_ < 1e-5 * height}
+    check(all(parts_.values()), "morph: the new outfit comes in the old outfit's shape at the moment and settles "
+                                "into its own (%s; %s %s %.5f %.6f)" % ([k_ for k_, ok_ in parts_.items() if not ok_]
+                                                                        or "all", order_, offsets_[:3], moved_,
+                                                                        settled_))
+    # the skirt drop (a part of the new outfit between her knees and waist standing in for the skirt): gathered up at
+    # the moment, dropped again by the end
+    lows_ = {}
+    for o_ in target.meshes:
+        index_ = np.zeros(len(o_.data.polygons), dtype=np.int32)
+        o_.data.polygons.foreach_get("material_index", index_)
+        centres_ = np.zeros(len(o_.data.polygons) * 3, dtype=np.float32)
+        o_.data.polygons.foreach_get("center", centres_)
+        zs_ = centres_.reshape(-1, 3)[:, 2]
+        if not len(zs_):
+            continue
+        lo_, top_ = float(zs_.min()), float(zs_.max())
+        keep_ = mdl.split_patterns(mdl.DEFAULT_LOCK_PATTERNS) + mdl.split_patterns(mdl.DEFAULT_KEEP)
+        for k_, slot_ in enumerate(o_.material_slots):
+            key_ = mdl.material_key(slot_.material) if slot_.material is not None else ""
+            if not key_ or any(fnmatch.fnmatchcase(key_, p_) for p_ in keep_) or (index_ == k_).sum() < 50:
+                continue
+            mid_ = (float(zs_[index_ == k_].mean()) - lo_) / max(top_ - lo_, 1e-6)
+            if 0.25 < mid_ < 0.5:
+                lows_[key_] = lows_.get(key_, 0) + int((index_ == k_).sum())
+    part_ = max(lows_, key=lows_.get) if lows_ else ""
+    s.morph_style, s.morph_parts = "SKIRT", "".join("?" if c_ in "[]*?" else c_ for c_ in part_)
+    skirt_ = [o_ for o_ in target.meshes if o_.data.attributes.get(cover_nodes.ATTR_SKIRT) is not None]
+
+    def skirt_low(f_):
+        """The lowest point of the skirt at frame `f_` (its evaluated mesh carries ATTR_SKIRT)."""
+        scene.frame_set(int(round(f_)))
+        deps_ = bpy.context.evaluated_depsgraph_get()
+        low_ = None
+        for o_ in skirt_:
+            me_ = o_.evaluated_get(deps_).data
+            attr_ = me_.attributes.get(cover_nodes.ATTR_SKIRT)
+            if attr_ is None or not len(me_.vertices):
+                continue
+            vals_ = np.zeros(len(me_.vertices), dtype=np.float32)
+            attr_.data.foreach_get("value", vals_)
+            zs_ = np.zeros(len(me_.vertices) * 3, dtype=np.float32)
+            me_.vertices.foreach_get("co", zs_)
+            zs_ = zs_.reshape(-1, 3)[vals_ > 0.5, 2]
+            if len(zs_):
+                low_ = float(zs_.min()) if low_ is None else min(low_, float(zs_.min()))
+        return low_
+
+    gathered_, dropped_ = skirt_low(moment + 1), skirt_low(moment + span_ + 2)
+    if part_:
+        check(bool(skirt_) and None not in (gathered_, dropped_) and gathered_ > dropped_ + 0.02 * height,
+              "skirt drop: the skirt (%s) gathered up at her waist at the moment, dropped by the end (%s %s)"
+              % (part_, gathered_, dropped_))
+    else:  # (an outfit with nothing at her hips: no skirt to find, nothing gathered)
+        check(gathered_ is None and dropped_ is None, "skirt drop: no skirt in this outfit, nothing gathered")
+    check(not draw_panels(bpy.context), "panels draw with the morph")
+    s.morph_enable = False
+    check(not [o_ for o_ in target.meshes if o_.modifiers.get(morph.NAME) or o_.get(morph.P_MORPH) is not None
+               or o_.data.attributes.get(cover_nodes.ATTR_MORPH) is not None
+               or o_.data.attributes.get(cover_nodes.ATTR_SKIRT) is not None]
+          and bpy.data.node_groups.get(cover_nodes.MORPH_GROUP) is None,
+          "morph off: the modifiers, the marks and the group gone")
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.24 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along

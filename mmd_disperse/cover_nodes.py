@@ -72,8 +72,13 @@ ATTR_STICK = "mmdd_stick"  # on the old outfit's meshes (a face attribute): 1 wh
 FUMBLE_HIDE_GROUP = "MMDDisperse Fumble Hide"
 ATTR_LOOSE = "mmdd_loose"  # on the new outfit's meshes (a face attribute): 1 where fumble.py lets it fall off
 ATTR_TEAR = "mmdd_tear"  # on the outfits' meshes (a face attribute): 1 where peel.py tears it off (cuts it, 1.23)
+PLUMAGE_GROUP = "MMDDisperse Plumage"  # 1.24 (plumage.py): feathers or flowers growing on her
+ATTR_GROW = "mmdd_grow"  # on the old outfit's meshes (a face attribute): 1 where plumage.py lets them grow
+MORPH_GROUP = "MMDDisperse Morph"  # 1.24 (morph.py): the new outfit from the old one's shape, or its skirt dropping
+ATTR_MORPH = "mmdd_morph"  # on the new outfit's meshes (a point vector, at rest): to the old outfit's nearest surface
+ATTR_SKIRT = "mmdd_skirt"  # ... (a point float): 1 on the skirt that drops
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 19  # bumped when one of these groups changes
+REVISION = 20  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -2944,3 +2949,283 @@ def ensure_talisman_group():
     if not _current(TALISMAN_GROUP):
         build_talisman_group()
     return bpy.data.node_groups[TALISMAN_GROUP]
+
+
+# --------------------------------------------------------------------------- 1.24: feathers and flowers (plumage.py)
+
+def build_plumage_group():
+    """Feathers or flowers growing on her (plumage.py), on a twin of a mesh of the old outfit after its armature: about
+    Count of them, their places spread evenly over her at rest (Poisson; only where ATTR_GROW marks her), each where
+    its place is now. From Start, in a wave over Grow frames out from From (at rest), each first rises as a little bump
+    (goosebumps) and then grows out in Sprout frames, a little too big and settling: Style 0 a feather (Feather, an
+    object 1.3 long along Y, the quill at -Y) lying along her, down her body and out along her arms (beyond Width from
+    Centre), lifting off her as it grows and then lying down; Style 1 a flower (Flower, 2 across, facing +Z) opening on
+    her, facing out. From Moment (a few frames apart) they blow off her in Blow frames, tumbling, falling and fading
+    (mmdd_age on them, 0 .. 1). Size is a feather's length or a flower's width; Height hers."""
+    ng, b = _group(PLUMAGE_GROUP, (
+        ("Start", "NodeSocketFloat", 0.0),
+        ("Grow", "NodeSocketFloat", 48.0),
+        ("Sprout", "NodeSocketFloat", 10.0),
+        ("Moment", "NodeSocketFloat", 60.0),
+        ("Blow", "NodeSocketFloat", 27.0),
+        ("Count", "NodeSocketInt", 2000),
+        ("Size", "NodeSocketFloat", 0.1),
+        ("Height", "NodeSocketFloat", 1.6),
+        ("From", "NodeSocketVector", (0.0, 0.1, 1.3)),
+        ("Centre", "NodeSocketVector", (0.0, 0.0, 1.0)),
+        ("Width", "NodeSocketFloat", 0.2),
+        ("Style", "NodeSocketInt", 0),
+        ("Feather", "NodeSocketObject"),
+        ("Flower", "NodeSocketObject"),
+        ("Material", "NodeSocketMaterial"),
+        ("Seed", "NodeSocketInt", 0),
+    ))
+    gi = b.node("NodeGroupInput", -3800, 0)
+    go = b.node("NodeGroupOutput", 4000, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -3800, -300).outputs["Frame"]
+    h = gi.outputs["Height"]
+    size = gi.outputs["Size"]
+    count = b.math("MAXIMUM", gi.outputs["Count"], 1.0, x=-3600, y=-500)
+    flowers = b.compare("GREATER_THAN", gi.outputs["Style"], 0.5, x=-3600, y=-650)
+    # her as she is now (where, which way she faces), kept on her at rest; the part of her they grow on
+    held = b.store(b.store(gi.outputs["Geometry"], "mmdd_posed", b.node("GeometryNodeInputPosition", -3800, -700)
+                           .outputs[0], "FLOAT_VECTOR", x=-3600, y=0),
+                   "mmdd_posed_normal", b.node("GeometryNodeInputNormal", -3800, -850).outputs[0], "FLOAT_VECTOR",
+                   x=-3400, y=0)
+    rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=-3600, y=-1000)[0]
+    at_rest = b.set_position(held, position=rest, x=-3200, y=0)
+    at_rest = b.store(at_rest, "mmdd_rest_normal", b.node("GeometryNodeInputNormal", -3200, -200).outputs[0],
+                      "FLOAT_VECTOR", x=-3000, y=0)
+    body = b.delete(at_rest, b.boolean("NOT", b.named_attribute(ATTR_GROW, "BOOLEAN", x=-3000, y=-1400)[0], x=-2800,
+                                       y=-1400), "FACE", x=-2800, y=0)
+    stat = b.node("GeometryNodeAttributeStatistic", -2600, -400, data_type="FLOAT", domain="FACE")
+    b.feed(stat.inputs["Geometry"], body)
+    b.feed(_enabled(stat.inputs, "Attribute")[0], b.node("GeometryNodeInputMeshFaceArea", -2800, -500).outputs[0])
+    area = b.math("MAXIMUM", stat.outputs["Sum"], 1e-6, x=-2400, y=-400)
+    spots = b.node("GeometryNodeDistributePointsOnFaces", -2200, 0, distribute_method="POISSON")
+    b.feed(spots.inputs["Mesh"], body)
+    b.feed(spots.inputs["Distance Min"], b.math("MULTIPLY", b.math("SQRT", b.math("DIVIDE", area, count, x=-2400,
+                                                                                  y=-600), x=-2200, y=-600), 0.5,
+                                                x=-2000, y=-600))
+    b.feed(spots.inputs["Density Max"], b.math("DIVIDE", b.math("MULTIPLY", count, 10.0, x=-2400, y=-800), area,
+                                               x=-2200, y=-800))
+    b.feed(spots.inputs["Seed"], gi.outputs["Seed"])
+    places = b.delete(spots.outputs["Points"], b.compare("GREATER_EQUAL", b.node("GeometryNodeInputIndex", -2200,
+                                                                                 -1000).outputs[0], count, x=-2000,
+                                                         y=-1000), "POINT", x=-2000, y=0)
+    here = b.node("GeometryNodeInputPosition", -1800, -1200).outputs[0]
+    k = b.node("GeometryNodeInputIndex", -1800, -1400).outputs[0]
+    rnd, rnd_c = b.white_noise(b.combine(k, gi.outputs["Seed"], 0.71, x=-1600, y=-1400), x=-1400, y=-1400)
+    r1, r2, r3 = b.split_xyz(rnd_c, x=-1200, y=-1500)
+    # when: a wave out from From over Grow (the farthest last), a little ragged
+    dist = b.vmath("LENGTH", b.vmath("SUBTRACT", here, gi.outputs["From"], x=-1600, y=-1200), x=-1400, y=-1200)
+    far = b.node("GeometryNodeAttributeStatistic", -1400, -1700, data_type="FLOAT", domain="POINT")
+    b.feed(far.inputs["Geometry"], places)
+    b.feed(_enabled(far.inputs, "Attribute")[0], dist)
+    # (the first bumps rise at Start: the growing begins a bump's time after it)
+    bump = b.math("MULTIPLY", gi.outputs["Sprout"], 0.4, x=-1000, y=-2050)
+    born = b.math("ADD", b.math("ADD", gi.outputs["Start"], bump, x=-600, y=-2000), b.math(
+        "MULTIPLY", b.math("MAXIMUM", b.math("SUBTRACT", gi.outputs["Grow"], bump, x=-800, y=-1950), 0.0, x=-600,
+                           y=-1950), b.math(
+            "MULTIPLY_ADD", b.math("DIVIDE", dist, b.math("MAXIMUM", far.outputs["Max"], 1e-6, x=-1200, y=-1800),
+                                   x=-1000, y=-1700), 0.85, b.math("MULTIPLY", rnd, 0.12, x=-1000, y=-1900), x=-800,
+            y=-1800), x=-600, y=-1800), x=-400, y=-1750)
+    nub = b.map_range(frame, b.math("SUBTRACT", born, b.math("MULTIPLY", gi.outputs["Sprout"], 0.4, x=-400, y=-2100),
+                                    x=-200, y=-2050), born, x=0, y=-2000)
+    g = b.map_range(frame, born, b.math("ADD", born, gi.outputs["Sprout"], x=-200, y=-2250), x=0, y=-2200)
+    eased = b.map_range(g, 0.0, 1.0, x=200, y=-2200, smooth=True)
+    grown = b.math("MULTIPLY", eased, b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY", g, 3.1416, x=200,
+                                                                                    y=-2400), x=400, y=-2400), 0.18,
+                                             1.0, x=600, y=-2400), x=800, y=-2300)
+    scale_ = b.math("MULTIPLY", b.math("MAXIMUM", b.math("MULTIPLY", nub, 0.12, x=600, y=-2050), grown, x=800,
+                                       y=-2100), b.math("MULTIPLY_ADD", r1, 0.5, 0.75, x=800, y=-2550), x=1000,
+                    y=-2200)
+    # which way: her normal now; down her body (out along her arms) along her at rest, carried to where it is now
+    posed = b.named_attribute("mmdd_posed", "FLOAT_VECTOR", x=-1800, y=-2800)[0]
+    n = b.vmath("NORMALIZE", b.named_attribute("mmdd_posed_normal", "FLOAT_VECTOR", x=-1800, y=-3000)[0], x=-1600,
+                y=-3000)
+    n_rest = b.vmath("NORMALIZE", b.named_attribute("mmdd_rest_normal", "FLOAT_VECTOR", x=-1800, y=-3200)[0],
+                     x=-1600, y=-3200)
+    rx, _ry, _rz = b.split_xyz(here, x=-1600, y=-3400)
+    cx, _cy, _cz = b.split_xyz(gi.outputs["Centre"], x=-1600, y=-3550)
+    off_x = b.math("SUBTRACT", rx, cx, x=-1400, y=-3450)
+    arm = b.compare("GREATER_THAN", b.math("ABSOLUTE", off_x, x=-1200, y=-3450),
+                    b.math("MULTIPLY", gi.outputs["Width"], 1.15, x=-1200, y=-3600), x=-1000, y=-3500)
+    side = b.math("SIGN", off_x, x=-1200, y=-3700)
+    want = b.switch("VECTOR", arm, (0.0, 0.0, -1.0), b.combine(side, 0.0, -0.35, x=-1000, y=-3700), x=-800, y=-3600)
+    tangent = b.vmath("NORMALIZE", b.vmath("SUBTRACT", want, b.vmath("SCALE", n_rest, scale=b.vmath(
+        "DOT_PRODUCT", want, n_rest, x=-800, y=-3300), x=-600, y=-3300), x=-400, y=-3400), x=-200, y=-3400)
+    probe = b.vmath("ADD", here, b.vmath("SCALE", tangent, scale=b.math("MULTIPLY", h, 0.012, x=-200, y=-3600),
+                                         x=0, y=-3500), x=200, y=-3450)
+    nearest = b.node("GeometryNodeSampleNearestSurface", 400, -3300, data_type="FLOAT_VECTOR")
+    b.feed(nearest.inputs["Mesh"], at_rest)
+    b.feed(_enabled(nearest.inputs, "Value")[0], b.named_attribute("mmdd_posed", "FLOAT_VECTOR", x=200, y=-3200)[0])
+    b.feed(nearest.inputs["Sample Position"], probe)
+    along = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("SUBTRACT", _enabled(nearest.outputs, "Value")[0], posed,
+                                                        x=600, y=-3300),
+                                         b.combine(0.0, 0.0, b.math("MULTIPLY", h, -1e-4, x=600, y=-3500), x=800,
+                                                   y=-3500), x=1000, y=-3400), x=1200, y=-3400)
+    # a feather: lifting off her as it grows, then lying down along her; its quill on her
+    lean = b.math("MULTIPLY", b.math("MULTIPLY_ADD", eased, -0.85, 1.15, x=1000, y=-3800),
+                  b.math("MULTIPLY_ADD", r2, 0.3, 0.7, x=1000, y=-3950), x=1200, y=-3850)
+    tip = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("SCALE", along, scale=b.math("COSINE", lean, x=1400, y=-3800),
+                                                      x=1600, y=-3700),
+                                       b.vmath("SCALE", n, scale=b.math("SINE", lean, x=1400, y=-3950), x=1600,
+                                               y=-3900), x=1800, y=-3800), x=2000, y=-3800)
+    f_first = b.node("FunctionNodeAlignEulerToVector", 2200, -3700, axis="Y")
+    b.feed(f_first.inputs["Vector"], tip)
+    f_turned = b.node("FunctionNodeAlignEulerToVector", 2400, -3800, axis="Z", pivot_axis="Y")
+    b.feed(f_turned.inputs["Rotation"], f_first.outputs[0])
+    b.feed(f_turned.inputs["Vector"], n)
+    feather_at = b.vmath("ADD", b.vmath("ADD", posed, b.vmath("SCALE", n, scale=b.math("MULTIPLY", h, 0.003, x=2000,
+                                                                                         y=-4100), x=2200, y=-4100),
+                                        x=2400, y=-4050),
+                         b.vmath("SCALE", tip, scale=b.math("MULTIPLY", b.math("MULTIPLY", size, 0.5, x=2200,
+                                                                               y=-4300), scale_, x=2400, y=-4300),
+                                 x=2600, y=-4250), x=2800, y=-4100)
+    # a flower: facing out from her (a little askew), turned by chance about its middle
+    face = b.vmath("NORMALIZE", b.vmath("ADD", n, b.vmath("SCALE", b.vmath("SUBTRACT", rnd_c, (0.5, 0.5, 0.5), x=1400,
+                                                                           y=-4600), scale=0.6, x=1600, y=-4600),
+                                        x=1800, y=-4500), x=2000, y=-4500)
+    l_first = b.node("FunctionNodeAlignEulerToVector", 2200, -4500, axis="Z")
+    b.feed(l_first.inputs["Vector"], face)
+    l_turned = b.node("FunctionNodeAlignEulerToVector", 2400, -4600, axis="X", pivot_axis="Z")
+    b.feed(l_turned.inputs["Rotation"], l_first.outputs[0])
+    b.feed(l_turned.inputs["Vector"], b.vmath("CROSS_PRODUCT", face, b.vmath("SUBTRACT", (0.31, -0.62, 0.45), rnd_c,
+                                                                              x=2000, y=-4800), x=2200, y=-4800))
+    flower_at = b.vmath("ADD", posed, b.vmath("SCALE", n, scale=b.math("MULTIPLY", h, 0.004, x=2400, y=-4900), x=2600,
+                                              y=-4900), x=2800, y=-4800)
+    at = b.switch("VECTOR", flowers, feather_at, flower_at, x=3000, y=-4100)
+    turn = b.switch("VECTOR", flowers, f_turned.outputs[0], l_turned.outputs[0], x=3000, y=-4300)
+    # blown off her from Moment (a few frames apart): out from her and up, slowing, falling, tumbling
+    off = b.math("ADD", gi.outputs["Moment"], b.math("MULTIPLY", b.math("MULTIPLY", rnd, gi.outputs["Blow"], x=1800,
+                                                                        y=-5200), 0.25, x=2000, y=-5200), x=2200,
+                 y=-5200)
+    tau = b.math("DIVIDE", b.math("MAXIMUM", b.math("SUBTRACT", frame, off, x=2400, y=-5200), 0.0, x=2600, y=-5200),
+                 b.math("MAXIMUM", gi.outputs["Blow"], 1.0, x=2600, y=-5350), x=2800, y=-5250)
+    away = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("ADD", n, (0.0, 0.0, 0.6), x=2400, y=-5500), b.vmath(
+        "SCALE", b.vmath("SUBTRACT", rnd_c, (0.5, 0.5, 0.5), x=2200, y=-5700), scale=1.2, x=2400, y=-5700),
+                                       x=2600, y=-5600), x=2800, y=-5600)
+    flung = b.math("MULTIPLY", b.math("MULTIPLY", h, b.math("MULTIPLY_ADD", r2, 0.4, 0.35, x=2600, y=-5900), x=2800,
+                                      y=-5900), b.math("SUBTRACT", 1.0, b.math("POWER", b.math(
+                                          "SUBTRACT", 1.0, b.math("MINIMUM", tau, 1.0, x=2600, y=-6050), x=2800,
+                                          y=-6050), 2.0, x=3000, y=-6050), x=3200, y=-6050), x=3200, y=-5900)
+    blown_at = b.vmath("ADD", b.vmath("ADD", at, b.vmath("SCALE", away, scale=flung, x=3200, y=-5600), x=3400,
+                                      y=-5000),
+                       b.combine(0.0, 0.0, b.math("MULTIPLY", b.math("MULTIPLY", tau, tau, x=3000, y=-6300), b.math(
+                           "MULTIPLY", h, -0.25, x=3000, y=-6450), x=3200, y=-6350), x=3400, y=-6300), x=3600,
+                       y=-5100)
+    spin = b.vmath("ADD", turn, b.vmath("SCALE", b.vmath("ADD", b.vmath("SCALE", rnd_c, scale=9.0, x=3000, y=-6700),
+                                                         (2.0, 1.5, 1.0), x=3200, y=-6700), scale=tau, x=3400,
+                                        y=-6700), x=3600, y=-6600)
+    moved = b.set_position(places, position=blown_at, x=3400, y=0)
+    shown = b.boolean("AND", b.compare("GREATER_THAN", nub, 0.0, x=3200, y=-300),
+                      b.compare("LESS_THAN", tau, 1.0, x=3200, y=-450), x=3400, y=-350)
+    feather = b.node("GeometryNodeObjectInfo", 3000, 600)
+    b.feed(feather.inputs["Object"], gi.outputs["Feather"])
+    flower = b.node("GeometryNodeObjectInfo", 3000, 900)
+    b.feed(flower.inputs["Object"], gi.outputs["Flower"])
+    shape = b.switch("GEOMETRY", flowers, feather.outputs["Geometry"], flower.outputs["Geometry"], x=3200, y=700)
+    # (the feather 1.3 long, the flower 2 across: Size either way; a flower cupped while it opens)
+    unit = b.math("MULTIPLY", size, b.switch("FLOAT", flowers, 1.0 / 1.3, 0.5, x=3200, y=-800), x=3400, y=-800)
+    s_ = b.math("MULTIPLY", unit, scale_, x=3600, y=-800)
+    cup = b.switch("FLOAT", flowers, 1.0, b.math("MULTIPLY_ADD", eased, 0.6, 0.4, x=3400, y=-950), x=3600, y=-950)
+    grown_on = b.node("GeometryNodeInstanceOnPoints", 3600, 0)
+    b.feed(grown_on.inputs["Points"], moved)
+    b.feed(grown_on.inputs["Selection"], shown)
+    b.feed(grown_on.inputs["Instance"], shape)
+    b.feed(grown_on.inputs["Rotation"], spin)
+    # (a feather broader than the particles' one: a body feather, not a quill)
+    wide = b.math("MULTIPLY", s_, b.switch("FLOAT", flowers, 1.7, 1.0, x=3600, y=-650), x=3800, y=-650)
+    b.feed(grown_on.inputs["Scale"], b.combine(wide, s_, b.math("MULTIPLY", s_, cup, x=3800, y=-950), x=3800,
+                                               y=-800))
+    aged = b.store(grown_on.outputs["Instances"], "mmdd_age", b.math("MINIMUM", tau, 1.0, x=3600, y=-1100), "FLOAT",
+                   "INSTANCE", x=3800, y=0)
+    real = b.node("GeometryNodeRealizeInstances", 3900, 200)
+    b.feed(real.inputs["Geometry"], aged)
+    dressed = b.node("GeometryNodeSetMaterial", 4000, 200)
+    b.feed(dressed.inputs["Geometry"], real.outputs["Geometry"])
+    b.feed(dressed.inputs["Material"], gi.outputs["Material"])
+    b.feed(go.inputs["Geometry"], dressed.outputs["Geometry"])
+    return ng
+
+
+def ensure_plumage_group():
+    if not _current(PLUMAGE_GROUP):
+        build_plumage_group()
+    return bpy.data.node_groups[PLUMAGE_GROUP]
+
+
+# --------------------------------------------------------------------------- 1.24: the morph (morph.py)
+
+def build_morph_group():
+    """The new outfit at rest, moved BEFORE its armature (morph.py), as Time goes 0 .. 1 (from the big moment):
+    Style 0 SHAPE: each point is where ATTR_MORPH takes it (the old outfit's nearest surface) until 0, then less and
+    less so, a little past its own place and back by 1; Style 1 SKIRT: the skirt's points (ATTR_SKIRT) are pulled up
+    to the Waist (z), Gather as long as they are, and in round her (what reaches out past her hips, a tenth of Height
+    from the upright line through Centre) as much, until 0, then the skirt drops (fast, a little bounce) and flares
+    out (the hem most, as far as a share of Height) on the way, settled by 1."""
+    ng, b = _group(MORPH_GROUP, (
+        ("Time", "NodeSocketFloat", -1.0),
+        ("Style", "NodeSocketInt", 0),
+        ("Waist", "NodeSocketFloat", 1.0),
+        ("Centre", "NodeSocketVector", (0.0, 0.0, 1.0)),
+        ("Height", "NodeSocketFloat", 1.6),
+        ("Gather", "NodeSocketFloat", 0.12),
+    ))
+    gi = b.node("NodeGroupInput", -2000, 0)
+    go = b.node("NodeGroupOutput", 1600, 0)
+    t = gi.outputs["Time"]
+    tc = b.math("MINIMUM", b.math("MAXIMUM", t, 0.0, x=-1800, y=-300), 1.0, x=-1600, y=-300)
+    pos = b.node("GeometryNodeInputPosition", -1800, -500).outputs[0]
+    # SHAPE: the way back to its own place, a little past it and back
+    settle = b.math("ADD", b.map_range(t, 0.0, 1.0, x=-1400, y=-200, smooth=True), b.math(
+        "MULTIPLY", b.math("SINE", b.math("MULTIPLY", tc, 3.1416, x=-1400, y=-400), x=-1200, y=-400), 0.08, x=-1000,
+        y=-400), x=-800, y=-300)
+    shaped = b.vmath("ADD", pos, b.vmath("SCALE", b.named_attribute(ATTR_MORPH, "FLOAT_VECTOR", x=-1200, y=-700)[0],
+                                         scale=b.math("SUBTRACT", 1.0, settle, x=-800, y=-500), x=-600, y=-600),
+                     x=-400, y=-500)
+    # SKIRT: gathered up at the waist, then dropping, bouncing a little, flaring out on the way
+    px, py, pz = b.split_xyz(pos, x=-1600, y=-1000)
+    cx, cy, _cz = b.split_xyz(gi.outputs["Centre"], x=-1600, y=-1200)
+    dz = b.math("SUBTRACT", pz, gi.outputs["Waist"], x=-1400, y=-1000)
+    drop = b.math("SUBTRACT", 1.0, b.math("POWER", b.math("SUBTRACT", 1.0, tc, x=-1400, y=-1400), 2.0, x=-1200,
+                                          y=-1400), x=-1000, y=-1400)
+    bounce = b.math("MULTIPLY", b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY", tc, 6.2832, x=-1400, y=-1600),
+                                                          x=-1200, y=-1600), b.math("SUBTRACT", 1.0, tc, x=-1200,
+                                                                                    y=-1750), x=-1000, y=-1650),
+                    0.15, x=-800, y=-1650)
+    length = b.math("ADD", gi.outputs["Gather"], b.math("MULTIPLY", b.math("SUBTRACT", 1.0, gi.outputs["Gather"],
+                                                                         x=-800, y=-1300),
+                                                        b.math("ADD", drop, bounce, x=-800, y=-1450), x=-600,
+                                                        y=-1350), x=-400, y=-1300)
+    depth = b.math("DIVIDE", b.math("MULTIPLY", dz, -1.0, x=-1200, y=-1900),
+                   b.math("MULTIPLY", gi.outputs["Height"], 0.25, x=-1200, y=-2050), x=-1000, y=-1950, clamp=True)
+    flare = b.math("MULTIPLY_ADD", b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY", tc, 3.1416, x=-1000, y=-2200),
+                                                             x=-800, y=-2200), depth, x=-600, y=-2100), 0.4, 1.0,
+                   x=-400, y=-2100)
+    # (gathered in round her as well as up: whatever reaches out past her waist, a tail or a train, is pulled in as
+    # much as the skirt is pulled up, or it would stick out like a plank)
+    ox, oy = b.math("SUBTRACT", px, cx, x=-800, y=-900), b.math("SUBTRACT", py, cy, x=-800, y=-1050)
+    r = b.vmath("LENGTH", b.combine(ox, oy, 0.0, x=-600, y=-2400), x=-400, y=-2400)
+    hips = b.math("MULTIPLY", gi.outputs["Height"], 0.1, x=-600, y=-2550)
+    r_new = b.math("MULTIPLY", b.math("ADD", b.math("MINIMUM", r, hips, x=-200, y=-2400), b.math(
+        "MULTIPLY", b.math("MAXIMUM", b.math("SUBTRACT", r, hips, x=-400, y=-2650), 0.0, x=-200, y=-2650), length,
+        x=0, y=-2600), x=200, y=-2500), flare, x=400, y=-2400)
+    spread = b.math("DIVIDE", r_new, b.math("MAXIMUM", r, 1e-6, x=400, y=-2600), x=600, y=-2500)
+    dropped = b.combine(b.math("MULTIPLY_ADD", ox, spread, cx, x=-200, y=-900),
+                        b.math("MULTIPLY_ADD", oy, spread, cy, x=-200, y=-1050),
+                        b.math("MULTIPLY_ADD", dz, length, gi.outputs["Waist"], x=-200, y=-1200), x=0, y=-1000)
+    skirt = b.named_attribute(ATTR_SKIRT, "FLOAT", x=-400, y=-1500)[0]
+    skirted = b.vmath("ADD", pos, b.vmath("SCALE", b.vmath("SUBTRACT", dropped, pos, x=200, y=-1100), scale=skirt,
+                                          x=400, y=-1100), x=600, y=-1000)
+    moved = b.switch("VECTOR", b.compare("GREATER_THAN", gi.outputs["Style"], 0.5, x=600, y=-200), shaped, skirted,
+                     x=800, y=-500)
+    b.feed(go.inputs["Geometry"], b.set_position(gi.outputs["Geometry"], position=moved, x=1200, y=0))
+    return ng
+
+
+def ensure_morph_group():
+    if not _current(MORPH_GROUP):
+        build_morph_group()
+    return bpy.data.node_groups[MORPH_GROUP]

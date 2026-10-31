@@ -992,6 +992,48 @@ class MMDDISPERSE_PT_talisman(_Panel, bpy.types.Panel):
         col.prop(s, "talisman_burn")
 
 
+class MMDDISPERSE_PT_plumage(_Panel, bpy.types.Panel):
+    bl_label = "Feathers and Flowers"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "plume_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.plume_enable
+        col = layout.column(align=True)
+        col.prop(s, "plume_style")
+        col.prop(s, "plume_count")
+        col.prop(s, "plume_time")
+        layout.prop(s, "plume_color")
+
+
+class MMDDISPERSE_PT_morph(_Panel, bpy.types.Panel):
+    bl_label = "Morph"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "morph_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.morph_enable
+        col = layout.column(align=True)
+        col.prop(s, "morph_style")
+        col.prop(s, "morph_time")
+        if s.morph_style == "SKIRT":
+            layout.prop(s, "morph_parts")
+
+
 class MMDDISPERSE_PT_fumble(_Panel, bpy.types.Panel):
     bl_label = "Fumble"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -1391,6 +1433,8 @@ classes = (
     MMDDISPERSE_PT_peel,
     MMDDISPERSE_PT_fumble,
     MMDDISPERSE_PT_talisman,
+    MMDDISPERSE_PT_plumage,
+    MMDDISPERSE_PT_morph,
     MMDDISPERSE_PT_hologram,
     MMDDISPERSE_PT_glitch,
     MMDDISPERSE_PT_beats,

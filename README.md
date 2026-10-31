@@ -46,11 +46,13 @@ Decade 式的残影汇聚、冰封碎裂、燃烧成灰、方块消散、金币�
 （像蜡一样往下塌、淌下来，在脚下积成一滩再缩没）。
 1.23 加了碎开再熔合（关键时刻前旧衣服裂成大块、缝里透火光，飘出去悬在身边，一块块换成新衣服的碎块，正好在关键时刻砸回身上，
 接缝发光再冷却）和光学迷彩（一条隐形带扫过全身：旧衣服变成透明的玻璃、带六边形纹路，新衣服从玻璃里显形）。
-主面板的「预设」一键套用一百五十四种风格。
+1.24 加了长出羽毛和花（关键时刻前旧衣服上起一层鸡皮疙瘩、长出一片片黑羽毛，或者开满彼岸花，关键时刻全被吹散）和形变
+（新衣服从旧衣服的形状变过来，或者裙子先收在腰上、关键时刻落下甩开）。
+主面板的「预设」一键套用一百五十八种风格。
 模型跳舞、整体移动或转圈时也能用：变身波纹、光剪影、光带和毒液触手都贴着身体走，碎片、装甲大块、粒子、新服装飞来的零件和收尾的星星
 都可以留在原地，风向固定在世界里。
 
-**效果展示页**：[docs/showcase.html](docs/showcase.html)，一百六十六段演示视频，每段附带在插件面板里手动做出同样效果的步骤。
+**效果展示页**：[docs/showcase.html](docs/showcase.html)，一百七十段演示视频，每段附带在插件面板里手动做出同样效果的步骤。
 用浏览器在本地打开；视频在 `test_output/`（渲染结果不进 git），没有的话先用下面「高清演示渲染」的命令渲染。
 
 技术来自 B 站视频 [【中文配音】一秒换装？用blender几何节点制作蜘蛛侠变身动画](https://www.bilibili.com/video/BV1Yd4y1X7eR/)
@@ -722,6 +724,28 @@ Decade 式的残影汇聚、冰封碎裂、燃烧成灰、方块消散、金币�
 - **两个新预设**（共一百五十四个）：碎开再熔合、光学迷彩。
 - 4.2 以上的光线追踪折射更好看（隐形带里看得清背后的东西）；3.6 是屏幕空间折射，只能折射画面里已经有的东西。
 
+## 长出羽毛和花、形变（1.24）
+
+调研里最后两个老项目，都在 Blender 3.6 上实现。
+
+- **长出羽毛和花**（「长出羽毛和花」面板）：关键时刻前两秒多，从她背上开始，一波起一层小凸点（鸡皮疙瘩），跟着长出
+  一片片黑羽毛：身上的顺着身体往下贴，手臂上的朝着手，先翘起来再伏下去，越长越多，最后整身像穿了一件羽衣（《黑天鹅》）；
+  也可以换成一朵朵红色的彼岸花开满全身。关键时刻它们一齐从她身上被吹飞、翻滚、往下落、变淡，里面已经是新衣服。
+- **形变**（「形变」面板）：关键时刻新衣服不是直接出现：
+  - 从旧衣服的形状变过来（《风云际会》的 MORF、迈克尔·杰克逊《Black or White》）：新衣服的每个点先贴在旧衣服最近的表面上，
+    再滑回自己的位置，稍微冲过一点再回来：裙子从紧身裤腿上张开，外套下摆从身上长出来；
+  - 裙摆落下（《灰姑娘》转一圈）：新裙子先收在腰上，再「哗」地落下，往外甩开、弹一下再落定（按材质名找裙子）。
+- 做法：
+  - 羽毛和花：和符箓燃尽一样，旧衣服的替身（骨架之后的几何节点）只输出实例：静止姿态上泊松撒点（避开头发、脸），每个点带着
+    摆动后的位置和法线；生长时间按离背部（胸部骨骼后面）的距离排；「往下 / 沿手臂」的方向在静止姿态里求（表面上往下的切线，
+    手臂上换成离开身体中线的方向），往前一点再用「最近表面采样」找到那个点现在在哪，两点相减就是现在的方向。羽毛用粒子里的
+    羽毛形状（加宽 1.7 倍），新材质是黑色、带一层亮漆和很淡的虹彩；彼岸花是新做的形状：六片细长、尖端往后卷的花瓣，加六根
+    伸出去往上弯的长花蕊。
+  - 形变：新衣服的网格上加一个几何节点修改器，放在骨架修改器之前（在静止姿态里挪点，骨架再带着它跳舞）。从旧形状变过来：
+    生成时用 BVH 在静止姿态里给新衣服的每个布料点找旧衣服布料上最近的点，偏移存成点属性（换一对衣服才重算）；裙摆落下：
+    裙子的点按到腰线的距离先压到 0.12（伸出腰围的部分也往里收同样的比例），再按 1 − (1 − t)² 加一点回弹放开，往外甩的量越往下摆越大。
+- **四个新预设**（共一百五十八个）：黑天鹅、开满彼岸花、从旧形状变过来、裙摆落下。
+
 ## 针对 MMD 的改进
 
 - 自动识别 mmd_tools 模型（根空物体 / 骨架 / 网格都能选），跳过刚体和关节。
@@ -738,11 +762,11 @@ Decade 式的残影汇聚、冰封碎裂、燃烧成灰、方块消散、金币�
 支持 Blender 3.6 及以上，已在 3.6.15、4.5.10、5.1.2 上测试。两种安装包都可以在
 [GitHub Releases](https://github.com/killinux/mmd_disperse/releases) 下载，也可以用下面的命令自己生成（zip 不进 git）：
 
-- **Blender 4.2 及以上**：扩展包 `dist/mmd_disperse-1.23.0.zip`，
+- **Blender 4.2 及以上**：扩展包 `dist/mmd_disperse-1.24.0.zip`，
   用 `blender --command extension build --source-dir mmd_disperse --output-dir dist` 生成。
   安装：编辑 > 偏好设置 > 获取扩展 > 右上角下拉 > 从磁盘安装。
-- **Blender 3.6 ~ 4.1**：传统插件包 `dist/mmd_disperse-1.23.0-legacy.zip`（zip 里是 `mmd_disperse/` 文件夹），
-  用 `python -c "import shutil; shutil.make_archive('dist/mmd_disperse-1.23.0-legacy', 'zip', '.', 'mmd_disperse')"` 生成。
+- **Blender 3.6 ~ 4.1**：传统插件包 `dist/mmd_disperse-1.24.0-legacy.zip`（zip 里是 `mmd_disperse/` 文件夹），
+  用 `python -c "import shutil; shutil.make_archive('dist/mmd_disperse-1.24.0-legacy', 'zip', '.', 'mmd_disperse')"` 生成。
   安装：编辑 > 偏好设置 > 插件 > 安装，选这个 zip 后勾选启用。
 
 ## 使用
@@ -916,6 +940,10 @@ blender -b --factory-startup "$D/Tifa Gantz 18 V2.blend" --python demo/render_hd
 --preset MELT_AWAY --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"  # 1.22：融化滴落（打开 Gantz V1.blend）
 --preset SHATTER_FUSE --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"  # 1.23：碎开再熔合（打开 Gantz V1.blend）
 --preset OPTICAL_CAMO --vmd "回レ！雪月花.vmd" --wave 140:230 --backdrop STRIPES --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"  # 1.23：光学迷彩（打开 Gantz V1.blend；身后一面 LED 条纹墙，看得出折射）
+--preset BLACK_SWAN --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"  # 1.24：黑天鹅（打开 Gantz V1.blend）
+--preset SPIDER_LILIES --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"  # 1.24：开满彼岸花（打开 Gantz V1.blend）
+--preset MORPH_SHAPE --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"  # 1.24：从旧形状变过来（打开 Gantz V1.blend）
+--preset SKIRT_DROP --vmd "回レ！雪月花.vmd" --wave 150:210 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"  # 1.24：裙摆落下（打开 Gantz V1.blend）
 ```
 
 `--vmd` 用 mmd_tools 把舞蹈动作加载到旧模型的骨架上（新服装跟着旧骨架动）；模型是 MMD 原始尺寸时 `--vmd-scale` 用默认的 1，
@@ -994,7 +1022,9 @@ D="E:/Downloads/tifa_good/Tifa Gantz 18"
 # 1.23：碎开再熔合（之前没有，开始后旧衣服本身少了要撕的面，裂纹发热、碎块飘出去并多出核心，换成新衣服的碎块，关键时刻落回、
 # 还热着，之后冷却，最后没有；关掉后替身、修改器、标记、熔岩材质、衬里全删）/ 光学迷彩（新旧衣服的材质都成了能折射的玻璃，
 # 六边形按身高定大小；关掉后材质原样）/
-# 一百五十四个预设都能套用并生成（1.11 的预设逐个检查世界、运镜、绸带、卡通物理、分身、画面风格、纱、剪纸、水流）、光带、星光、光剪影 /
+# 1.24：羽毛（开始前没有、长到一半、关键时刻全长出来、吹散后飞开、最后没有；羽毛和花各用自己的材质；关掉后替身、节点组、标记、
+# 材质全删）/ 形变（修改器在骨架之前、偏移非零、关键时刻挪开了、结束后回到原位；裙摆落下时最低点先高后低；关掉后全删）/
+# 一百五十八个预设都能套用并生成（1.11 的预设逐个检查世界、运镜、绸带、卡通物理、分身、画面风格、纱、剪纸、水流）、光带、星光、光剪影 /
 # 收尾闪光、光扫、闪白 /
 # 遮罩关键帧自动伸缩 / 模型转身时风向不变 /
 # 留在原地（骨骼平移时碎片落在后面、花瓣照常放出，装甲大块整块留下，根物体平移时碎片留在世界里，生成后挪动模型碎片跟着走，

@@ -742,6 +742,40 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                  description="Seconds before the big moment the first talisman leaves her hand")
     talisman_burn: FloatProperty(name="Burn Time", default=0.6, min=0.1, soft_max=3.0, update=_sync,
                                  description="Seconds a talisman takes to burn away")
+    # --- 1.24: feathers and flowers (plumage.py), the morph (morph.py)
+    plume_enable: BoolProperty(name="Feathers and Flowers", default=False, update=_sync,
+                               description="On the way to the big moment something grows out of her old outfit and "
+                                           "covers it, then blows off her at the moment (长出羽毛和花; pair it with "
+                                           "All at Once)")
+    plume_style: EnumProperty(
+        name="Grows",
+        items=(("FEATHERS", "Feathers", "Goosebumps run over her and black feathers push out and grow, lying down "
+                                        "along her body and her arms (the Black Swan)"),
+               ("FLOWERS", "Flowers", "Flowers open all over her (a field of red spider lilies)")),
+        default="FEATHERS", update=_sync)
+    plume_count: IntProperty(name="Feather Count", default=2400, min=50, soft_max=6000, update=_sync,
+                             description="How many feathers (flowers: about a third as many, they are wider)")
+    plume_time: FloatProperty(name="Growing Time", default=2.0, min=0.5, soft_max=8.0, update=_sync,
+                              description="Seconds before the big moment they start to grow")
+    plume_color: FloatVectorProperty(name="Feather Colour", subtype="COLOR", size=3, min=0.0, max=1.0,
+                                     default=(0.02, 0.02, 0.025), update=_sync,
+                                     description="Colour of the feathers or the flowers")
+    morph_enable: BoolProperty(name="Morph", default=False, update=_sync,
+                               description="At the big moment the new outfit comes in the old outfit's shape and "
+                                           "settles into its own, or its skirt drops from her waist and flares out "
+                                           "(形变; pair it with All at Once)")
+    morph_style: EnumProperty(
+        name="Morph From",
+        items=(("SHAPE", "The Old Shape", "Each point of the new outfit starts on the old outfit's nearest surface and "
+                                          "slides to its own place, a little past it and back (Willow, Black or "
+                                          "White)"),
+               ("SKIRT", "Skirt Drop", "Its skirt comes gathered up at her waist and drops, flaring out and settling "
+                                       "(Cinderella; the skirt is found by its material name)")),
+        default="SHAPE", update=_sync)
+    morph_time: FloatProperty(name="Morph Time", default=0.8, min=0.1, soft_max=3.0, update=_sync,
+                              description="Seconds the morph takes from the big moment")
+    morph_parts: StringProperty(name="Skirt", default="*skirt*;*スカート*;*裙*;*dress*;*ドレス*;*frill*;*フリル*",
+                                update=_sync, description="Skirt Drop: material name patterns of the skirt")
     # --- 1.20: the fumble (fumble.py)
     fumble_enable: BoolProperty(name="Fumble", default=False, update=_sync,
                                 description="A little after she has changed, a few loose parts of the new outfit come "

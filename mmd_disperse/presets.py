@@ -19,6 +19,7 @@ _OFF = dict(
     cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
     ghost_enable=False, puppet_enable=False, shadow_enable=False, shadow_style="SHADOW", mirror_enable=False,
     echo_enable=False, title_enable=False, sweat_enable=False, peel_enable=False, peel_threads=0.0, peel_layers=1, fumble_enable=False, talisman_enable=False,
+    plume_enable=False, morph_enable=False,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -779,6 +780,28 @@ PRESETS = (
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, peel_enable=True,
           peel_style="SHATTER", peel_time=2.4, peel_chunks=7, peel_lining=(0.12, 0.03, 0.01), impact_enable=True,
           glow_color=(1.0, 0.42, 0.08))),
+    ("BLACK_SWAN", "Black Swan", "Goosebumps run over her old outfit, black feathers push out of it and grow, lying "
+                                 "down along her body and her arms; at the big moment they all blow off her in a "
+                                 "flurry and she stands there changed (长出羽毛: the Black Swan)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, plume_enable=True,
+          plume_style="FEATHERS", plume_time=2.2, plume_count=2400, plume_color=(0.02, 0.02, 0.025),
+          glow_color=(0.6, 0.7, 1.0))),
+    ("SPIDER_LILIES", "Spider Lilies", "Red flowers open all over her old outfit, more and more, until she is covered "
+                                       "in them; at the big moment the petals blow away and she stands there changed "
+                                       "(开满彼岸花)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, plume_enable=True,
+          plume_style="FLOWERS", plume_time=2.4, plume_count=2400, plume_color=(0.78, 0.03, 0.05),
+          glow_color=(1.0, 0.3, 0.3))),
+    ("MORPH_SHAPE", "From the Old Shape", "At the big moment the new outfit comes in the old outfit's shape and slides "
+                                          "into its own, a little past it and back (形变: Willow, Black or White)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, morph_enable=True,
+          morph_style="SHAPE", morph_time=1.4, finale=True, finale_white=0.3,
+          glow_color=(0.8, 0.9, 1.0))),  # (the flash hides the very start, where only some of it fits the old shape)
+    ("SKIRT_DROP", "Skirt Drop", "At the big moment the old outfit bursts into stars and her new skirt comes gathered "
+                                 "up at her waist and drops, flaring out and settling (裙摆落下绽开: Cinderella)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, morph_enable=True,
+          morph_style="SKIRT", morph_time=0.8, exit_style="FRAGMENTS", frag_glow=True, particles="STAR",
+          particle_count=300, particle_color=(0.8, 0.9, 1.0), particle_glow=3.0, glow_color=(0.65, 0.85, 1.0))),
     ("TALISMANS", "Talismans", "Paper talismans fly from her fingertip, swirl round her and cover her, their "
                                "vermilion runes glowing; at the moment they all catch fire and burn away, ashes "
                                "rising, and she stands there changed (符箓燃尽)",

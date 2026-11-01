@@ -773,6 +773,21 @@ _ZH = {
     ("*", "Gem Crown"): "宝石冠",
     ("*", "Crown Time"): "宝石冠停留",
     ("*", "Terastallize"): "太晶化（宝石化）",
+    ("*", "Coiling Tendrils"): "盘绕的触手",
+    ("*", "Feelers"): "触须",
+    ("*", "Goo Pulse"): "黏液脉动",
+    ("*", "Oily Sheen"): "油光虹彩",
+    ("*", "Drips"): "黏液滴落",
+    ("*", "Symbiote Eyes"): "共生体之眼",
+    ("*", "Grin of Teeth"): "咧嘴獠牙",
+    ("*", "Undersuit Stays"): "黏液留在身上（内衬不变回去）",
+    ("*", "Mask Splits Open"): "面罩中分露脸",
+    ("*", "Splits After"): "盖住后几秒裂开",
+    ("*", "Stays Open"): "露脸停留",
+    ("*", "Symbiote from the Hands"): "毒液·从手开始",
+    ("*", "Symbiote at the Head Whip"): "毒液·甩头变脸",
+    ("*", "Symbiote, the Classic Beats"): "毒液·经典变身",
+    ("*", "Eyes need the goo on her face: unlock Face* and Eye*"): "要长出眼睛，黏液得盖到脸上：把 Face*、Eye* 从锁定里去掉",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

@@ -762,11 +762,31 @@ class MMDDISPERSE_PT_venom(_Panel, bpy.types.Panel):
         col.prop(s, "venom_length")
         col.prop(s, "venom_thickness")
         col.prop(s, "venom_speed")
+        col.prop(s, "venom_coil")
+        layout.prop(s, "venom_feelers")
         layout.prop(s, "venom_webs")
-        layout.prop(s, "venom_strands")
+        col = layout.column(align=True)
+        col.prop(s, "venom_strands")
+        col.prop(s, "venom_drips")
         col = layout.column(align=True)
         col.prop(s, "venom_color")
         col.prop(s, "venom_metallic")
+        col.prop(s, "venom_sheen")
+        col.prop(s, "venom_pulse")
+        col = layout.column(align=True)
+        col.prop(s, "venom_eyes")
+        col.prop(s, "layer_stay")
+        sub = col.column(align=True)
+        sub.active = s.venom_eyes
+        sub.prop(s, "venom_teeth")
+        sub.prop(s, "venom_split")
+        sub2 = sub.column(align=True)
+        sub2.active = s.venom_eyes and s.venom_split
+        sub2.prop(s, "venom_split_after")
+        sub2.prop(s, "venom_split_hold")
+        if s.venom_eyes and s.use_lock and any(p.strip().lower().startswith(("face", "eye"))
+                                               for p in s.lock_patterns.split(";")):
+            layout.label(text="Eyes need the goo on her face: unlock Face* and Eye*", icon="INFO")
         if not (s.layer_enable and s.layer_style == "GOO"):
             layout.label(text="Goo coat: Dark Undersuit, Symbiote Goo style", icon="INFO")
         if s.old_surface != "VEINS":

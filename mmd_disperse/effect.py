@@ -87,7 +87,7 @@ SIZE_RATIOS = {
     "layer_width": 0.12,
     "inner_depth": 0.1,
     "venom_length": 0.16,
-    "venom_thickness": 0.0028,
+    "venom_thickness": 0.004,
     "surface_width": 0.12,
     "crystal_size": 0.03,
     "clamp_distance": 0.22,
@@ -696,14 +696,96 @@ def _update_inner_glow(ob, settings):
 def _update_layer(ob, settings):
     # the cells sit on the rest position, which is in object units
     height = max(settings.size_reference, 1e-3) / _object_scale(ob)
-    goo = (settings.venom_color, GOO_CELL * height, settings.venom_metallic) if settings.layer_style == "GOO" else None
+    goo = ((settings.venom_color, GOO_CELL * height, settings.venom_metallic, settings.venom_sheen,
+            settings.venom_pulse) if settings.layer_style == "GOO" else None)
+    eyes = _symbiote_eyes(ob, settings) if goo is not None and settings.venom_eyes else None
+    if eyes is not None:  # (open and shut by the frame: the goo covers her face, the eyes open, the goo leaves)
+        when = _symbiote_eye_frames(settings, settings.mask)
+        scene = settings.id_data
+        eyes = eyes[:4] + ({"cover": when[0], "back": when[1], "fps": scene.render.fps / scene.render.fps_base,
+                            "teeth": settings.venom_teeth,
+                            "split": ((settings.venom_split_after, settings.venom_split_hold)
+                                      if settings.venom_split else None)},) if when is not None else None
     for mat in _glow_materials(ob, settings):
         if settings.layer_enable:
             materials.add_layer(mat)
             materials.update_layer(mat, settings.layer_color, settings.glow_color, settings.layer_lines,
-                                   LAYER_CELL * height, goo)
+                                   LAYER_CELL * height, goo, eyes, settings.layer_stay)
         else:
             materials.remove_layer(mat)
+
+
+EYE_SHIFT = (0.15, 0.1)  # the symbiote's eyes sit this far out and up from her eyes (in eye distances)
+
+
+def _symbiote_eyes(ob, settings):
+    """(left centre, right centre, axis from the left to the right, eye distance, 1.0) of the symbiote's eyes on mesh
+    `ob` (1.27), in its object space (where its rest position is): her eye bones' heads, shifted a little out and up;
+    None without eye bones."""
+    arm = mdl.find_armature(ob)
+    if arm is None:
+        return None
+    bones = arm.data.bones
+    found = [next((bones[n] for n in names if n in bones), None) for names in motion.EYES]
+    if any(b is None for b in found):
+        return None
+    to_mesh = ob.matrix_world.inverted() @ arm.matrix_world
+    left, right = (to_mesh @ b.head_local for b in found)
+    axis = right - left
+    size = axis.length
+    if size < 1e-6:
+        return None
+    axis.normalize()
+    up = Vector((0.0, 0.0, 1.0))
+    shift = EYE_SHIFT[0] * size * axis + EYE_SHIFT[1] * size * up
+    return (tuple(left - EYE_SHIFT[0] * size * axis + EYE_SHIFT[1] * size * up), tuple(right + shift), tuple(axis),
+            size, 1.0)
+
+
+_EYE_FRAMES = {}  # the symbiote's eye frames of a build, keyed by what they depend on (one scan a sync)
+
+
+def _symbiote_eye_frames(settings, mask):
+    """(frame the goo coat reaches her eyes, frame it leaves them): from the arrival of the new outfit's vertices
+    round the eye centres, the earliest of its meshes (her face surface; the eyeballs behind it arrive later), and the
+    undersuit's width behind the edge. None when the goo never gets there."""
+    meshes = [ob for ob in effect_objects(mask) if ob.type == "MESH" and ob.get(P_ROLE) == "TARGET"]
+    key = (mask.name, float(mask.get(P_WAVE, 0.0)), mask.get(P_PATH, ""), settings.seeds, settings.frame_start,
+           settings.frame_end, round(_layer(settings), 6), settings.layer_stay, tuple(ob.name for ob in meshes))
+    if key in _EYE_FRAMES:
+        return _EYE_FRAMES[key]
+    _EYE_FRAMES.clear()
+    reach = None
+    for ob in meshes:
+        eyes = _symbiote_eyes(ob, settings)
+        if eyes is None:
+            continue
+        me = ob.data
+        co = np.empty(len(me.vertices) * 3, dtype=np.float32)
+        me.vertices.foreach_get("co", co)
+        co = co.reshape(-1, 3)
+        centres = np.array([eyes[0], eyes[1]], dtype=np.float32)
+        near = np.minimum(np.linalg.norm(co - centres[0], axis=1), np.linalg.norm(co - centres[1], axis=1)) \
+            < 0.6 * eyes[3]
+        if int(near.sum()) < 10:
+            continue
+        attr = me.attributes.get(ATTR_ARRIVAL)
+        if attr is not None:
+            values = np.empty(len(me.vertices), dtype=np.float32)
+            attr.data.foreach_get("value", values)
+            there = float(np.median(values[near])) * _object_scale(ob)
+        else:
+            there = float(np.median(np.linalg.norm(mdl.rest_points_world(ob)[near]
+                                                   - np.asarray(mask.matrix_world.translation), axis=1)))
+        reach = there if reach is None else min(reach, there)
+    when = None
+    if reach is not None:
+        cover = _frame_at(mask, reach)
+        if cover is not None:
+            back = None if settings.layer_stay else _frame_at(mask, reach + _layer(settings))
+            when = (float(cover), float(back) if back is not None else float(cover) + 1e6)
+    _EYE_FRAMES[key] = when
+    return when
 
 
 def _update_paint(ob, settings):
@@ -740,7 +822,8 @@ def _update_surface(ob, settings):
         if settings.old_surface != "NONE":
             materials.add_surface(mat, settings.old_surface)
             materials.update_surface(mat, settings.surface_color, settings.glow_color, cell, settings.venom_metallic,
-                                     settings.ice_clarity, CODE_CELL * height)
+                                     settings.ice_clarity, CODE_CELL * height, settings.venom_sheen,
+                                     settings.venom_pulse)
             if settings.old_surface == "INK":  # its drawing uses the paint colours (and its cells)
                 materials.update_paint(mat, 1.0, settings.paper_color, settings.ink_color,
                                        PAINT_CELL * max(settings.size_reference, 1e-3) / _object_scale(ob))
@@ -789,7 +872,8 @@ def _update_venom(settings, mask, objects):
             poses, key = venom.sample_poses(scene, ob, frames, objects) if settings.venom_strands > 0 else ([], None)
             venom.build(ob, values, settings, height, scene, poses, key)
     goo = materials.ensure_goo_material()
-    materials.update_goo_material(settings.venom_color, GOO_CELL * height, settings.venom_metallic)
+    materials.update_goo_material(settings.venom_color, GOO_CELL * height, settings.venom_metallic,
+                                  settings.venom_sheen, settings.venom_pulse)
     return goo
 
 
@@ -1380,6 +1464,8 @@ def sync(settings):
         "Tendril Absorb": ABSORB * settings.venom_length,
         "Strand Life": STRAND_LIFE * settings.venom_length,
         "Venom Material": goo,
+        "Tendril Pulse": settings.venom_pulse,
+        "Goo Drips": settings.venom_drips,
         "Edge Glow": settings.edge_glow,
         "Scales": settings.entrance == "SCALES",
         "Scale Size": settings.scale_size,

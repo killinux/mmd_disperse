@@ -28,7 +28,7 @@ import os
 
 import bpy
 
-VERSION = 19
+VERSION = 20
 CACHE_PREFIX = "mmd_disperse_node_groups_"  # the main groups, once built, are kept in the user's config folder
 
 FIELD_GROUP = "MMDDisperse Field"
@@ -142,6 +142,8 @@ VENOM_INPUTS = (
     ("Tendril Absorb", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
     ("Strand Life", "NodeSocketFloat", 3.0, 0.0, 1e9, "DISTANCE"),
     ("Venom Material", "NodeSocketMaterial", None, None, None, None),
+    ("Tendril Pulse", "NodeSocketFloat", 1.0, 0.0, 10.0, None),
+    ("Goo Drips", "NodeSocketBool", True, None, None, None),
 )
 
 # Entrances without a front, timed by the mask radius against Clamp Distance (the moment): the evolution flash
@@ -889,9 +891,11 @@ def _remove_attributes(b, geometry, names, x, y):
 # Point attributes of the symbiote's skeleton (venom.py). End A, end B: three vertex indices and their weights.
 VENOM_ENDS = (("mmdd_a0", "mmdd_a1", "mmdd_a2", "mmdd_aw"), ("mmdd_b0", "mmdd_b1", "mmdd_b2", "mmdd_bw"))
 VENOM_ATTRS = tuple(name for end in VENOM_ENDS for name in end) + (
-    "mmdd_t", "mmdd_kind", "mmdd_s", "mmdd_len", "mmdd_root", "mmdd_rnd")
+    "mmdd_t", "mmdd_kind", "mmdd_s", "mmdd_len", "mmdd_root", "mmdd_rnd", "mmdd_thick")
 _VENOM_AGE = "mmdd_venom_age"  # scratch: age of the bound point
-_VENOM_RADIUS = "mmdd_venom_radius"  # scratch: tube radius
+_VENOM_RADIUS = "mmdd_venom_radius"  # tube radius (kept on the tubes for the goo material, 1.27)
+_VENOM_S = "mmdd_goo_s"  # 1.27, on the goo's tubes for its material: length along the tendril or strand ...
+_VENOM_V = "mmdd_goo_v"  # ... and the way round it (0 .. 1, from the profile): the smears stay put on a tendril
 
 
 def build_venom_group():
@@ -901,7 +905,9 @@ def build_venom_group():
     A tendril grows out of its root once the edge has passed the root, faster than the edge (Tendril Speed), so it
     runs ahead; once the edge is Tendril Absorb past the root the goo swallows it again from the root on. A strand
     forms where the edge has passed both its ends, sags, thins as the body pulls it longer, snaps at three times its
-    length and is gone after Strand Life."""
+    length and is gone after Strand Life. 1.27: bulges are pumped along a tendril towards its tip and its tip flicks
+    about (Tendril Pulse), a drop of goo falls off a strand as it snaps (Goo Drips), the feelers are thin (the
+    skeleton's thickness factor), and the tubes carry coordinates for their material (_VENOM_S, _VENOM_V)."""
     ng = _new_group(VENOM_GROUP, is_modifier=False)
     _add_socket(ng, "Mesh", "INPUT", "NodeSocketGeometry")
     for spec in VENOM_INPUTS[1:]:
@@ -958,8 +964,10 @@ def build_venom_group():
     web = b.compare("GREATER_THAN", kind, 1.5, x=-700, y=-500)
     strand = b.boolean("AND", b.compare("GREATER_THAN", kind, 0.5, x=-700, y=-650), b.boolean("NOT", web, x=-500,
                                                                                                y=-600), x=-500, y=-700)
-    thick = b.math("MULTIPLY", gi.outputs["Tendril Radius"], b.math("MULTIPLY_ADD", rnd, 0.8, 0.6, x=-700, y=-1100),
-                   x=-500, y=-1100)
+    thick_attr, has_thick = b.named_attribute("mmdd_thick", "FLOAT", x=-900, y=-1400)
+    thick_f = b.switch("FLOAT", has_thick, 1.0, thick_attr, x=-700, y=-1400)
+    thick = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Tendril Radius"], thick_f, x=-700, y=-1250),
+                   b.math("MULTIPLY_ADD", rnd, 0.8, 0.6, x=-700, y=-1100), x=-500, y=-1100)
 
     # --- Tendrils: the whole tendril is timed by the age at its root.
     aged = b.store(skel, _VENOM_AGE, age_a, x=-700, y=600)
@@ -981,7 +989,18 @@ def build_venom_group():
     swell = b.math("MULTIPLY_ADD", b.math("SUBTRACT", 1.0, b.math("DIVIDE", s, b.math("MULTIPLY", length, 0.5, x=700,
                                                                                          y=-300), x=900, y=-300),
                                           x=1100, y=-300, clamp=True), 0.8, 1.0, x=1300, y=-300)
-    tendril_radius = b.math("MULTIPLY", b.math("MULTIPLY", thick, fade, x=1100, y=200), swell, x=1300, y=200)
+    # 1.27: bulges pumped along the tendril towards its tip (Tendril Pulse), each tendril on its own beat
+    frame0 = b.node("GeometryNodeInputSceneTime", 500, -500).outputs["Frame"]
+    pulse = b.math("MINIMUM", gi.outputs["Tendril Pulse"], 1.0, x=500, y=-650)
+    phase = b.math("SUBTRACT", b.math("MULTIPLY_ADD", b.math("DIVIDE", s, b.math("MAXIMUM", b.math(
+        "MULTIPLY", length, 0.3, x=500, y=-850), 1e-4, x=700, y=-850), x=900, y=-850), 6.2832,
+        b.math("MULTIPLY", rnd, 6.2832, x=700, y=-1000), x=1100, y=-850),
+        b.math("MULTIPLY", frame0, 0.3, x=900, y=-1000), x=1300, y=-850)
+    bulge = b.math("POWER", b.math("MAXIMUM", b.math("SINE", phase, x=1500, y=-850), 0.0, x=1700, y=-850), 2.0,
+                   x=1900, y=-850)
+    pumped = b.math("MULTIPLY_ADD", b.math("MULTIPLY", bulge, pulse, x=2100, y=-850), 0.45, 1.0, x=2300, y=-850)
+    tendril_radius = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", thick, fade, x=1100, y=200), swell,
+                                               x=1300, y=200), pumped, x=1500, y=200)
     tendril_shown = b.boolean("AND", b.compare("GREATER_EQUAL", to_tip, 0.0, x=700, y=500),
                               b.compare("GREATER_EQUAL", from_tail, 0.0, x=700, y=650), x=900, y=550)
     # The tip rises off the body and sways, feeling its way.
@@ -990,8 +1009,12 @@ def build_venom_group():
                                                          b.math("MULTIPLY", rnd, 2.0 * math.pi, x=700, y=1050),
                                                          x=900, y=950), x=1100, y=950), 0.5, 0.5, x=1300, y=950)
     tipness = b.math("SUBTRACT", 1.0, tip_fade, x=900, y=750)
-    rise = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", tipness, tipness, x=1100, y=750), sway,
-                                     x=1300, y=750), b.math("MULTIPLY", length, 0.12, x=1300, y=600), x=1500, y=700)
+    # (1.27: a quicker flick on top of the sway, as much as the pulse)
+    flick = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.9, b.math(
+        "MULTIPLY", rnd, 7.0, x=700, y=1250), x=900, y=1150), x=1100, y=1150), 0.5, 0.5, x=1300, y=1150)
+    swaying = b.math("MULTIPLY_ADD", b.math("MULTIPLY", flick, pulse, x=1500, y=1150), 0.5, sway, x=1700, y=1150)
+    rise = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", tipness, tipness, x=1100, y=750), swaying,
+                                     x=1300, y=750), b.math("MULTIPLY", length, 0.14, x=1300, y=600), x=1500, y=700)
 
     # --- Strands: timed by the later of their two ends.
     strand_age = b.math("MINIMUM", age_a, age_b, x=-300, y=-1500)
@@ -1022,6 +1045,32 @@ def build_venom_group():
     sag = b.vmath("SCALE", down, scale=b.math("MULTIPLY", b.math("MULTIPLY", span, droop, x=700, y=-3100), middle,
                                                 x=900, y=-3050), x=1100, y=-2900)
 
+    # 1.27: a drop of goo falls off a strand as it snaps (Goo Drips): from its middle, straight down, gone by Strand
+    # Life (a small ball, as big as the strand was thick)
+    frac = b.math("DIVIDE", b.math("SUBTRACT", strand_age, b.math("MULTIPLY", life, 0.6, x=-100, y=-3400), x=100,
+                                   y=-3400), b.math("MULTIPLY", life, 0.4, x=-100, y=-3550), x=300, y=-3400)
+    dropping = b.boolean("AND", b.boolean("AND", strand, gi.outputs["Goo Drips"], x=500, y=-3300), b.boolean(
+        "AND", b.boolean("AND", b.compare("GREATER_THAN", frac, 0.0, x=500, y=-3450),
+                         b.compare("LESS_THAN", frac, 1.0, x=500, y=-3600), x=700, y=-3500),
+        b.boolean("AND", b.compare("GREATER_THAN", t, 0.5, x=500, y=-3750),
+                  b.compare("LESS_THAN", t, 0.6, x=500, y=-3900), x=700, y=-3800), x=900, y=-3600), x=1100, y=-3500)
+    fall = b.math("MULTIPLY", b.math("MULTIPLY", frac, frac, x=1100, y=-3700), b.math("MULTIPLY", thick, 40.0, x=1100,
+                                                                                      y=-3850), x=1300, y=-3750)
+    drop_at = b.vmath("ADD", b.vmath("ADD", point, sag, x=1300, y=-3950), b.vmath("SCALE", down, scale=fall, x=1300,
+                                                                                   y=-4100), x=1500, y=-4000)
+    drop_size = b.math("MULTIPLY", thick, b.math("MULTIPLY_ADD", frac, -0.5, 1.6, x=1300, y=-4250), x=1500, y=-4250)
+    ico = b.node("GeometryNodeMeshIcoSphere", 1700, -4300)
+    ico.inputs["Subdivisions"].default_value = 1
+    ico.inputs["Radius"].default_value = 1.0
+    drop_on = b.node("GeometryNodeInstanceOnPoints", 1900, -4000)
+    b.feed(drop_on.inputs["Points"], b.set_position(aged, position=drop_at, x=1700, y=-4000))
+    b.feed(drop_on.inputs["Selection"], dropping)
+    b.feed(drop_on.inputs["Instance"], ico.outputs["Mesh"])
+    b.feed(drop_on.inputs["Scale"], b.combine(drop_size, drop_size, drop_size, x=1700, y=-4450))
+    drops_real = b.node("GeometryNodeRealizeInstances", 2100, -4000)
+    b.feed(drops_real.inputs["Geometry"], drop_on.outputs["Instances"])
+    drops = _remove_attributes(b, drops_real.outputs["Geometry"], VENOM_ATTRS + (_VENOM_AGE,), 2300, -4000)
+
     radius = b.switch("FLOAT", strand, tendril_radius, strand_radius, x=1300, y=-500)
     shown = b.switch("BOOLEAN", strand, tendril_shown, strand_shown, x=1300, y=-700)
     # Tendrils lie on the surface, mostly above it; webs lie under their middle.
@@ -1032,6 +1081,8 @@ def build_venom_group():
                       x=1900, y=-900)
     placed = b.set_position(aged, position=b.vmath("ADD", point, offset, x=1700, y=-600), x=1900, y=600)
     placed = b.store(placed, _VENOM_RADIUS, radius, x=2100, y=600)
+    placed = b.store(placed, _VENOM_S, b.switch("FLOAT", strand, s, b.math("MULTIPLY", t, length, x=2000, y=300),
+                                                x=2100, y=300), x=2200, y=600)
     placed = b.delete(placed, b.boolean("NOT", shown, x=2100, y=400), "POINT", x=2300, y=600)
     webs, placed = b.separate(placed, web, "POINT", x=2400, y=800)
     placed = _remove_attributes(b, placed, VENOM_ATTRS + (_VENOM_AGE,), 2500, 600)
@@ -1047,13 +1098,15 @@ def build_venom_group():
     width = b.node("GeometryNodeSetCurveRadius", 3100, 200)
     b.feed(width.inputs["Curve"], res.outputs["Geometry"])
     b.feed(width.inputs["Radius"], b.named_attribute(_VENOM_RADIUS, "FLOAT", x=2900, y=0)[0])
-    curves = _remove_attributes(b, width.outputs["Curve"], (_VENOM_RADIUS,), 3300, 200)
+    curves = width.outputs["Curve"]  # (the radius stays on the tubes for their material)
     profile = b.node("GeometryNodeCurvePrimitiveCircle", 3300, -100, mode="RADIUS")
-    profile.inputs["Resolution"].default_value = 6
+    profile.inputs["Resolution"].default_value = 8
     profile.inputs["Radius"].default_value = 1.0
-    tube = b.curve_to_mesh(curves, profile.outputs["Curve"], x=3500, y=200)
+    ring = b.store(profile.outputs["Curve"], _VENOM_V, b.node("GeometryNodeSplineParameter", 3300, -300).outputs[
+        "Factor"], x=3450, y=-100)
+    tube = b.curve_to_mesh(curves, ring, x=3500, y=200)
     shade = b.node("GeometryNodeSetShadeSmooth", 3700, 200)
-    b.feed(shade.inputs["Geometry"], b.join([tube, webs], x=3600, y=400))
+    b.feed(shade.inputs["Geometry"], b.join([tube, webs, drops], x=3600, y=400))
     mat = b.node("GeometryNodeSetMaterial", 3900, 200)
     b.feed(mat.inputs["Geometry"], shade.outputs["Geometry"])
     b.feed(mat.inputs["Material"], gi.outputs["Venom Material"])

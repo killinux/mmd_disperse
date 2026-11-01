@@ -854,33 +854,78 @@ def update_particle_material(settings):
     mat.diffuse_color = color
 
 
+GOO_SHEEN = ((0.0, (0.02, 0.05, 0.4)), (0.45, (0.3, 0.04, 0.45)), (1.0, (0.0, 0.4, 0.42)))  # oil on wet tar: deep
+# blue, violet, teal, from facing the camera to grazing
+
+
 def _goo_shader(nt, prefix, coord, x, y):
     """Wet black goo: a Principled BSDF (`prefix` + " BSDF") under a clear coat, its roughness smeared by a noise on
-    `coord` with a matching bump, so it is not equally wet everywhere (DNEG's "semi-dry" symbiote). Returns the BSDF;
-    the noise (`prefix` + " Smear") gets its scale from _set_goo()."""
-    smear = _new(nt, "ShaderNodeTexNoise", prefix + " Smear", x - 700, y - 200, noise_dimensions="3D")
+    `coord` with a matching bump, so it is not equally wet everywhere (DNEG's "semi-dry" symbiote). 1.27: the smears
+    creep (the noise drifts with the frame), veins throb under the goo (cell walls on `coord`, raised and wetter, each
+    cell on its own beat, as much as the value `prefix` + " Pulse") and an oily rainbow lies on it at grazing angles
+    (GOO_SHEEN, as much as `prefix` + " Sheen"). Returns the BSDF; the noise (`prefix` + " Smear") and the veins
+    (`prefix` + " Ridges") get their scale from _set_goo()."""
+    time = _camo_time(nt, prefix + " Time", x - 1500, y - 350)
+    smear = _new(nt, "ShaderNodeTexNoise", prefix + " Smear", x - 700, y - 200, noise_dimensions="4D")
     nt.links.new(coord, smear.inputs["Vector"])
+    nt.links.new(_math(nt, prefix, "MULTIPLY", time, 0.02, x=x - 1100, y=y - 350), smear.inputs["W"])
     smear.inputs["Detail"].default_value = 3.0
+    ridges = _new(nt, "ShaderNodeTexVoronoi", prefix + " Ridges", x - 1300, y - 600, voronoi_dimensions="3D",
+                  feature="DISTANCE_TO_EDGE")
+    nt.links.new(coord, ridges.inputs["Vector"])
+    cells = _new(nt, "ShaderNodeTexVoronoi", prefix + " Ridge Cells", x - 1300, y - 900, voronoi_dimensions="3D")
+    nt.links.new(coord, cells.inputs["Vector"])
+    ridge = _math(nt, prefix, "SUBTRACT", 1.0, _smooth_node(nt, prefix + " Ridge", ridges.outputs["Distance"], 0.0,
+                                                           0.14, x - 1100, y - 600), x=x - 900, y=y - 600)
+    beat = _new(nt, "ShaderNodeSeparateXYZ", prefix + " Ridge Beat", x - 1100, y - 900)
+    nt.links.new(cells.outputs["Color"], beat.inputs[0])
+    throb = _math(nt, prefix, "MULTIPLY_ADD", _math(nt, prefix, "SINE", _math(
+        nt, prefix, "MULTIPLY_ADD", time, 0.25, _math(nt, prefix, "MULTIPLY", beat.outputs[0], 6.283, x=x - 900,
+                                                     y=y - 1000), x=x - 900, y=y - 900), x=x - 700, y=y - 900), 0.5,
+                  0.5, x=x - 500, y=y - 900)
+    pulse = _new(nt, "ShaderNodeValue", prefix + " Pulse", x - 1300, y - 1150)
+    pulse.outputs[0].default_value = 1.0
+    raised = _math(nt, prefix, "MULTIPLY", _math(nt, prefix, "MULTIPLY", ridge, _math(
+        nt, prefix, "MULTIPLY_ADD", throb, 0.65, 0.35, x=x - 500, y=y - 1050), x=x - 700, y=y - 700),
+                   pulse.outputs[0], x=x - 500, y=y - 700)
     wet = _new(nt, "ShaderNodeMapRange", prefix + " Wet", x - 500, y - 100)
     for i, value in ((1, 0.35), (2, 0.65), (3, 0.04), (4, 0.45)):
         wet.inputs[i].default_value = value
     nt.links.new(smear.outputs[0], wet.inputs[0])  # "Fac" / "Factor"
+    rough = _math(nt, prefix, "SUBTRACT", wet.outputs[0], _math(nt, prefix, "MULTIPLY", raised, 0.15, x=x - 300,
+                                                                 y=y - 50), x=x - 300, y=y + 50, clamp=True)
     bump = _new(nt, "ShaderNodeBump", prefix + " Bump", x - 500, y - 400)
     bump.inputs["Strength"].default_value = 0.35
     bump.inputs["Distance"].default_value = 0.05
-    nt.links.new(smear.outputs[0], bump.inputs["Height"])
+    nt.links.new(_math(nt, prefix, "MULTIPLY_ADD", raised, 0.8, smear.outputs[0], x=x - 700, y=y - 450),
+                 bump.inputs["Height"])
+    # the oily sheen: a thin rainbow where the goo turns away from the camera
+    facing = _new(nt, "ShaderNodeLayerWeight", prefix + " Facing", x - 1300, y - 1350)
+    facing.inputs["Blend"].default_value = 0.5
+    ramp = _new(nt, "ShaderNodeValToRGB", prefix + " Sheen Ramp", x - 1100, y - 1350)
+    _ramp_stops(ramp, [(pos, tuple(c) + (1.0,)) for pos, c in GOO_SHEEN])
+    nt.links.new(facing.outputs["Facing"], ramp.inputs[0])
+    sheen = _new(nt, "ShaderNodeValue", prefix + " Sheen", x - 1300, y - 1600)
+    sheen.outputs[0].default_value = 0.6
+    glint = _math(nt, prefix, "MULTIPLY", _math(nt, prefix, "MULTIPLY", sheen.outputs[0], _math(
+        nt, prefix, "POWER", facing.outputs["Facing"], 2.5, x=x - 900, y=y - 1500), x=x - 700, y=y - 1500),
+                  _math(nt, prefix, "MULTIPLY_ADD", _math(nt, prefix, "MULTIPLY", throb, ridge, x=x - 700, y=y - 1650),
+                        0.3, 0.45, x=x - 500, y=y - 1650), x=x - 300, y=y - 1500)
     bsdf = _new(nt, "ShaderNodeBsdfPrincipled", prefix + " BSDF", x - 250, y - 200)
     _set_input(bsdf, ("Metallic",), 0.0)
     _set_input(bsdf, ("Coat Weight", "Clearcoat"), 1.0)
     _set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.03)
-    nt.links.new(wet.outputs[0], bsdf.inputs["Roughness"])
+    nt.links.new(rough, bsdf.inputs["Roughness"])
     nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    nt.links.new(ramp.outputs["Color"], bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission"))
+    nt.links.new(glint, bsdf.inputs["Emission Strength"])
     return bsdf
 
 
-def _set_goo(nodes, prefix, color, cell, metallic=0.0):
-    """Goo colour, the size of its wet / dry smears (`cell`, in the units of the noise's coordinates) and how metallic
-    it is (liquid metal: polished, with only faint smears)."""
+def _set_goo(nodes, prefix, color, cell, metallic=0.0, sheen=None, pulse=None):
+    """Goo colour, the size of its wet / dry smears (`cell`, in the units of the noise's coordinates), how metallic
+    it is (liquid metal: polished, with only faint smears), and (1.27) how much of the oily sheen and of the throbbing
+    veins it has (None: left as they are)."""
     bsdf = nodes.get(prefix + " BSDF")
     if bsdf is not None:
         _set_input(bsdf, ("Base Color",), tuple(color) + (1.0,))
@@ -888,6 +933,14 @@ def _set_goo(nodes, prefix, color, cell, metallic=0.0):
     smear = nodes.get(prefix + " Smear")
     if smear is not None:
         smear.inputs["Scale"].default_value = 1.0 / max(cell, 1e-6)
+    for name in (" Ridges", " Ridge Cells"):  # (the veins' cells: a few smears across)
+        node = nodes.get(prefix + name)
+        if node is not None:
+            node.inputs["Scale"].default_value = 0.4 / max(cell, 1e-6)
+    for name, value in ((" Sheen", sheen), (" Pulse", pulse)):
+        node = nodes.get(prefix + name)
+        if node is not None and value is not None:
+            node.outputs[0].default_value = float(value)
     wet = nodes.get(prefix + " Wet")
     if wet is not None:  # roughness range of the smears (metal: brushed enough to catch the lights)
         wet.inputs[3].default_value = 0.04 + 0.08 * metallic
@@ -905,17 +958,29 @@ def ensure_goo_material():
     nt = mat.node_tree
     nt.nodes.clear()
     out = _new(nt, "ShaderNodeOutputMaterial", "Output", 400, 0)
-    coord = _new(nt, "ShaderNodeTexCoord", "Coordinates", -1000, -200)
-    bsdf = _goo_shader(nt, "MMDD Goo", coord.outputs["Object"], 200, 0)
+    # (1.27) along the tendril and round it, in object units (the tubes carry them from the node group): the smears
+    # stay put on a tendril while it rides the dancing body
+    along = _new(nt, "ShaderNodeAttribute", "Goo S", -1800, -100, attribute_type="GEOMETRY",
+                 attribute_name="mmdd_goo_s")
+    around = _new(nt, "ShaderNodeAttribute", "Goo V", -1800, -350, attribute_type="GEOMETRY",
+                  attribute_name="mmdd_goo_v")
+    radius = _new(nt, "ShaderNodeAttribute", "Goo Radius", -1800, -600, attribute_type="GEOMETRY",
+                  attribute_name="mmdd_venom_radius")
+    coord = _new(nt, "ShaderNodeCombineXYZ", "Goo Coordinates", -1400, -200)
+    nt.links.new(along.outputs[2], coord.inputs[0])
+    nt.links.new(_math(nt, "MMDD Goo", "MULTIPLY", _math(nt, "MMDD Goo", "MULTIPLY", around.outputs[2], 6.2832,
+                                                          x=-1600, y=-350), radius.outputs[2], x=-1600, y=-500),
+                 coord.inputs[1])
+    bsdf = _goo_shader(nt, "MMDD Goo", coord.outputs[0], 200, 0)
     nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
     return mat
 
 
-def update_goo_material(color, cell, metallic=0.0):
+def update_goo_material(color, cell, metallic=0.0, sheen=None, pulse=None):
     mat = bpy.data.materials.get(GOO_MATERIAL)
     if mat is None or mat.node_tree is None:
         return
-    _set_goo(mat.node_tree.nodes, "MMDD Goo", color, cell, metallic)
+    _set_goo(mat.node_tree.nodes, "MMDD Goo", color, cell, metallic, sheen, pulse)
     mat.diffuse_color = tuple(color) + (1.0,)
     mat.metallic = metallic
 
@@ -1379,22 +1444,153 @@ def add_layer(mat):
     if alpha is not None:  # lace and other cut-outs keep their holes
         nt.links.new(alpha, bsdf.inputs["Alpha"])
         nt.links.new(alpha, goo.inputs["Alpha"])
+    # (1.27) the symbiote's face on the goo (set by update_layer; nothing while its strengths are 0): the eyes and
+    # the teeth in white, and the mask split down the middle showing what is under the coat
+    eyed, split = _symbiote_face(nt, rest.outputs["Vector"], goo.outputs[0], x - 2000, y - 2600)
     style = _new(nt, "ShaderNodeValue", LAYER + " Style", x - 300, y - 500)
     pick = _new(nt, "ShaderNodeMixShader", LAYER + " Pick", x - 50, y - 300)
     nt.links.new(style.outputs[0], pick.inputs[0])
     nt.links.new(bsdf.outputs[0], pick.inputs[1])
-    nt.links.new(goo.outputs[0], pick.inputs[2])
+    nt.links.new(eyed, pick.inputs[2])
+    # (1.27) Stay 1: the undersuit never turns into the final look (what shows of the new outfit has been reached)
+    stay = _new(nt, "ShaderNodeValue", LAYER + " Stay", x - 900, y + 350)
+    stay.outputs[0].default_value = 0.0
+    shown = _math(nt, LAYER, "MULTIPLY", _math(nt, LAYER, "MAXIMUM", attr.outputs[2], stay.outputs[0], x=x - 700,
+                                              y=y + 350), _math(nt, LAYER, "SUBTRACT", 1.0, split, x=x - 500,
+                                                                y=y + 350), x=x - 300, y=y + 350)
     for i, out in enumerate(outputs):
         mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (LAYER, i), out.location.x - 180, out.location.y + 450)
-        nt.links.new(attr.outputs[2], mix.inputs[0])
+        nt.links.new(shown, mix.inputs[0])
         nt.links.new(pick.outputs[0], mix.inputs[2])
         _splice(nt, out, mix)
     mat[P_LAYER] = 1
 
 
-def update_layer(mat, color, glow_color, lines, cell, goo=None):
+EYE_TILT = 0.5236  # the symbiote's eyes: tilted up and out this far (radians, 30 degrees) ...
+EYE_SHAPE = (0.6, 0.32, 0.5)  # ... half their length, half their width, their depth, in eye distances (their
+# inner points stop short of the nose, the outer ones reach the temples)
+TEETH_SHAPE = (1.0, 1.3, 0.19, 3.5)  # the grin: this far under the eye line, half its width, half its height (eye
+# distances), this many teeth across an eye distance
+SPLIT_SHAPE = (0.9, 1.25, 1.7, 0.3)  # the mask splitting: half the opening at its widest, the face's half width and
+# half height (eye distances), how far under the eye line the face's middle is
+FACE_DEPTH = (0.7, 1.0)  # the front of her head: this far from the eyes' plane the face marks fade (eye distances)
+
+
+def _symbiote_face(nt, rest, shader, x, y):
+    """The symbiote's face on the goo coat (1.27), on the rest position round her eye centres LAYER + " Eye L" /
+    " Eye R" (vectors, object space; the axis from the left to the right " Eye Axis", the eye distance " Eye Size",
+    set by update_layer): two big white almond eyes tilted EYE_TILT up and out (EYE_SHAPE), as much as " Eye
+    Strength"; a grin of white teeth under them (TEETH_SHAPE), as much as " Teeth Strength"; and the mask splitting
+    down the middle (SPLIT_SHAPE, as wide as " Split Open"), which the goo coat shows her face through. Returns
+    (`shader` with the white light mixed in, the split: 1 where the face shows)."""
+    count = [0]
+
+    def m(op, a, b=None, c=None, clamp=False):
+        count[0] += 1
+        return _math(nt, LAYER + " Face", op, a, b, c, x=x + 200 * (count[0] % 9), y=y - 40 * count[0], clamp=clamp)
+
+    def v(op, a, b=None, scale=None):
+        count[0] += 1
+        node = _new(nt, "ShaderNodeVectorMath", "%s Face %s %d" % (LAYER, op, count[0]), x + 200 * (count[0] % 9),
+                    y - 40 * count[0], operation=op)
+        _feed(nt, node.inputs[0], a)
+        if b is not None:
+            _feed(nt, node.inputs[1], b)
+        if scale is not None:
+            _feed(nt, node.inputs[3], scale)
+        return node.outputs["Value" if op in ("DOT_PRODUCT", "LENGTH", "DISTANCE") else "Vector"]
+
+    def smooth(value, low, high):
+        count[0] += 1
+        return _smooth_node(nt, "%s Face Smooth %d" % (LAYER, count[0]), value, low, high, x + 200 * (count[0] % 9),
+                            y - 40 * count[0])
+
+    size = _new(nt, "ShaderNodeValue", LAYER + " Eye Size", x - 400, y)
+    size.outputs[0].default_value = 1.0
+    strengths = {}
+    for i, name in enumerate((" Eye Strength", " Teeth Strength", " Split Open")):
+        node = _new(nt, "ShaderNodeValue", LAYER + name, x - 400, y - 150 - 120 * i)
+        node.outputs[0].default_value = 0.0  # (frame drivers when they open and shut: update_layer)
+        strengths[name] = node.outputs[0]
+    axis = _new(nt, "ShaderNodeCombineXYZ", LAYER + " Eye Axis", x - 400, y - 550)
+    axis.inputs[0].default_value = 1.0
+    centres = {}
+    for i, name in enumerate((" Eye L", " Eye R")):
+        centres[name] = _new(nt, "ShaderNodeCombineXYZ", LAYER + name, x - 400, y - 700 - 150 * i).outputs[0]
+    c30, s30 = math.cos(EYE_TILT), math.sin(EYE_TILT)
+    half_long, half_wide, depth = (m("MULTIPLY", size.outputs[0], k) for k in EYE_SHAPE)
+    # --- the eyes
+    masks = []
+    for name, sign in ((" Eye L", -1.0), (" Eye R", 1.0)):
+        out = v("SCALE", axis.outputs[0], scale=sign)
+        e_u = v("ADD", v("SCALE", out, scale=c30), (0.0, 0.0, s30))  # along the almond, up and out
+        e_v = v("ADD", v("SCALE", out, scale=-s30), (0.0, 0.0, c30))  # across it
+        d = v("SUBTRACT", rest, centres[name])
+        u, w = v("DOT_PRODUCT", d, e_u), v("DOT_PRODUCT", d, e_v)
+        off = v("LENGTH", v("SUBTRACT", v("SUBTRACT", d, v("SCALE", e_u, scale=u)), v("SCALE", e_v, scale=w)))
+        xu = m("DIVIDE", u, half_long)
+        x2 = m("MULTIPLY", xu, xu)
+        pointed = m("MAXIMUM", m("SUBTRACT", 1.0, x2), 0.05)  # (the almond narrows to its points)
+        yw = m("DIVIDE", w, m("MULTIPLY", half_wide, pointed))
+        zo = m("DIVIDE", off, depth)
+        inside = m("ADD", m("ADD", x2, m("MULTIPLY", yw, yw)), m("MULTIPLY", zo, zo))
+        masks.append(m("SUBTRACT", 1.0, smooth(inside, 0.92, 1.12)))
+    eyes = m("MULTIPLY", m("MAXIMUM", masks[0], masks[1]), strengths[" Eye Strength"])
+    # --- her face's frame: across (the axis), up, and how far off the eyes' plane (the front of her head only)
+    mid = v("SCALE", v("ADD", centres[" Eye L"], centres[" Eye R"]), scale=0.5)
+    d0 = v("SUBTRACT", rest, mid)
+    hx = v("DOT_PRODUCT", d0, axis.outputs[0])
+    hz = v("DOT_PRODUCT", d0, (0.0, 0.0, 1.0))
+    off0 = v("LENGTH", v("SUBTRACT", v("SUBTRACT", d0, v("SCALE", axis.outputs[0], scale=hx)),
+                        v("SCALE", (0.0, 0.0, 1.0), scale=hz)))
+    front = m("SUBTRACT", 1.0, smooth(m("DIVIDE", off0, size.outputs[0]), FACE_DEPTH[0], FACE_DEPTH[1]))
+    gx = m("DIVIDE", hx, size.outputs[0])  # (in eye distances)
+    gz = m("DIVIDE", hz, size.outputs[0])
+    # --- the grin: a band of teeth under the eye line, pointed top and bottom, narrowing to the corners
+    tz = m("ADD", gz, TEETH_SHAPE[0])
+    taper = m("MAXIMUM", m("SUBTRACT", 1.0, m("MULTIPLY", m("DIVIDE", gx, TEETH_SHAPE[1]),
+                                              m("DIVIDE", gx, TEETH_SHAPE[1]))), 0.0)
+    saw = m("MULTIPLY", m("ABSOLUTE", m("SUBTRACT", m("FRACT", m("MULTIPLY_ADD", gx, TEETH_SHAPE[3], 0.5)), 0.5)),
+            2.0)
+    half = m("MULTIPLY", m("MULTIPLY", taper, TEETH_SHAPE[2]), m("MULTIPLY_ADD", saw, 0.55, 0.45))
+    teeth = m("MULTIPLY", m("SUBTRACT", 1.0, smooth(m("SUBTRACT", m("ABSOLUTE", tz), half), 0.0, 0.05)),
+              m("MULTIPLY", smooth(taper, 0.0, 0.08), strengths[" Teeth Strength"]))
+    white_mask = m("MULTIPLY", m("MAXIMUM", eyes, teeth), front, clamp=True)
+    # --- the mask splitting down the middle: her face shows inside a band round the middle line, Split Open wide
+    opening = m("MULTIPLY", strengths[" Split Open"], SPLIT_SHAPE[0])
+    face = m("SUBTRACT", 1.0, smooth(m("ADD", m("MULTIPLY", m("DIVIDE", gx, SPLIT_SHAPE[1]),
+                                                  m("DIVIDE", gx, SPLIT_SHAPE[1])),
+                                         m("MULTIPLY", m("DIVIDE", m("ADD", gz, SPLIT_SHAPE[3]), SPLIT_SHAPE[2]),
+                                           m("DIVIDE", m("ADD", gz, SPLIT_SHAPE[3]), SPLIT_SHAPE[2]))), 0.85, 1.0))
+    split = m("MULTIPLY", m("MULTIPLY", m("SUBTRACT", 1.0, smooth(m("ABSOLUTE", gx), m("MULTIPLY", opening, 0.85),
+                                                                 opening)),
+                            smooth(opening, 0.0, 0.02)), m("MULTIPLY", face, front), clamp=True)
+    white = _new(nt, "ShaderNodeEmission", LAYER + " Eye White", x - 400, y - 1050)
+    white.inputs["Color"].default_value = (0.92, 0.96, 1.0, 1.0)
+    white.inputs["Strength"].default_value = 1.8
+    mix = _new(nt, "ShaderNodeMixShader", LAYER + " Eye Mix", x - 150, y - 1050)
+    nt.links.new(white_mask, mix.inputs[0])
+    nt.links.new(shader, mix.inputs[1])
+    nt.links.new(white.outputs[0], mix.inputs[2])
+    return mix.outputs[0], split
+
+
+def _face_clock(sock, expression):
+    """A frame driver `expression` on the value socket `sock` (None: no driver, 0)."""
+    sock.driver_remove("default_value")
+    sock.default_value = 0.0
+    if expression is not None:
+        driver = sock.driver_add("default_value").driver
+        driver.type = "SCRIPTED"
+        driver.expression = expression
+
+
+def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=False):
     """Undersuit colour, colour and brightness of its lines, cell size in object units; `goo` = (colour, smear size,
-    metallic) for the symbiote's goo instead."""
+    metallic, sheen, pulse) for the symbiote's goo instead, and with it `eyes` = (left centre, right centre, the axis
+    from the left to the right, the eye distance, clock) for the symbiote's face on it (None: none). The clock is a
+    strength, or a dict: cover and back (the frames the goo coat reaches her eyes and leaves them), fps, teeth (the
+    grin too) and split (None, or (seconds after cover the mask splits, seconds it stays open; 0: for good))."""
     nodes = mat.node_tree.nodes if mat.node_tree else {}
     bsdf = nodes.get(LAYER + " BSDF")
     if bsdf is not None:
@@ -1409,8 +1605,55 @@ def update_layer(mat, color, glow_color, lines, cell, goo=None):
     style = nodes.get(LAYER + " Style")
     if style is not None:
         style.outputs[0].default_value = 0.0 if goo is None else 1.0
+    if nodes.get(LAYER + " Stay") is not None:
+        nodes[LAYER + " Stay"].outputs[0].default_value = 1.0 if stay else 0.0
     if goo is not None:
         _set_goo(nodes, LAYER + " Goo", *goo)
+    strength = nodes.get(LAYER + " Eye Strength")
+    if strength is not None:
+        when = eyes[4] if eyes is not None else 0.0
+        clocks = {" Eye Strength": None, " Teeth Strength": None, " Split Open": None}
+        if isinstance(when, dict):
+            cover, back = float(when["cover"]), float(when["back"])
+            span = max(back - cover, 1.0)  # (frames the coat covers her eyes; a thin coat squeezes the beats)
+
+            def at(frames, share):
+                return min(frames, share * span)
+
+            shut = "(1 - smoothstep(%.2f, %.2f, frame))" % (back - at(6.0, 0.3), back - at(2.0, 0.1))
+            clocks[" Eye Strength"] = "smoothstep(%.2f, %.2f, frame) * %s" % (cover + at(3.0, 0.12),
+                                                                            cover + at(7.0, 0.3), shut)
+            if when.get("teeth"):
+                clocks[" Teeth Strength"] = "smoothstep(%.2f, %.2f, frame) * %s" % (cover + at(8.0, 0.4),
+                                                                                  cover + at(13.0, 0.55), shut)
+            if when.get("split") is not None:
+                after, hold = when["split"]
+                fps = float(when.get("fps", 30.0))
+                lasting = back > cover + 1e5  # (the goo coat stays: the mask closes again after Hold)
+                open_at = max(cover + at(6.0, 0.3), cover + after * fps)
+                if not lasting:
+                    open_at = min(open_at, back - at(8.0, 0.4))
+                opens = at(5.0, 0.15)
+                close_at = open_at + opens + hold * fps if hold > 0.0 else None
+                if close_at is not None and not lasting and close_at > back - at(4.0, 0.2):
+                    close_at = None  # (the coat goes before it would close: it stays open)
+                clocks[" Split Open"] = "smoothstep(%.2f, %.2f, frame)" % (open_at, open_at + opens) + (
+                    " * (1 - smoothstep(%.2f, %.2f, frame))" % (close_at, close_at + opens) if close_at is not None
+                    else "")
+        for name, expression in clocks.items():
+            node = nodes.get(LAYER + name)
+            if node is not None:
+                _face_clock(node.outputs[0], expression)
+        if not isinstance(when, dict):
+            strength.outputs[0].default_value = float(when)
+        if eyes is not None:
+            for name, vector in ((" Eye L", eyes[0]), (" Eye R", eyes[1]), (" Eye Axis", eyes[2])):
+                node = nodes.get(LAYER + name)
+                if node is not None:
+                    for i in range(3):
+                        node.inputs[i].default_value = float(vector[i])
+            if nodes.get(LAYER + " Eye Size") is not None:
+                nodes[LAYER + " Eye Size"].outputs[0].default_value = float(eyes[3])
 
 
 def remove_layer(mat):
@@ -1419,6 +1662,8 @@ def remove_layer(mat):
         return
     _unsplice(nt, LAYER + " Mix")
     for node in [n for n in nt.nodes if n.name.startswith(LAYER)]:
+        if node.bl_idname == "ShaderNodeValue":
+            node.outputs[0].driver_remove("default_value")
         nt.nodes.remove(node)
     del mat[P_LAYER]
 
@@ -1881,6 +2126,12 @@ def _veins(nt, near, rest, x, y):
     nt.links.new(rest, coord.inputs[0])
     nt.links.new(amount.outputs[0], coord.inputs[1])
 
+    # (1.27) the veins throb: their width pulses, a beat running towards the edge
+    vtime = _camo_time(nt, SURFACE + " Veins Time", x - 1700, y - 900)
+    throb = _math(nt, SURFACE, "MULTIPLY_ADD", _math(nt, SURFACE, "SINE", _math(
+        nt, SURFACE, "MULTIPLY_ADD", vtime, 0.3, _math(nt, SURFACE, "MULTIPLY", near, -6.0, x=x - 1500, y=y - 1000),
+        x=x - 1300, y=y - 1000), x=x - 1100, y=y - 1000), 0.25, 1.0, x=x - 900, y=y - 1000)
+
     def web(name, width, top, yy):
         cells = _new(nt, "ShaderNodeTexVoronoi", SURFACE + " " + name, x - 900, yy, voronoi_dimensions="3D",
                      feature="DISTANCE_TO_EDGE")
@@ -1888,9 +2139,13 @@ def _veins(nt, near, rest, x, y):
         wide = _new(nt, "ShaderNodeMath", SURFACE + " " + name + " Width", x - 900, yy - 250, operation="MULTIPLY")
         nt.links.new(near, wide.inputs[0])
         wide.inputs[1].default_value = width  # in cells, right at the edge
+        throbbing = _new(nt, "ShaderNodeMath", SURFACE + " " + name + " Throb", x - 800, yy - 250,
+                         operation="MULTIPLY")
+        nt.links.new(wide.outputs[0], throbbing.inputs[0])
+        nt.links.new(throb, throbbing.inputs[1])
         line = _new(nt, "ShaderNodeMapRange", SURFACE + " " + name + " Line", x - 700, yy)
         nt.links.new(cells.outputs["Distance"], line.inputs[0])
-        nt.links.new(wide.outputs[0], line.inputs[2])
+        nt.links.new(throbbing.outputs[0], line.inputs[2])
         line.inputs[3].default_value = top
         line.inputs[4].default_value = 0.0
         return line
@@ -2496,7 +2751,7 @@ def add_surface(mat, style):
     mat[P_SURFACE] = style
 
 
-def update_surface(mat, color, glow_color, cell, metallic=0.0, clarity=0.0, code_cell=1.0):
+def update_surface(mat, color, glow_color, cell, metallic=0.0, clarity=0.0, code_cell=1.0, sheen=None, pulse=None):
     """Colour of the veins / ice / char / stone / gold / silk, the glow colour of the smouldering char and the digital
     rain, the cell size (object units), how metallic the veins' goo is, how clear the ice is (clear ice lets EEVEE
     refract through the material) and the digital rain's cell size (object units)."""
@@ -2532,7 +2787,7 @@ def update_surface(mat, color, glow_color, cell, metallic=0.0, clarity=0.0, code
     amount = nodes.get(SURFACE + " Amount")
     if amount is not None:
         amount.inputs[3].default_value = 0.6 * cell
-    _set_goo(nodes, SURFACE + " Goo", color, cell * 0.5, metallic)
+    _set_goo(nodes, SURFACE + " Goo", color, cell * 0.5, metallic, sheen, pulse)
     ice = nodes.get(SURFACE + " Ice BSDF")
     if ice is not None:
         _set_input(ice, ("Emission Color", "Emission"), tuple(color) + (1.0,))

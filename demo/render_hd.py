@@ -31,7 +31,8 @@ sys.path.insert(0, os.path.join(REPO, "tests"))
 import mmd_disperse  # noqa: E402
 from mmd_disperse import beats, compositor, effect, presets  # noqa: E402
 from mmd_disperse.model import resolve, rest_bounds  # noqa: E402
-from scene_setup import _fix_shared_toons, add_model_args, apply_settings, load_dance, load_models  # noqa: E402
+from scene_setup import (_fix_shared_toons, add_model_args, apply_settings, ensure_physics,  # noqa: E402
+                         load_dance, load_models)
 
 TIFA_LOCK = "Face*;Hair*;Eye*;*Brows*;Eyelashes*;Mouth*;*Teeth*;Inners*"
 NORMAL_NAME = re.compile(r"n(or)?m|nrm|[ _]n[ _.]|n_ao|mapn")  # CSuit_Body_norm, Arms_N, Tifa Head N_AO ...
@@ -66,6 +67,9 @@ def parse_args():
     p.add_argument("--angle", type=float, default=0.0,
                    help="camera angle around the model in degrees (0 = from the front, 90 = from its left)")
     p.add_argument("--save", default="")
+    p.add_argument("--physics-reach", type=float, default=None,
+                   help="when the physics is built here: non-collision pairs found this far apart, in the bodies' "
+                        "sizes (mmd_tools' default 1.5; more calms a sash that fights its neighbours)")
     p.add_argument("--set", action="append", default=[], help="override a setting, e.g. path=SURFACE")
     p.add_argument("--glitch-fx", action="store_true", help="add the compositor RGB split")
     p.add_argument("--white-flash", action="store_true", help="add the compositor white flash of the finale")
@@ -369,6 +373,14 @@ def main():
     base, target = resolve(base_root), resolve(target_root)
     if args.vmd:
         load_dance(base.armature, args.vmd, args.vmd_scale)
+        # (1.27) her physics must be BUILT for the rigid bodies to move her bones (a PMX comes with rigid bodies, but
+        # mmd_tools' build makes the bones follow them); before this the demos' hair and skirts only rode the bones.
+        # Built at the dance's first frame, where the simulation then starts (pre-rolled up to the clip), with MMD's
+        # gravity for the model's units
+        action = base.armature.animation_data.action if base.armature.animation_data else None
+        physics_start = int(action.frame_range[0]) if action is not None else 1
+        print("PHYSICS built at %d: rigid bodies move %s bones, gravity %.2f"
+              % (physics_start, ensure_physics(base_root, physics_start, args.physics_reach), scene.gravity[2]))
     chained = []
     for item in args.chain:  # the outfits worn before the old one (chain.py), appended from their own files
         blend, root = item.split("::")
@@ -432,11 +444,16 @@ def main():
         rbw = scene.rigidbody_world
         cache = rbw.point_cache if rbw is not None else None
         if cache is not None and not cache.is_baked:
-            # (1.25) the model's physics (hair, skirt) from the first frame rendered: a simulation only ever steps on
-            # from the frame before, so a clip starting part-way into the cache's range never ran it at all
-            cache.frame_start = a
+            # (1.25) the model's physics (hair, skirt) must run: a simulation only ever steps on from the frame before,
+            # so a clip starting part-way into the cache's range never ran it at all. (1.27) It starts at the dance's
+            # first frame, where the rig was built (starting at the clip's first frame, mid-dance, every body snaps
+            # from where it was built to where its bone is), and is played on up to the clip before rendering
+            start = min(a, physics_start) if args.vmd else a
+            cache.frame_start = start
             cache.frame_end = max(cache.frame_end, b)
-            print("PHYSICS from", a, "to", cache.frame_end)
+            print("PHYSICS from", start, "to", cache.frame_end, "(pre-roll %d frames)" % (a - start), flush=True)
+            for f in range(start, a):
+                scene.frame_set(f)
     for f in frames:
         scene.frame_set(f)
         scene.render.filepath = os.path.join(args.out, "%04d.png" % f)

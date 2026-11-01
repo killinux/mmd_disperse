@@ -96,11 +96,108 @@ def load_models(args):
         if args.toon_dir:
             _fix_shared_toons(args.toon_dir)
         return roots
-    with bpy.data.libraries.load(args.target_blend, link=False) as (src, dst):
-        dst.objects = [n for n in src.objects if n.startswith(args.target_root)]
+    import os
+
     coll = bpy.data.collections.new("New Outfit")
     bpy.context.scene.collection.children.link(coll)
-    for ob in dst.objects:
-        if ob is not None:
+    if os.path.abspath(args.target_blend) == os.path.abspath(bpy.data.filepath):
+        # the opened file itself: a second copy of the same model (she turns into something that hides her, like the
+        # symbiote), duplicated here with its own mesh data and materials
+        root = _duplicate_tree(bpy.data.objects[args.target_root])
+        keep = {root} | set(root.children_recursive)
+    else:
+        # (every object of the file: a model's meshes need not carry its root's name; its lights and cameras, and
+        # whatever is not under the root, go)
+        with bpy.data.libraries.load(args.target_blend, link=False) as (src, dst):
+            dst.objects = list(src.objects)
+        appended = [ob for ob in dst.objects if ob is not None]
+        root = next((ob for ob in appended if ob.parent is None and ob.type == "EMPTY" and ob.children
+                     and ob.name.startswith(args.target_root)), None)
+        if root is None:
+            root = next((ob for ob in appended if ob.name.startswith(args.target_root)), None)
+        if root is None:
+            root = bpy.data.objects[args.target_root]
+        keep = {root} | set(root.children_recursive)
+        for ob in appended:
+            if ob not in keep:
+                bpy.data.objects.remove(ob)
+    for ob in keep:
+        if ob.name not in coll.objects:
             coll.objects.link(ob)
-    return bpy.data.objects[args.base_root], bpy.data.objects[args.target_root]
+    return bpy.data.objects[args.base_root], root
+
+
+MMD_GRAVITY = 9.81 * 10.0  # mmd_tools' gravity for a model in MMD units (scale 1): MMD's own, about 8 cm a unit
+
+
+def model_height(root):
+    """Height of the model's meshes (not its rigid bodies), world units."""
+    zs = [(ob.matrix_world @ ob.data.vertices[i].co).z for ob in root.children_recursive
+          if ob.type == "MESH" and ob.rigid_body is None and ob.rigid_body_constraint is None
+          for i in range(0, len(ob.data.vertices), 25)]
+    return max(zs) - min(zs) if zs else 0.0
+
+
+def ensure_physics(root, frame=None, reach=None):
+    """Build the model's physics with mmd_tools when it never was (the rigid bodies of an imported PMX only move its
+    bones once mmd_tools has built the rig: before that the hair and skirts only follow the bones), at `frame` (the
+    dance's first frame: the simulation must start there, in the pose it was built in), and give the scene MMD's gravity
+    for the model's units (mmd_tools' -9.81 * 10 * scale: in MMD units, a model some twenty units tall, Blender's
+    default 9.81 is a tenth of what the models' springs are made for, and hair and skirts float up). Returns how many
+    bones the rigid bodies move, or None without mmd_tools."""
+    mmd_root = getattr(root, "mmd_root", None)
+    if mmd_root is None or not hasattr(bpy.ops, "mmd_tools") or not hasattr(bpy.ops.mmd_tools, "build_rig"):
+        return None
+    scene = bpy.context.scene
+    if frame is not None:
+        scene.frame_set(int(frame))
+    scale = 1.0 if model_height(root) > 5.0 else 0.08  # (mmd_tools imports at 1 or at 0.08)
+    scene.gravity = (0.0, 0.0, -MMD_GRAVITY * scale)
+    scene.use_gravity = True
+    if not mmd_root.is_built:
+        for ob in bpy.context.view_layer.objects:
+            ob.select_set(False)
+        bpy.context.view_layer.objects.active = root
+        root.select_set(True)
+        if reach is None:
+            bpy.ops.mmd_tools.build_rig()
+        else:  # (non-collision pairs found this far apart, in the bodies' sizes: mmd_tools' default is 1.5)
+            bpy.ops.mmd_tools.build_rig(non_collision_distance_scale=reach)
+    arm = next((ob for ob in root.children_recursive if ob.type == "ARMATURE" and len(ob.data.bones) > 1), None)
+    return sum(1 for pb in arm.pose.bones if "mmd_tools_rigid_track" in pb.constraints) if arm is not None else 0
+
+
+def _duplicate_tree(root):
+    """A copy of `root` and everything under it (own mesh and armature data, own materials; parents, modifiers and
+    constraints pointing at the copies), but not its rigid bodies and joints: the copy's bones keep following the
+    original's rigid bodies (the only ones simulated). Returns the new root."""
+    copies = {}
+    for ob in [root] + list(root.children_recursive):
+        if ob.rigid_body is not None or ob.rigid_body_constraint is not None:
+            continue
+        dup = ob.copy()
+        if ob.data is not None:
+            dup.data = ob.data.copy()
+        copies[ob] = dup
+    materials = {}
+    for ob, dup in copies.items():
+        if ob.parent in copies:
+            dup.parent = copies[ob.parent]
+        for mod in dup.modifiers:
+            if getattr(mod, "object", None) in copies:
+                mod.object = copies[mod.object]
+        for con in dup.constraints:
+            if getattr(con, "target", None) in copies:
+                con.target = copies[con.target]
+        if dup.type == "ARMATURE":
+            for pb in dup.pose.bones:
+                for con in pb.constraints:
+                    if getattr(con, "target", None) in copies:
+                        con.target = copies[con.target]
+        if dup.type == "MESH":
+            for slot in dup.material_slots:
+                if slot.material is not None:
+                    if slot.material not in materials:
+                        materials[slot.material] = slot.material.copy()
+                    slot.material = materials[slot.material]
+    return copies[root]

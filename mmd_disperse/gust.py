@@ -114,7 +114,11 @@ def sync(settings, mask, models, moment):
     m = float(moment)
     rise, end = m - RISE * fps, m + max(settings.wind_time, 0.2) * fps
     hold = m + 0.3 * (end - m)
-    strength = STRENGTH[style] * max(settings.wind_strength, 0.0)
+    # (1.27: as strong against the scene's gravity as it was made for at 9.81: a model in MMD units wants ten times
+    # that, mmd_tools' -9.81 * 10, and so does the wind)
+    scene_ = settings.id_data
+    weight = max(abs(scene_.gravity[2]) if scene_.use_gravity else 9.81, 1e-3) / 9.81
+    strength = STRENGTH[style] * max(settings.wind_strength, 0.0) * weight
     field.driver_remove("strength")
     driver = field.driver_add("strength").driver
     driver.type = "SCRIPTED"

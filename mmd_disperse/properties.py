@@ -1223,6 +1223,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                            "its own look a little behind it, along a second glowing seam "
                                            "(Mark 50 style)")
     layer_width: _distance("Undersuit Width", "How far the final look trails behind the edge", 2.0)
+    layer_stay: BoolProperty(name="Undersuit Stays", default=False, update=_sync,
+                             description="The undersuit never turns into the final look: the new outfit stays the "
+                                         "dark undersuit, or the symbiote's goo (she becomes the symbiote: a copy of "
+                                         "the same model makes a new outfit)")
     layer_color: FloatVectorProperty(name="Undersuit Color", subtype="COLOR", size=3, min=0.0, max=1.0,
                                      default=(0.02, 0.022, 0.026), update=_sync)
     layer_lines: FloatProperty(name="Undersuit Lines", default=1.5, min=0.0, soft_max=20.0, update=_sync,
@@ -1257,6 +1261,36 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     venom_metallic: FloatProperty(name="Goo Metallic", default=0.0, min=0.0, max=1.0, subtype="FACTOR", update=_sync,
                                   description="Turns the goo (tendrils, strands, goo undersuit, black veins) into "
                                               "liquid metal: 1 with a silver color is the T-1000")
+    # (1.27)
+    venom_coil: FloatProperty(name="Coiling Tendrils", default=0.35, min=0.0, max=1.0, subtype="FACTOR", update=_sync,
+                              description="Share of the tendrils that corkscrew round the limbs and the body instead "
+                                          "of crawling straight ahead (the tendrils are traced again)")
+    venom_feelers: BoolProperty(name="Feelers", default=True, update=_sync,
+                                description="Short thin feelers branch off each tendril near its tip (the tendrils "
+                                            "are traced again)")
+    venom_pulse: FloatProperty(name="Goo Pulse", default=1.0, min=0.0, soft_max=2.0, update=_sync,
+                               description="How alive the goo is: bulges are pumped along the tendrils towards their "
+                                           "tips, the tips flick about, veins throb under the goo coat (0: still)")
+    venom_sheen: FloatProperty(name="Oily Sheen", default=0.6, min=0.0, soft_max=1.0, subtype="FACTOR", update=_sync,
+                               description="A thin oily rainbow (deep blue, violet, teal) on the goo where it turns "
+                                           "away from the camera, like oil on wet tar (0 for liquid metal)")
+    venom_drips: BoolProperty(name="Drips", default=True, update=_sync,
+                              description="A drop of goo falls when a strand snaps")
+    venom_eyes: BoolProperty(name="Symbiote Eyes", default=False, update=_sync,
+                             description="While the goo coat covers her head two big white eyes open on it, tilted "
+                                         "up and out like Venom's (the goo must reach her face: take Face* and Eye* "
+                                         "out of the lock patterns; needs eye bones)")
+    venom_teeth: BoolProperty(name="Grin of Teeth", default=True, update=_sync,
+                              description="With the eyes: a wide grin of white teeth opens under them a moment later")
+    venom_split: BoolProperty(name="Mask Splits Open", default=False, update=_sync,
+                              description="With the eyes: the goo mask splits down the middle of her face and shows "
+                                          "her own face through the gap (\"We are Venom\"); it closes again when the "
+                                          "goo coat stays on")
+    venom_split_after: FloatProperty(name="Splits After", default=1.2, min=0.0, soft_max=10.0, update=_sync,
+                                     description="Seconds after the goo covers her eyes the mask splits open")
+    venom_split_hold: FloatProperty(name="Stays Open", default=1.0, min=0.0, soft_max=10.0, update=_sync,
+                                    description="Seconds the gap stays open before the mask closes again (0: for "
+                                                "good); when the goo coat leaves anyway it just stays open")
 
     # --- the old outfit's surface ahead of the edge
     old_surface: EnumProperty(

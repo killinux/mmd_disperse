@@ -20,7 +20,7 @@ _OFF = dict(
     ghost_enable=False, puppet_enable=False, shadow_enable=False, shadow_style="SHADOW", mirror_enable=False,
     echo_enable=False, title_enable=False, sweat_enable=False, peel_enable=False, peel_threads=0.0, peel_layers=1, fumble_enable=False, talisman_enable=False,
     plume_enable=False, morph_enable=False, dim_reverse=False, dim_cel=False, dim_outline=1.0, wind_style="NONE",
-    after_enable=False, crown_enable=False,
+    after_enable=False, crown_enable=False, venom_eyes=False, venom_split=False, layer_stay=False,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -45,16 +45,52 @@ PRESETS = (
      dict(_OFF, path="SURFACE", seeds="ORIGIN", wire_enable=True, layer_enable=True, inner_glow=True, finale=True,
           finale_style="SWEEP", finale_length=0.3, finale_white=0.8, particle_color=(0.6, 0.9, 1.0),
           particle_glow=3.0, glow_color=(0.1, 0.75, 1.0))),
-    ("VENOM", "Symbiote", "Black veins spread under the old outfit from the chest, tendrils of goo crawl ahead, sticky "
-                          "strands stretch across the gaps, and the goo that covers the body turns into the new suit",
+    ("VENOM", "Symbiote", "Black veins throb under the old outfit from the chest, tendrils of goo crawl and coil "
+                          "ahead, pumping and flicking their feelers, sticky strands stretch across the gaps and "
+                          "drip, and the goo that covers the body, oily and alive, opens two white eyes and turns "
+                          "into the new suit",
      dict(_OFF, path="SURFACE", seeds="ORIGIN", venom_enable=True, venom_color=(0.006, 0.006, 0.009),
           old_surface="VEINS", surface_color=(0.006, 0.006, 0.009), layer_enable=True, layer_style="GOO",
-          edge_glow=False)),
+          edge_glow=False, venom_tendrils=220, venom_strands=80, venom_coil=0.35, venom_feelers=True,
+          venom_pulse=1.0, venom_sheen=0.6, venom_drips=True, venom_eyes=True, venom_teeth=True,
+          layer_width=Height(0.3), surface_width=Height(0.18))),  # (the goo coat lingers: her face stays covered a
+    # while, the eyes open)
+    ("VENOM_HANDS", "Symbiote from the Hands", "The symbiote takes her from the hands and feet: the goo climbs up her "
+                                               "arms and legs, tendrils coiling ahead of it, her head last, where the "
+                                               "white eyes and the grin open (Venom 2018: the hand turns first)",
+     dict(_OFF, path="SURFACE", seeds="LIMBS", venom_enable=True, venom_color=(0.006, 0.006, 0.009),
+          old_surface="VEINS", surface_color=(0.006, 0.006, 0.009), layer_enable=True, layer_style="GOO",
+          edge_glow=False, venom_tendrils=220, venom_strands=80, venom_coil=0.45, venom_feelers=True,
+          venom_pulse=1.0, venom_sheen=0.6, venom_drips=True, venom_eyes=True, venom_teeth=True,
+          layer_width=Height(0.3), surface_width=Height(0.18))),
+    ("VENOM_WHIP", "Symbiote at the Head Whip", "On a quick toss of her head the symbiote takes her from the head: "
+                                                "the goo mask with its white eyes and grin first, then it pours down "
+                                                "her body (the head-whip transformation of the short videos; needs a "
+                                                "dance with a head toss)",
+     dict(_OFF, path="SURFACE", seeds="ORIGIN", trigger="FLIP", venom_enable=True, venom_color=(0.006, 0.006, 0.009),
+          old_surface="VEINS", surface_color=(0.006, 0.006, 0.009), layer_enable=True, layer_style="GOO",
+          edge_glow=False, venom_tendrils=220, venom_strands=80, venom_coil=0.35, venom_feelers=True,
+          venom_pulse=1.0, venom_sheen=0.6, venom_drips=True, venom_eyes=True, venom_teeth=True,
+          layer_width=Height(0.3), surface_width=Height(0.18))),
+    ("VENOM_CLASSIC", "Symbiote, the Classic Beats", "The film's beats: veins throb under her skin, the goo takes her "
+                                                     "from the hands, tendrils coil up her limbs, her head goes last, "
+                                                     "the white eyes open, then the grin, the mask splits down the "
+                                                     "middle to show her face and closes again; the goo stays on "
+                                                     "(Undersuit Stays: she is the symbiote; a copy of the same model "
+                                                     "makes a new outfit, or any outfit the goo should hide)",
+     dict(_OFF, path="SURFACE", seeds="LIMBS", venom_enable=True, venom_color=(0.006, 0.006, 0.009),
+          old_surface="VEINS", surface_color=(0.006, 0.006, 0.009), layer_enable=True, layer_style="GOO",
+          edge_glow=False, venom_tendrils=240, venom_strands=90, venom_coil=0.45, venom_feelers=True,
+          venom_pulse=1.0, venom_sheen=0.6, venom_drips=True, venom_eyes=True, venom_teeth=True, venom_split=True,
+          venom_split_after=1.2, venom_split_hold=1.0, layer_stay=True, layer_width=Height(0.3),
+          surface_width=Height(0.18))),
     ("LIQUID_METAL", "Liquid Metal", "Liquid metal runs over the body from the chest in silver veins and tendrils, "
                                      "coats it and turns into the new outfit (Terminator 2's T-1000)",
      dict(_OFF, path="SURFACE", seeds="ORIGIN", venom_enable=True, venom_metallic=1.0, venom_color=(0.85, 0.87, 0.9),
           old_surface="VEINS", surface_color=(0.85, 0.87, 0.9), layer_enable=True, layer_style="GOO",
-          edge_glow=False)),
+          edge_glow=False, venom_tendrils=220, venom_strands=80, venom_coil=0.35, venom_feelers=True,
+          venom_pulse=0.6, venom_sheen=0.0, venom_drips=True, venom_eyes=False, layer_width=Height(0.3),
+          surface_width=Height(0.18))),
     ("ICE", "Freeze and Shatter", "Frost creeps up from the feet and freezes the old outfit to clear ice, crystals "
                                   "grow out of it, the new outfit forms underneath; then all of it shatters into "
                                   "chunks and splinters of ice",

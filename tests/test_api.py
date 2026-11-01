@@ -4816,6 +4816,193 @@ def run():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.26 checks")
 
+    # --- 1.27: the symbiote, more alive: coiling tendrils and feelers, pumping and flicking tendrils, drips off the
+    # snapping strands, throbbing veins and goo, the oily sheen, and the symbiote's eyes on the goo coat
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "venom_enable", "venom_tendrils", "venom_strands", "venom_webs", "venom_coil",
+        "venom_feelers", "venom_pulse", "venom_sheen", "venom_drips", "venom_eyes", "venom_metallic", "old_surface",
+        "layer_enable", "layer_style", "layer_width", "layer_stay", "venom_teeth", "venom_split",
+        "venom_split_after", "venom_split_hold")}
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
+    s.layer_width = 0.3 * height  # (the goo coat lingers, as the symbiote presets have it)
+    s.edge_glow, s.frame_start, s.frame_end = False, 20, 80
+    s.venom_enable, s.old_surface, s.layer_enable, s.layer_style, s.venom_metallic = True, "VEINS", True, "GOO", 0.0
+    s.venom_tendrils, s.venom_strands, s.venom_webs = 160, 60, True
+    s.venom_coil, s.venom_feelers, s.venom_pulse, s.venom_sheen, s.venom_drips = 0.0, False, 0.0, 0.0, False
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the symbiote (straight tendrils, no feelers)")
+    old_mesh = base.meshes[0]
+    sk_plain_ = venom.skeleton(old_mesh)
+
+    def progress(sk_):
+        """Per tendril of the skeleton: field distance gained from its root to its furthest point over its length
+        (a coiling tendril gains less), the median of them; and how many points are thin (the feelers)."""
+        values_ = venom.field_values(old_mesh, s.mask.matrix_world.translation, True)
+        me_ = sk_.data
+        n_ = len(me_.vertices)
+
+        def col(name_, dtype=np.float32, size=1, prop="value"):
+            arr_ = np.zeros(n_ * size, dtype=dtype)
+            me_.attributes[name_].data.foreach_get(prop, arr_)
+            return arr_.reshape(n_, size) if size > 1 else arr_
+
+        kind_, s_, root_ = col("mmdd_kind"), col("mmdd_s"), col("mmdd_root", np.int32)
+        thick_ = col("mmdd_thick") if me_.attributes.get("mmdd_thick") is not None else np.ones(n_, np.float32)
+        idx_ = np.stack([col(nm_, np.int32) for nm_ in VENOM_ENDS[0][:3]], 1)
+        f_ = (values_[idx_] * col(VENOM_ENDS[0][3], size=3, prop="vector")).sum(axis=1)
+        gains_ = []
+        for r_ in np.unique(root_[(kind_ < 0.5) & (thick_ > 0.99)]):
+            mine_ = (root_ == r_) & (kind_ < 0.5) & (thick_ > 0.99)
+            if s_[mine_].max() > 1e-6:
+                gains_.append((f_[mine_].max() - f_[r_]) / s_[mine_].max())
+        return float(np.median(gains_)) if gains_ else 0.0, int((thick_ < 0.99).sum())
+
+    plain_gain_, plain_thin_ = progress(sk_plain_)
+    s.venom_coil, s.venom_feelers = 1.0, True
+    sk_coil_ = venom.skeleton(old_mesh)
+    coil_gain_, coil_thin_ = progress(sk_coil_)
+    check(sk_coil_ is not None and sk_coil_ != sk_plain_ and plain_thin_ == 0 and coil_thin_ > 50
+          and coil_gain_ < plain_gain_ - 0.08,
+          "coiling tendrils and feelers: traced again; coiling ones gain less ground along the field (%.2f -> %.2f of "
+          "their length), %d thin feeler points" % (plain_gain_, coil_gain_, coil_thin_))
+    s.venom_coil = 0.35
+    # the pulse: the tubes change shape (bulges pumped along, the tips flicking), drips off the snapping strands
+    frame_ = int(round(s.frame_start + 0.45 * (s.frame_end - s.frame_start)))
+    scene.frame_set(frame_)
+    still_ = goo_points(old_mesh)
+    s.venom_pulse = 1.0
+    scene.frame_set(frame_)
+    pumped_ = goo_points(old_mesh)
+    moved_ = float(np.abs(pumped_ - still_).max()) if still_.shape == pumped_.shape and len(still_) else -1.0
+    check(len(still_) > 0 and moved_ > 0.1 * s.venom_thickness,
+          "goo pulse: the tendrils' tubes change shape (%d goo points, moved up to %.4f)" % (len(still_), moved_))
+    found_ = None
+    for f_ in range(s.frame_start + 4, s.frame_end + 60, 4):
+        s.venom_drips = True
+        scene.frame_set(f_)
+        with_ = len(goo_points(old_mesh))
+        s.venom_drips = False
+        scene.frame_set(f_)
+        if with_ > len(goo_points(old_mesh)):
+            found_ = (f_, with_ - len(goo_points(old_mesh)))
+            break
+    check(found_ is not None, "goo drips: drops fall off the snapping strands (%s)" % (found_,))
+    s.venom_drips = True
+    # the goo's look: its sheen and pulse pushed to the tendrils' material, the goo coat and the veins' goo; the
+    # clocks of the creeping smears and the throbbing veins are simple drivers
+    s.venom_sheen, s.venom_pulse = 0.6, 1.0
+    goo_mat_ = bpy.data.materials.get(materials.GOO_MATERIAL)
+    nodes_ = goo_mat_.node_tree.nodes if goo_mat_ is not None else {}
+    drivers_ = list(goo_mat_.node_tree.animation_data.drivers) if goo_mat_ is not None and \
+        goo_mat_.node_tree.animation_data else []
+    coat_ = next((sl_.material for m_ in target.meshes for sl_ in m_.material_slots
+                  if sl_.material is not None and sl_.material.get(materials.P_LAYER)), None)
+    veined_ = next((sl_.material for m_ in base.meshes for sl_ in m_.material_slots
+                    if sl_.material is not None and sl_.material.get(materials.P_SURFACE) == "VEINS"), None)
+    coat_nodes_ = coat_.node_tree.nodes if coat_ is not None else {}
+    vein_nodes_ = veined_.node_tree.nodes if veined_ is not None else {}
+    look_ = {
+        "sheen": nodes_.get("MMDD Goo Sheen") is not None
+        and abs(nodes_["MMDD Goo Sheen"].outputs[0].default_value - 0.6) < 1e-6,
+        "pulse": nodes_.get("MMDD Goo Pulse") is not None
+        and abs(nodes_["MMDD Goo Pulse"].outputs[0].default_value - 1.0) < 1e-6,
+        "ridges": nodes_.get("MMDD Goo Ridges") is not None, "coords": nodes_.get("Goo Coordinates") is not None,
+        "clock": len(drivers_) == 1 and drivers_[0].driver.is_simple_expression,
+        "coat": coat_nodes_.get(materials.LAYER + " Goo Sheen") is not None
+        and abs(coat_nodes_[materials.LAYER + " Goo Sheen"].outputs[0].default_value - 0.6) < 1e-6,
+        "veins": vein_nodes_.get(materials.SURFACE + " Veins Time") is not None
+        and vein_nodes_.get(materials.SURFACE + " Cells Throb") is not None
+        and vein_nodes_.get(materials.SURFACE + " Goo Ridges") is not None}
+    check(all(look_.values()),
+          "the goo's look: sheen and pulse on the tendrils, the goo coat and the veins' goo; the veins throb; one "
+          "simple driver clocks the tendril material (%s)" % [k_ for k_, v_ in look_.items() if not v_])
+    # the symbiote's eyes on the goo coat: by her eye bones, in the mesh's space; off, nothing
+    s.venom_eyes = True
+    eyes_ = effect._symbiote_eyes(target.meshes[0], s)
+    coats_ = [sl_.material for m_ in target.meshes for sl_ in m_.material_slots
+              if sl_.material is not None and sl_.material.get(materials.P_LAYER)
+              and sl_.material.node_tree.nodes.get(materials.LAYER + " Eye Strength") is not None]
+    def eye_clock(m_):
+        """(open, shut) frames of a goo coat's eye driver, None without one."""
+        ad_ = m_.node_tree.animation_data
+        path_ = m_.node_tree.nodes[materials.LAYER + " Eye Strength"].outputs[0].path_from_id("default_value")
+        d_ = next((d for d in (ad_.drivers if ad_ else []) if d.data_path == path_), None)
+        if d_ is None or not d_.driver.is_simple_expression:
+            return None
+        nums_ = [float(v) for v in re.findall(r"-?\d+\.\d+", d_.driver.expression)]
+        return (nums_[0], nums_[3]) if len(nums_) == 4 else None
+
+    import re  # noqa: E402
+    clocks_ = [eye_clock(m_) for m_ in coats_]
+    strengths_ = [1.0 if c_ is not None and s.frame_start < c_[0] < c_[1] < s.frame_end + 100 else 0.0
+                  for c_ in clocks_]
+    bones_ = (target.armature or base.armature).data.bones
+    eye_bone_ = next((bones_[n_] for n_ in motion.EYES[0] if n_ in bones_), None)
+    if eyes_ is not None and coats_:
+        got_ = coats_[0].node_tree.nodes[materials.LAYER + " Eye L"].inputs
+        left_ = Vector((got_[0].default_value, got_[1].default_value, got_[2].default_value))
+        size_ = coats_[0].node_tree.nodes[materials.LAYER + " Eye Size"].outputs[0].default_value
+        check(all(v_ == 1.0 for v_ in strengths_) and (left_ - Vector(eyes_[0])).length < 1e-5
+              and abs(size_ - eyes_[3]) < 1e-6 and 0.015 * height < size_ < 0.12 * height
+              and eye_bone_ is not None and (left_ - target.meshes[0].matrix_world.inverted()
+                                             @ (target.armature or base.armature).matrix_world
+                                             @ eye_bone_.head_local).length < 0.4 * size_,
+              "symbiote eyes: on every goo coat (%d), opening at frame %s and shutting at %s, by her eye bones (%.3f "
+              "apart, the left one %.3f from its bone)"
+              % (len(coats_), clocks_[0][0] if clocks_ and clocks_[0] else None,
+                 clocks_[0][1] if clocks_ and clocks_[0] else None, size_,
+                 (left_ - target.meshes[0].matrix_world.inverted()
+                                      @ (target.armature or base.armature).matrix_world @ eye_bone_.head_local).length
+                 if eye_bone_ is not None else -1.0))
+    else:
+        check(False, "symbiote eyes found by her eye bones (%s, %d coats)" % (eyes_ is not None, len(coats_)))
+    # the grin and the mask splitting open: their own clocks on the coats (the split opens after Splits After and
+    # closes after Stays Open while the coat stays; here the coat leaves, so it opens before the coat does and stays)
+
+    def face_clock(m_, name_):
+        ad_ = m_.node_tree.animation_data
+        path_ = m_.node_tree.nodes[materials.LAYER + name_].outputs[0].path_from_id("default_value")
+        d_ = next((d for d in (ad_.drivers if ad_ else []) if d.data_path == path_), None)
+        return [float(v) for v in re.findall(r"-?\d+\.\d+", d_.driver.expression)] if d_ is not None else None
+
+    s.venom_teeth, s.venom_split, s.venom_split_after, s.venom_split_hold = True, True, 0.3, 0.2
+    teeth_ = face_clock(coats_[0], " Teeth Strength")
+    split_ = face_clock(coats_[0], " Split Open")
+    eyes_c_ = eye_clock(coats_[0])
+    check(teeth_ is not None and len(teeth_) == 4 and eyes_c_ is not None and teeth_[0] > eyes_c_[0]
+          and split_ is not None and len(split_) in (2, 4) and eyes_c_[0] < split_[0] < eyes_c_[1]
+          and coats_[0].node_tree.nodes.get(materials.LAYER + " Eye White") is not None,
+          "the grin opens after the eyes (%.1f > %.1f), the mask splits at %.1f, before the coat leaves (%.1f)"
+          % (teeth_[0] if teeth_ else -1.0, eyes_c_[0] if eyes_c_ else -1.0, split_[0] if split_ else -1.0,
+             eyes_c_[1] if eyes_c_ else -1.0))
+    s.venom_split, s.venom_teeth = False, False
+    check(face_clock(coats_[0], " Split Open") is None and face_clock(coats_[0], " Teeth Strength") is None,
+          "grin and split off: their clocks gone")
+    # the goo coat staying on: the coats' Stay is 1, the eyes never shut, and well after the coat would have left the
+    # new outfit still shows the goo (the layer attribute is 0 there, the Stay keeps it)
+    s.layer_stay = True
+    stays_ = [m_.node_tree.nodes[materials.LAYER + " Stay"].outputs[0].default_value for m_ in coats_]
+    late_ = eye_clock(coats_[0])
+    check(stays_ and all(v_ == 1.0 for v_ in stays_) and late_ is not None and late_[1] > late_[0] + 1e5,
+          "undersuit stays: every coat keeps the goo, the eyes stay open (shut at %.0f)" % (late_[1] if late_ else -1))
+    s.layer_stay = False
+    check(all(m_.node_tree.nodes[materials.LAYER + " Stay"].outputs[0].default_value == 0.0 for m_ in coats_),
+          "undersuit stays off")
+    s.venom_eyes = False
+    check(all(m_.node_tree.nodes[materials.LAYER + " Eye Strength"].outputs[0].default_value == 0.0
+              and eye_clock(m_) is None for m_ in coats_), "symbiote eyes off: gone from the goo coats, no driver")
+    check(not draw_panels(bpy.context), "panels draw with the symbiote's new options")
+    for key_ in ("VENOM", "LIQUID_METAL", "VENOM_HANDS", "VENOM_WHIP", "VENOM_CLASSIC"):
+        presets.apply(s, key_)
+        s.frame_start, s.frame_end = 20, 80
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"} and s.venom_feelers
+              and s.venom_eyes == (key_ != "LIQUID_METAL") and s.venom_split == (key_ == "VENOM_CLASSIC"),
+              "preset %s builds" % key_)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.27 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

@@ -46,6 +46,7 @@ ATTR_S = "mmdd_s"  # tendrils, webs: length along the tendril from its root (obj
 ATTR_LENGTH = "mmdd_len"  # tendrils, webs: s at the end of the branch; strands: rest length
 ATTR_ROOT = "mmdd_root"  # tendrils, webs: skeleton index of the root, whose age times the whole tendril
 ATTR_RND = "mmdd_rnd"  # random number per tendril / strand
+ATTR_THICK = "mmdd_thick"  # thickness factor per tendril / strand (1.27: the feelers are thin)
 
 STEPS = 24  # trace steps per tendril length
 STRAND_POINTS = 8
@@ -55,6 +56,11 @@ WEB_ROWS, WEB_COLUMNS = 6, 4  # faces of a web along the fork and across it
 WEB_REACH = 0.5  # how far up the fork a web reaches (share of the shorter side)
 WEB_CURVE = 0.6  # how far its free edge curves in, in the middle (share of the reach)
 POSES = 4  # frames of the animation the strands are also looked for in
+COIL_TURN = 0.75  # 1.27, coiling tendrils: a steady turn (radians) off the field each step, so they corkscrew round
+# a limb (or across the body) instead of crawling straight ahead
+FEELERS = 2  # 1.27: feelers off each tendril near its tip: short, thin branches ...
+FEELER_LENGTH = (0.12, 0.22)  # ... this share of the tendril's length ...
+FEELER_THICK = 0.45  # ... this share of its thickness
 
 
 def skeleton(ob):
@@ -66,7 +72,8 @@ def signature(settings, s):
     """What the skeleton of a mesh with scale `s` depends on (object units; the frames the strands are looked for in
     come from the transformation's frame range)."""
     return (float(settings.venom_tendrils), float(settings.venom_strands), settings.venom_length / s,
-            float(settings.venom_webs), float(settings.frame_start), float(settings.frame_end))
+            float(settings.venom_webs), float(settings.frame_start), float(settings.frame_end),
+            float(getattr(settings, "venom_coil", 0.0)), float(getattr(settings, "venom_feelers", False)))
 
 
 def _encode(values):
@@ -240,11 +247,13 @@ class _Chain:
         self.length = 0.0
         self.root = None  # chain whose first point is the root (tendrils, webs), filled in later
         self.faces = []  # webs: faces, indices into points
+        self.thick = 1.0  # thickness factor (feelers are thin)
 
 
-def _trace(surface, k, p, heading, length, step, rng, s0=0.0):
+def _trace(surface, k, p, heading, length, step, rng, s0=0.0, bias=0.0):
     """Points (point, triangle, s) of a path from `p` on triangle `k` along the field for `length`, starting towards
-    `heading` (None: straight along the field). It stops early at locked parts, sharp folds and dead ends."""
+    `heading` (None: straight along the field). It stops early at locked parts, sharp folds and dead ends. With a
+    `bias` (radians) it keeps turning that far off the field: round a limb that is a corkscrew (1.27)."""
     path = [(p, k, s0)]
     n = surface.normals[k]
     d = heading if heading is not None else surface.grad[k]
@@ -257,7 +266,10 @@ def _trace(surface, k, p, heading, length, step, rng, s0=0.0):
     while s - s0 < length:
         g = surface.grad[k] - n * (surface.grad[k] @ n)
         g = _unit(g) if np.linalg.norm(g) > 1e-9 else d
-        angle = float(np.clip(angle + rng.normal(0.0, 0.3), -0.9, 0.9))
+        if bias:
+            angle = float(np.clip(0.5 * angle + bias + rng.normal(0.0, 0.15), -1.25, 1.25))
+        else:
+            angle = float(np.clip(angle + rng.normal(0.0, 0.3), -0.9, 0.9))
         d = _unit(0.6 * d + 0.4 * _turn(g, n, angle))
         d = _unit(d - n * (d @ n))
         q, kq = surface.drop(p + d * step, n, step)
@@ -318,7 +330,9 @@ def _web(surface, side_a, side_b, trunk, step):
     return web
 
 
-def _tendrils(surface, count, length, height, rng, webs=True):
+def _tendrils(surface, count, length, height, rng, webs=True, coil=0.0, feelers=False):
+    """Tendrils over the free surface: trunks traced along the field (a `coil` share of them corkscrewing, 1.27),
+    branches off their middles (with webs in the forks), and with `feelers` short thin ones off their tips."""
     chains = []
     step = length / STEPS
     total = float(np.where(surface.free, surface.area, 0.0).sum())
@@ -330,7 +344,8 @@ def _tendrils(surface, count, length, height, rng, webs=True):
     for k, p in _spaced(candidates, spacing)[:count]:
         rnd = float(rng.random())
         own = length * (0.7 + 0.6 * rng.random())
-        path = _trace(surface, k, p, None, own, step, rng)
+        bias = COIL_TURN * float(rng.choice((-1.0, 1.0))) if rng.random() < coil else 0.0
+        path = _trace(surface, k, p, None, own, step, rng, bias=bias)
         if len(path) < 4:
             continue
         trunk = _Chain(0, rnd)
@@ -356,6 +371,24 @@ def _tendrils(surface, count, length, height, rng, webs=True):
             web = _web(surface, path[at:], branch_path, trunk, step) if webs else None
             if web is not None:
                 chains.append(web)
+        if not feelers:
+            continue
+        # Feelers: short thin branches off the last part of the trunk, feeling about to either side.
+        for _i in range(FEELERS):
+            at = int(len(path) * (0.6 + 0.3 * rng.random()))
+            fp, fk, fs = path[at]
+            nf = surface.normals[fk]
+            ahead = path[min(at + 1, len(path) - 1)][0] - fp
+            side = _turn(_unit(ahead - nf * (ahead @ nf)), nf, (0.6 + 0.6 * rng.random()) * rng.choice((-1.0, 1.0)))
+            feeler_path = _trace(surface, fk, fp, side, own * (FEELER_LENGTH[0] + (FEELER_LENGTH[1] - FEELER_LENGTH[0])
+                                                              * rng.random()), step * 0.6, rng, fs)
+            if len(feeler_path) < 3:
+                continue
+            feeler = _Chain(0, float(rng.random()))
+            feeler.root = trunk
+            feeler.thick = FEELER_THICK
+            _fill(surface, feeler, feeler_path)
+            chains.append(feeler)
     return chains
 
 
@@ -442,6 +475,7 @@ def _mesh(name, surface, chains):
     put(ATTR_KIND, "FLOAT", per_point(lambda c: c.kind, np.float32))
     put(ATTR_LENGTH, "FLOAT", per_point(lambda c: c.length, np.float32))
     put(ATTR_RND, "FLOAT", per_point(lambda c: c.rnd, np.float32))
+    put(ATTR_THICK, "FLOAT", per_point(lambda c: c.thick, np.float32))
     put(ATTR_ROOT, "INT", np.concatenate([np.full(len(c.points), first[id(c.root)] if c.root is not None
                                                   else start, dtype=np.int32) for c, start in zip(chains, starts)]))
     return me
@@ -536,7 +570,8 @@ def build(ob, values, settings, height, scene, poses=(), pose_key=None):
     surface = _Surface(ob, values)
     rng = np.random.default_rng(len(ob.data.vertices) + 7919)
     tendrils = _tendrils(surface, settings.venom_tendrils, settings.venom_length / s, height / s, rng,
-                         settings.venom_webs)
+                         settings.venom_webs, getattr(settings, "venom_coil", 0.0),
+                         getattr(settings, "venom_feelers", False))
     key = None if pose_key is None else (pose_key, settings.venom_strands, round(height / s, 6))
     strands = _STRANDS.get(key)
     if strands is None:

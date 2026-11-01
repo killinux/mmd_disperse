@@ -961,6 +961,16 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                              "the start of the transformation, when that is later)")
 
     # --- 1.11: the camera and time at the big moment
+    moment_at: EnumProperty(
+        name="Moment At",
+        items=(("SWAP", "The Swap", "The camera move, the time warp, the impact frames and the picture's look come at "
+                                    "the swap, or the new outfit complete (or as a move of the dance sets the front "
+                                    "off)"),
+               ("FACE", "Her Face", "They come as the front reaches her face instead (1.28): the goo covers it and the "
+                                    "symbiote's eyes open (found by her eye bones; the front must get there: Face* and "
+                                    "Eye* out of the lock patterns). Back to the swap when it never does")),
+        default="SWAP", update=_sync,
+        description="Where the big moment the picture is cut on falls")
     shot_enable: BoolProperty(name="Camera Move", default=False, update=_sync,
                               description="The camera moves at the big moment (the swap, or the new outfit complete): "
                                           "a camera of the add-on rides on the scene camera or circles the dancer and "
@@ -973,6 +983,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("ROLL", "Roll", "The picture spins away round its middle and back in, the outfits swapping in the "
                                 "spin"),
                ("PUNCH", "Zoom Punch", "A sudden zoom in on the dancer at the moment, smeared outwards, then back"),
+               ("CLOSEUP", "Push In on Her Face", "The camera pushes in on her face over the half second before the "
+                                                  "moment (her head a third of the picture), stays on it for Move "
+                                                  "Time, following her head, and eases back out (1.28; the "
+                                                  "symbiote's eyes, grin and the mask splitting: Moment At her face)"),
                ("DOLLY", "Dolly Zoom", "The camera backs away while it zooms in, so the dancer stays the same size and "
                                        "the world behind stretches away, then comes back (Vertigo)"),
                ("ORBIT", "Orbit", "The camera circles the dancer round the moment and comes back where it was (with "
@@ -993,7 +1007,8 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
         default="WHIP", update=_sync)
     shot_length: FloatProperty(name="Move Time", default=2.0, min=0.2, soft_max=10.0, update=_sync,
                                description="How long the dolly zoom, the orbit, the cuts and the journeys out to the "
-                                           "Earth and into the eye take, in seconds")
+                                           "Earth and into the eye take, and how long the push-in stays on her face, "
+                                           "in seconds")
     shot_angle: FloatProperty(name="Orbit Angle", default=360.0, min=-1080.0, max=1080.0, update=_sync,
                               description="How far the camera goes round the dancer, in degrees (a whole turn comes "
                                           "back to where it started)")

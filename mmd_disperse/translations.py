@@ -382,6 +382,13 @@ _ZH = {
     ("*", "It opens out past the scene camera"): "它会一直展开到场景相机之外",
     ("*", "Camera and Time"): "镜头与时间",
     ("*", "Camera Move"): "镜头运动",
+    ("*", "Moment At"): "关键时刻在",
+    ("*", "The Swap"): "换装时刻",
+    ("*", "Her Face"): "前沿到脸",
+    ("*", "Push In on Her Face"): "推近看脸",
+    ("*", "Big moment at frame %d"): "关键时刻：第 %d 帧",
+    ("*", "Her face is not reached (locked, or no eye bones): frame %d, the swap"):
+        "前沿到不了脸（锁定了，或没有眼睛骨骼）：第 %d 帧，换装时刻",
     ("*", "Move"): "运镜",
     ("*", "Whip Pan"): "甩镜头",
     ("*", "Roll"): "旋转",

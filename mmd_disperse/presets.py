@@ -14,6 +14,7 @@ _OFF = dict(
     venom_metallic=0.0, old_surface="NONE", particle_count=600, easing="EASE", ring_enable=False, paint_style="NONE",
     reactor=False, plates=False, arc_enable=False, trigger="NONE", flame_enable=False, impact_enable=False,
     soul_enable=False, domain_enable=False, domain_arrive="OPEN", shot_enable=False, time_warp="NONE", toon_style="NONE", float_up=False,
+    moment_at="SWAP",
     husk_motion="STILL", trail_enable=False, step_flowers=False, look_style="NONE", holo_style="SCAN",
     shell_enable=False, lights_out=False, flash_enable=False, flash_steps=False, streaks=False, smoke_style="WHITE",
     cover_style="NONE", stage_flames=False, tint_style="NONE", body_grow=0.0, dim_style="NONE", totem_enable=False,
@@ -77,13 +78,17 @@ PRESETS = (
                                                      "the white eyes open, then the grin, the mask splits down the "
                                                      "middle to show her face and closes again; the goo stays on "
                                                      "(Undersuit Stays: she is the symbiote; a copy of the same model "
-                                                     "makes a new outfit, or any outfit the goo should hide)",
+                                                     "makes a new outfit, or any outfit the goo should hide); the "
+                                                     "camera pushes in on her face as the eyes open, the dance slows "
+                                                     "and impact frames hit (1.28)",
      dict(_OFF, path="SURFACE", seeds="LIMBS", venom_enable=True, venom_color=(0.006, 0.006, 0.009),
           old_surface="VEINS", surface_color=(0.006, 0.006, 0.009), layer_enable=True, layer_style="GOO",
           edge_glow=False, venom_tendrils=240, venom_strands=90, venom_coil=0.45, venom_feelers=True,
           venom_pulse=1.0, venom_sheen=0.6, venom_drips=True, venom_eyes=True, venom_teeth=True, venom_split=True,
           venom_split_after=1.2, venom_split_hold=1.0, layer_stay=True, layer_width=Height(0.3),
-          surface_width=Height(0.18))),
+          surface_width=Height(0.18), moment_at="FACE", shot_enable=True, shot_style="CLOSEUP", shot_length=2.8,
+          time_warp="SLOW", warp_length=1.2, impact_enable=True, impact_frames=3, speed_lines=True,
+          shockwave=False)),
     ("LIQUID_METAL", "Liquid Metal", "Liquid metal runs over the body from the chest in silver veins and tendrils, "
                                      "coats it and turns into the new outfit (Terminator 2's T-1000)",
      dict(_OFF, path="SURFACE", seeds="ORIGIN", venom_enable=True, venom_metallic=1.0, venom_color=(0.85, 0.87, 0.9),

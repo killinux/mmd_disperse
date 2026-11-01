@@ -1575,6 +1575,16 @@ def _symbiote_face(nt, rest, shader, x, y):
     return mix.outputs[0], split
 
 
+EYES_OPEN = (3.0, 7.0, 0.12, 0.3)  # the symbiote's eyes open from (frames, share of the coat's span) to (frames, share)
+
+
+def eyes_open_at(cover, back):
+    """The frame the symbiote's eyes are open on a goo coat that reaches her eyes at frame `cover` and leaves them at
+    `back` (a thin coat squeezes the beats): the picture's big moment at her face (1.28)."""
+    span = max(float(back) - float(cover), 1.0)
+    return float(cover) + min(EYES_OPEN[1], EYES_OPEN[3] * span)
+
+
 def _face_clock(sock, expression):
     """A frame driver `expression` on the value socket `sock` (None: no driver, 0)."""
     sock.driver_remove("default_value")
@@ -1621,8 +1631,8 @@ def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=
                 return min(frames, share * span)
 
             shut = "(1 - smoothstep(%.2f, %.2f, frame))" % (back - at(6.0, 0.3), back - at(2.0, 0.1))
-            clocks[" Eye Strength"] = "smoothstep(%.2f, %.2f, frame) * %s" % (cover + at(3.0, 0.12),
-                                                                            cover + at(7.0, 0.3), shut)
+            clocks[" Eye Strength"] = "smoothstep(%.2f, %.2f, frame) * %s" % (cover + at(EYES_OPEN[0], EYES_OPEN[2]),
+                                                                            eyes_open_at(cover, back), shut)
             if when.get("teeth"):
                 clocks[" Teeth Strength"] = "smoothstep(%.2f, %.2f, frame) * %s" % (cover + at(8.0, 0.4),
                                                                                   cover + at(13.0, 0.55), shut)

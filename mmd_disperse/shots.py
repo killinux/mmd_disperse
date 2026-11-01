@@ -24,8 +24,13 @@ P_USER = "mmd_disperse_user_camera"  # on the mask: the scene camera the moves r
 P_KEY = "mmd_disperse_shot_key"  # on the mask: the orbit and the cuts as they were set up (redone when it changes)
 ZOOM = "mmdd_zoom"  # on the riding camera: its focal length as a share of the scene camera's (keyed)
 MARKER = "MMD Disperse Shot"  # our timeline markers' names start with it
-STYLES = ("WHIP", "ROLL", "PUNCH", "DOLLY", "ORBIT", "CUTS", "RISE", "EARTH", "PUPIL")
-RIDING = ("WHIP", "ROLL", "PUNCH", "DOLLY", "RISE")
+STYLES = ("WHIP", "ROLL", "PUNCH", "DOLLY", "ORBIT", "CUTS", "RISE", "EARTH", "PUPIL", "CLOSEUP")
+RIDING = ("WHIP", "ROLL", "PUNCH", "DOLLY", "RISE", "CLOSEUP")
+AIM = "MMD Disperse Aim"  # the riding camera's Damped Track at her head for the push-in on her face (1.28)
+CLOSEUP_SHARE = 0.33  # the push-in on her face: her head this share of the picture's height ...
+CLOSEUP_ZOOM = (1.15, 4.0)  # ... within these focal length factors ...
+CLOSEUP_IN, CLOSEUP_OUT = 0.5, 0.7  # ... pushed in over these seconds before the moment and eased back out after ...
+CLOSEUP_AIM = 0.55  # ... aimed this far up her head bone (0 its root at the neck, 1 the crown)
 SWING = 2.5  # how far a whip pan swings each way, in the picture's widths (between ...
 SWING_RANGE = (math.radians(20.0), math.radians(75.0))  # ... these angles)
 ROLL = math.radians(100.0)  # ... and a roll
@@ -90,6 +95,9 @@ def _key(ob, path, keys, index=-1, interpolation="LINEAR"):
             ob.keyframe_insert(path, index=index, frame=frame)
         elif path.startswith('["'):
             ob[path[2:-2]] = value
+            ob.keyframe_insert(path, frame=frame)
+        elif path.startswith("constraints["):
+            ob.constraints[path.split('"')[1]].influence = value
             ob.keyframe_insert(path, frame=frame)
         else:
             setattr(ob, path, value)
@@ -307,6 +315,46 @@ def _cuts(scene, mask, user, collection, armature, frame, length, focus, height)
     return out
 
 
+def _closeup(scene, ride, user, armature, frame, length, focus, height, fps):
+    """The push-in on her face on the riding camera (1.28): its focal length up to where her head takes CLOSEUP_SHARE
+    of the picture's height (as the scene camera sees it at the moment), over CLOSEUP_IN seconds before frame `frame`,
+    held for `length` seconds and eased back; a Damped Track at her head bone, its influence keyed with the zoom, turns
+    the camera onto her face and follows it (without a head bone it zooms on the chest `focus`, lifted). Its cuts."""
+    head = _bone(armature, HEAD_BONES)
+    current = scene.frame_current
+    scene.frame_set(int(frame))
+    if head is not None:
+        bottom = armature.matrix_world @ head.head
+        top = armature.matrix_world @ head.tail
+    else:
+        bottom = Vector(focus) + Vector((0.0, 0.0, 0.2 * height))
+        top = bottom + Vector((0.0, 0.0, 0.14 * height))
+    seen = [world_to_camera_view(scene, user, p) for p in (bottom, top)]
+    scene.frame_set(current)
+    share = max(abs(seen[1].y - seen[0].y), 1e-3) if all(v.z > 0.0 for v in seen) else CLOSEUP_SHARE
+    zoom = min(max(CLOSEUP_SHARE / share, CLOSEUP_ZOOM[0]), CLOSEUP_ZOOM[1])
+    for con in [c for c in ride.constraints if c.name == AIM]:
+        ride.constraints.remove(con)
+    if head is not None:
+        con = ride.constraints.new("DAMPED_TRACK")
+        con.name = AIM
+        con.target = armature
+        con.subtarget = head.name
+        con.head_tail = CLOSEUP_AIM
+        con.track_axis = "TRACK_NEGATIVE_Z"
+        con.influence = 0.0
+    before, after = max(int(round(CLOSEUP_IN * fps)), 2), max(int(round(CLOSEUP_OUT * fps)), 3)
+    hold = frame + max(int(round(length * fps)), 1)
+    eased_in = [(k / float(before)) ** 2 * (3.0 - 2.0 * k / float(before)) for k in range(before + 1)]
+    eased_out = [1.0 - (k / float(after)) ** 2 * (3.0 - 2.0 * k / float(after)) for k in range(1, after + 1)]
+    shares = ([(frame - before + k, e) for k, e in enumerate(eased_in)] + [(hold, 1.0)]
+              + [(hold + k, e) for k, e in enumerate(eased_out, 1)])
+    _key(ride, '["%s"]' % ZOOM, [(f, 1.0 + (zoom - 1.0) * e) for f, e in shares])
+    if head is not None:
+        _key(ride, 'constraints["%s"].influence' % AIM, shares)
+    return [(frame - before, ride), (hold + after + 1, None)]
+
+
 def _rise(ride, user, rise, focus, height, fps):
     """The rising reveal on the riding camera: close up (RISE_ZOOM), turned to look at the part just changed as the
     change climbs (`rise`: (frame, height of the top of what has changed)), then back out to the scene camera's
@@ -359,6 +407,9 @@ def sync(settings, mask, moment, focus, armature=None, height=1.0, rise=None, hi
         ride = _riding(mask, user, collection)
         _clear_keys(ride)
         ride[ZOOM] = 1.0
+        if style != "CLOSEUP":
+            for con in [c for c in ride.constraints if c.name == AIM]:
+                ride.constraints.remove(con)
         if style in ("WHIP", "ROLL"):
             before, after = max(int(round(0.12 * fps)), 2), max(int(round(0.18 * fps)), 3)
             # (a whip swings a few widths of the picture: the dancer is out of it for two or three frames)
@@ -369,6 +420,8 @@ def sync(settings, mask, moment, focus, armature=None, height=1.0, rise=None, hi
             cuts = [(frame - before, ride), (frame + after + 1, None)]
         elif style == "RISE":
             cuts = _rise(ride, user, rise, focus, height, fps)
+        elif style == "CLOSEUP":
+            cuts = _closeup(scene, ride, user, armature, frame, settings.shot_length, focus, height, fps)
         elif style == "PUNCH":
             before, after = max(int(round(0.07 * fps)), 2), max(int(round(0.15 * fps)), 3)
             _key(ride, '["%s"]' % ZOOM, [(frame - before, 1.0), (frame, PUNCH), (frame + 1, PUNCH),

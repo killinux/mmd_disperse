@@ -538,11 +538,20 @@ class MMDDISPERSE_PT_camera(_Panel, bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
+        layout.prop(s, "moment_at")
+        mask = s.mask
+        at = mask.get("mmd_disperse_moment", -1) if mask is not None else -1
+        if at is not None and at >= 0:
+            if s.moment_at == "FACE" and not mask.get("mmd_disperse_at_face", False):
+                layout.label(text=iface_("Her face is not reached (locked, or no eye bones): frame %d, the swap") % at,
+                             translate=False, icon="INFO")
+            else:
+                layout.label(text=iface_("Big moment at frame %d") % at, translate=False, icon="TIME")
         layout.prop(s, "shot_enable")
         col = layout.column()
         col.active = s.shot_enable
         col.prop(s, "shot_style")
-        if s.shot_style in ("DOLLY", "ORBIT", "CUTS", "EARTH", "PUPIL"):
+        if s.shot_style in ("DOLLY", "ORBIT", "CUTS", "EARTH", "PUPIL", "CLOSEUP"):
             col.prop(s, "shot_length")
         if s.shot_style == "ORBIT":
             col.prop(s, "shot_angle")

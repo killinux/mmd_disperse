@@ -5003,6 +5003,106 @@ def run():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.27 checks")
 
+    # --- 1.28: the big moment at her face: the camera's push-in on her face, the time warp and the impact frames timed
+    # on the symbiote's eyes opening (the classic beats cut on the face)
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "warp_length", "venom_enable", "venom_eyes", "venom_tendrils",
+        "venom_strands", "old_surface", "layer_enable", "layer_style", "layer_width", "layer_stay", "moment_at",
+        "shot_enable", "shot_style", "shot_length", "impact_enable", "speed_lines", "shockwave", "impact_frames")}
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.shot_enable, s.impact_enable, s.moment_at = False, False, "FACE"
+    s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
+    s.layer_width, s.layer_stay = 0.3 * height, True
+    s.edge_glow, s.frame_start, s.frame_end = False, 20, 80
+    s.venom_enable, s.old_surface, s.layer_enable, s.layer_style, s.venom_eyes = True, "VEINS", True, "GOO", True
+    s.venom_tendrils, s.venom_strands = 60, 20
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the moment at her face")
+    wave_ = float(s.mask[effect.P_WAVE])
+    when_ = effect._symbiote_eye_frames(s, s.mask)
+    at_face_ = effect._big_frame(s, s.mask, wave_)
+    opens_ = materials.eyes_open_at(*when_) if when_ is not None else None
+    check(when_ is not None and at_face_ is not None and at_face_ == int(math.ceil(opens_ - 1e-6))
+          and s.mask.get(effect.P_AT_FACE) and s.mask.get(effect.P_MOMENT) == at_face_
+          and s.frame_start < at_face_ < s.frame_end,
+          "moment at her face: the big frame is where the symbiote's eyes are open (goo at her eyes %s, eyes open "
+          "%.1f, big frame %s)" % (when_[0] if when_ else None, opens_ if opens_ else -1.0, at_face_))
+    s.moment_at = "SWAP"
+    at_swap_ = effect._big_frame(s, s.mask, wave_)  # (a frame past the swap: None when the mask stops right there)
+    swap_ = effect._frame_at(s.mask, effect._finale_start(s, wave_, s.mask))
+    check(swap_ is not None and swap_ > at_face_ + 5 and not s.mask.get(effect.P_AT_FACE)
+          and (at_swap_ is None or at_swap_ >= swap_) and s.mask.get(effect.P_MOMENT) == (at_swap_ or -1),
+          "moment at the swap again: later (%s, %s > %s), the panel's frame follows" % (at_swap_, swap_, at_face_))
+    s.moment_at = "FACE"
+    # the push-in on her face: the riding camera zooms in before the moment, turned onto her head by a damped track that
+    # follows it, holds for Move Time and eases back; the markers switch to it and back
+    arm_ = base.armature
+    if scene.camera is None:
+        scene.camera = bpy.data.objects.new("MMDD Test Camera", bpy.data.cameras.new("MMDD Test Camera"))
+        scene.collection.objects.link(scene.camera)
+        scene.camera.location = (0.0, -3.0 * height, 0.6 * height)
+        scene.camera.rotation_euler = (math.radians(88.0), 0.0, 0.0)
+    user_ = camera_moves.user_camera(scene, s.mask) or scene.camera
+    s.shot_enable, s.shot_style, s.shot_length = True, "CLOSEUP", 1.0
+    ride_ = next((ob for ob in camera_moves.shot_objects(s.mask) if ob.get(camera_moves.P_ROLE) == "RIDE"), None)
+    aim_ = ride_.constraints.get(camera_moves.AIM) if ride_ is not None else None
+    head_ = next((arm_.pose.bones[n_] for n_ in camera_moves.HEAD_BONES if n_ in arm_.pose.bones), None)
+
+    def zoomed(f_):
+        scene.frame_set(f_)
+        return round(float(ride_[camera_moves.ZOOM]), 3), round(float(aim_.influence), 3) if aim_ else None, scene.camera
+
+    before_, at_, held_, after_ = (zoomed(f_) for f_ in (at_face_ - 30, at_face_, at_face_ + 20, at_face_ + 60))
+    scene.frame_set(at_face_)
+    bpy.context.view_layer.update()
+    looking_ = -(ride_.matrix_world.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized() if ride_ is not None else None
+    spot_ = (arm_.matrix_world @ (head_.head + camera_moves.CLOSEUP_AIM * (head_.tail - head_.head))
+             if head_ is not None else None)
+    to_head_ = (spot_ - ride_.matrix_world.translation).normalized() if spot_ is not None else None
+    off_ = math.degrees(looking_.angle(to_head_)) if looking_ is not None and to_head_ is not None else -1.0
+    check(ride_ is not None and aim_ is not None and aim_.type == "DAMPED_TRACK" and aim_.target == arm_
+          and aim_.subtarget == (head_.name if head_ else "") and before_[0] == 1.0 and before_[1] == 0.0
+          and at_[0] > 1.1 and at_[1] == 1.0 and held_[0] == at_[0] and held_[1] == 1.0 and after_[0] == 1.0
+          and after_[1] == 0.0 and at_[2] == ride_ and held_[2] == ride_ and after_[2] == user_ and before_[2] == user_
+          and 0.0 <= off_ < 3.0,
+          "push-in on her face: zoom x%.2f at the moment (frame %d) on the riding camera, aimed at her head (%.1f deg "
+          "off), held, back to x%.2f and the scene camera after (before %s, held %s, after %s)"
+          % (at_[0], at_face_, off_, after_[0], before_[:2], held_[:2], after_[:2]))
+    s.shot_style = "PUNCH"
+    check(ride_ is not None and ride_.constraints.get(camera_moves.AIM) is None,
+          "another move on the riding camera: the aim at her head gone")
+    s.shot_enable = False
+    # the slow motion and the impact frames come at her face too
+    s.time_warp, s.warp_length = "SLOW", 1.2
+    key_ = s.mask.get(effect.timewarp.P_KEY, "")
+    check(key_.startswith("SLOW:%d:" % at_face_) and not draw_panels(bpy.context),
+          "slow motion round the moment at her face (%s)" % key_)
+    s.time_warp = "NONE"
+    s.impact_enable, s.speed_lines, s.shockwave, s.impact_frames = True, True, False, 3
+    check(bpy.ops.mmd_disperse.add_impact() == {"FINISHED"}, "impact frames added")
+    tree_ = compositor._existing_tree(scene)
+    grey_ = tree_.nodes.get(compositor.IMPACT_GREY) if tree_ is not None else None
+    hits_ = []
+    for f_ in (at_face_ - 2, at_face_, at_face_ + 1, at_face_ + 6):
+        scene.frame_set(f_)
+        hits_.append(round(compositor._flash_factor(grey_).default_value) if grey_ is not None else -1)
+    check(hits_ == [0, 1, 1, 0], "impact frames at her face (frame %d: %s)" % (at_face_, hits_))
+    s.impact_enable = False
+    # the classic beats preset cuts on her face: push-in, slow motion and impact frames, one click
+    presets.apply(s, "VENOM_CLASSIC")
+    s.frame_start, s.frame_end = 20, 80
+    check(s.moment_at == "FACE" and s.shot_enable and s.shot_style == "CLOSEUP" and s.time_warp == "SLOW"
+          and s.impact_enable and not s.shockwave and bpy.ops.mmd_disperse.build() == {"FINISHED"}
+          and s.mask.get(effect.P_AT_FACE)
+          and any(ob.get(camera_moves.P_ROLE) == "RIDE" for ob in camera_moves.shot_objects(s.mask))
+          and str(s.mask.get(effect.timewarp.P_KEY, "")).startswith("SLOW:%d:" % s.mask.get(effect.P_MOMENT)),
+          "the classic beats: moment at her face, the push-in, slow motion and impact frames all on it (frame %s)"
+          % s.mask.get(effect.P_MOMENT))
+    check(not draw_panels(bpy.context), "panels draw with the moment at her face")
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.28 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

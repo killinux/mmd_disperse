@@ -1121,13 +1121,18 @@ def _impact_start(settings, mask, wave):
     return big + (_radius_step(mask, big) if mask is not None else 0.0)
 
 
-def _focus(mask):
-    """World point the speed lines rush towards: the middle of the body, a little above (the chest)."""
+FOCUS_CHEST, FOCUS_FACE = 0.62, 0.92  # the focus up the rest pose: the chest; her face (the moment at her face)
+
+
+def _focus(mask, face=False):
+    """World point the speed lines rush towards and the camera moves centre on: the middle of the body, a little above
+    (the chest); her face with `face` (1.28: the moment at her face)."""
     meshes = [ob for ob in effect_objects(mask) if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
     if not meshes:
         return None
     lo, hi = mdl.rest_bounds(meshes)
-    return Vector(((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z + 0.62 * (hi.z - lo.z)))
+    up = FOCUS_FACE if face else FOCUS_CHEST
+    return Vector(((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z + up * (hi.z - lo.z)))
 
 
 def _rise_heights(settings, mask, step=2):
@@ -1172,10 +1177,8 @@ def update_impact(settings):
         if mask is not None:
             impact.remove(mask)
         return
-    # the first whole frame at which the mask radius gets there, counted on in frames from it (the mask keys as they
-    # are now: this runs again whenever the effect syncs)
-    at = _frame_at(mask, _impact_start(settings, mask, wave))
-    first = None if at is None else int(math.ceil(at - 1e-6))
+    # the first whole frame of the big moment (the mask keys as they are now: this runs again whenever the effect syncs)
+    first = _big_frame(settings, mask, wave)
     compositor.update_impact(scene, first, settings.impact_frames)
     camera = shots.carrier(scene, mask)
     if settings.speed_lines and camera is not None and first is not None:
@@ -1184,18 +1187,49 @@ def update_impact(settings):
         if not impact.sheets(mask):
             collection = mask.users_collection[0] if mask.users_collection else scene.collection
             impact.create(scene, mask, collection, camera)
-        impact.sync(scene, mask, _focus(mask), first, settings.impact_frames, shots.user_camera(scene, mask))
+        impact.sync(scene, mask, _focus(mask, _at_face(settings, mask)), first, settings.impact_frames,
+                    shots.user_camera(scene, mask))
     else:
         impact.remove(mask)
 
 
-def _big_frame(settings, mask, wave):
-    """The first whole frame of the big moment (where the impact frames start: a frame after the swap or the new
-    outfit complete, or as the front sets off from a move of the dance); None without mask keys."""
-    if mask is None or wave <= 0.0:
+P_MOMENT = "mmd_disperse_moment"  # on the mask: the big frame as it was last placed (the panel shows it) ...
+P_AT_FACE = "mmd_disperse_at_face"  # ... and whether it is at her face (Moment At: Her Face found her face)
+
+
+def _face_moment(settings, mask):
+    """The frame of the big moment at her face (Moment At: Her Face, 1.28): the symbiote's eyes open on the goo coat
+    (when the goo coat with its eyes is on), else the front reaching her eyes; None when it never does (locked, or no
+    eye bones) or the panel puts the moment at the swap."""
+    if settings.moment_at != "FACE" or mask is None:
         return None
-    at = _frame_at(mask, _impact_start(settings, mask, wave))
-    return None if at is None else int(math.ceil(at - 1e-6))
+    when = _symbiote_eye_frames(settings, mask)
+    if when is None:
+        return None
+    if settings.layer_enable and settings.layer_style == "GOO" and settings.venom_eyes:
+        return materials.eyes_open_at(when[0], when[1])
+    return when[0]
+
+
+def _at_face(settings, mask):
+    return bool(mask is not None and mask.get(P_AT_FACE, False))
+
+
+def _big_frame(settings, mask, wave):
+    """The first whole frame of the big moment (where the impact frames start, the camera moves and the time warps are
+    timed on): a frame after the swap or the new outfit complete, as the front sets off from a move of the dance, or
+    at her face (Moment At); None without mask keys. Kept on the mask for the panel."""
+    if mask is None or wave <= 0.0:
+        if mask is not None:
+            mask[P_MOMENT], mask[P_AT_FACE] = -1, False
+        return None
+    at = _face_moment(settings, mask)
+    mask[P_AT_FACE] = at is not None
+    if at is None:
+        at = _frame_at(mask, _impact_start(settings, mask, wave))
+    frame = None if at is None else int(math.ceil(at - 1e-6))
+    mask[P_MOMENT] = -1 if frame is None else frame
+    return frame
 
 
 def _models(settings):
@@ -1323,7 +1357,7 @@ def sync(settings):
     update_impact(settings)
     picture.sync(settings, mask, _models(settings))  # 1.12: the front on the picture
     models = _models(settings)
-    focus = _focus(mask)
+    focus = _focus(mask, _at_face(settings, mask))
     rise = _rise_heights(settings, mask) if settings.shot_enable and settings.shot_style == "RISE" else None
     # (1.17: the journey into the pupil plays the dance once with all of this switched off, and finds the eyes on the
     # dancing model)

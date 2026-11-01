@@ -10,7 +10,7 @@ from mathutils import Matrix, Vector
 
 from . import (arrival, beats, chain, compositor, cover, dimension, domain, finish, glint, grow, impact, launch, lights,
                echo, ghost, materials, mirror, mist, motion, origins, particles, picture, printer, puppet, pyro,
-               fumble, gust, morph, peel, plumage, replay, sweat, talisman, title,
+               afterimage, crown, fumble, gust, morph, peel, plumage, replay, sweat, talisman, title,
                ribbons, rings, sampling, shadowplay, shell, shots, spirit, timewarp, tint, toon, totem, trails, venom)
 from . import model as mdl
 from .node_groups import (ATTR_ARRIVAL, BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups,
@@ -618,6 +618,8 @@ def remove_effect(mask):
     plumage.remove(mask)
     morph.remove(mask)
     gust.remove(mask)
+    afterimage.remove(mask)
+    crown.remove(mask)
     grow.remove(mask)
     chain.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
@@ -1339,6 +1341,8 @@ def sync(settings):
     plumage.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.24
     morph.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.24
     gust.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.25: the wind
+    afterimage.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.26
+    crown.sync(settings, mask, _models(settings), _frame_at(mask, big) if wave_at > 0.0 else None)  # 1.26
     # 1.11: cartoon physics at the big moment (the first frame of it: the swap, or the new outfit complete), about an
     # anchor under the old model's hips; the float lands then
     landing = _frame_at(mask, big) if wave_at > 0.0 else None

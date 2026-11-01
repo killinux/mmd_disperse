@@ -48,7 +48,7 @@ P_LAYER = "mmd_disperse_layer"
 SURFACE = "MMDD Surface"
 P_SURFACE = "mmd_disperse_surface"  # the style the surface nodes were made for
 SURFACE_STYLES = ("VEINS", "FROST", "CHAR", "INK", "STONE", "GOLD", "SILK", "CODE", "PAPERCUT", "TATTOO", "LED",
-                  "EPAPER")
+                  "EPAPER", "GEM")
 P_SURFACE_BLEND = "mmd_disperse_surface_blend"  # blend mode to put back once the paper cut is gone (before 4.2)
 CODE_ROW = 1.4  # a glyph of the digital rain is this many times as tall as it is wide
 PAINT = "MMDD Paint"
@@ -836,10 +836,11 @@ def update_particle_material(settings):
             else:
                 _set_input(bsdf, ("Base Color",), color)
             shiny.diffuse_color = color
-    glitter = bpy.data.materials.get(GLITTER_MATERIAL)
-    if glitter is not None and glitter.node_tree is not None:
-        glitter.node_tree.nodes["MMDD_Color"].outputs[0].default_value = color
-        glitter.node_tree.nodes["MMDD_Strength"].outputs[0].default_value = settings.particle_glow
+    for name in (GLITTER_MATERIAL, GEM_MATERIAL):  # (1.26: the gems)
+        glitter = bpy.data.materials.get(name)
+        if glitter is not None and glitter.node_tree is not None:
+            glitter.node_tree.nodes["MMDD_Color"].outputs[0].default_value = color
+            glitter.node_tree.nodes["MMDD_Strength"].outputs[0].default_value = settings.particle_glow
     mat = bpy.data.materials.get(PARTICLE_MATERIAL)
     if mat is None or mat.node_tree is None:
         return
@@ -2476,7 +2477,7 @@ def add_surface(mat, style):
                 attribute_type="GEOMETRY", attribute_name=ATTR_REST).outputs["Vector"]
     make = {"VEINS": _veins, "FROST": _frost, "CHAR": _char, "INK": _ink, "STONE": _stone, "GOLD": _gold,
             "SILK": _silk, "CODE": _code_rain, "PAPERCUT": _papercut, "TATTOO": _tattoo, "LED": _led,
-            "EPAPER": _epaper, "CAMO": _camo}[style]
+            "EPAPER": _epaper, "CAMO": _camo, "GEM": _gem}[style]
     fac, shader = make(nt, near, rest, x, y)
     alpha = _alpha_source(nt)
     if alpha is not None:  # cut-outs stay see-through
@@ -2510,11 +2511,12 @@ def update_surface(mat, color, glow_color, cell, metallic=0.0, clarity=0.0, code
         tint.outputs[0].default_value = tuple(glow_color) + (1.0,)
     for name, scale in ((" Cells", 1.0), (" Fine", 2.6), (" Warp", 0.8), (" Patches", 0.7), (" Noise", 0.5),
                         (" Facets", 2.0), (" Feathers", 1.2), (" Cracks", 1.5), (" Grain", 4.0), (" Ripple", 0.9),
-                        (" Fibres", 1.3), (" Paper Tiles", 0.45), (" Tattoo Swirls", 0.45), (" Tattoo Cells", 0.5)):
+                        (" Fibres", 1.3), (" Paper Tiles", 0.45), (" Tattoo Swirls", 0.45), (" Tattoo Cells", 0.5),
+                        (" Gem Facets", 1.4), (" Gem Edges", 1.4), (" Gem Glints", 7.0)):
         node = nodes.get(SURFACE + name)
         if node is not None:
             node.inputs["Scale"].default_value = scale / max(cell, 1e-6)
-    for name in (" Stone Color", " Silk Color", " Paper Color", " Tattoo Color"):
+    for name in (" Stone Color", " Silk Color", " Paper Color", " Tattoo Color", " Gem Color"):
         node = nodes.get(SURFACE + name)
         if node is not None:
             node.outputs[0].default_value = tuple(color) + (1.0,)
@@ -6151,6 +6153,307 @@ def update_echo(style, tint):
             nt.nodes[ECHO_MONO].outputs[0].default_value = 1.0 if style == "MONO" else 0.0
 
 
+# --------------------------------------------------------------------------- 1.26: the rainbow afterimages (afterimage.py)
+
+AFTER_TINT = "MMDD After Tint"  # the one colour (the glow colour) ...
+AFTER_MONO = "MMDD After Mono"  # ... how much it is used instead of the rainbow ...
+AFTER_GLOW = "MMDD After Glow"  # ... and how brightly they glow
+AFTER_OF = "mmd_disperse_after_of"  # on the afterimages' materials: "image|UV map" of the texture whose alpha cuts
+# them out ("" for the one without)
+AFTER_FILL = 0.3  # how much an afterimage glows inside its outline ...
+AFTER_RIM = 1.4  # ... and how much more at it
+AFTER_SATURATION = 0.85
+
+
+def _cover_after(name, image=None, uv=""):
+    """The rainbow afterimages (AFTER, afterimage.py): light in the hue each one carries (mmdd_after_hue, a geometry
+    attribute: round the colour wheel) or in the one colour (AFTER_TINT, as much as AFTER_MONO), faint inside and
+    bright at its outline, as much as its mmdd_after_fade and AFTER_GLOW, and as much as the alpha of `image` (read
+    through UV map `uv`, the active one when "") when there is one: the cut-out texture of the material it stands in
+    for, so only what shows of her glows. It adds light: where they overlap they glow brighter."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    hue = s.attribute("mmdd_after_hue", -1600, 300).outputs[2]  # (cover_nodes.ATTR_AFTER_HUE, ATTR_AFTER_FADE)
+    fade = s.attribute("mmdd_after_fade", -1600, -100).outputs[2]
+    wheel = s.node("ShaderNodeCombineColor", -1400, 300, mode="HSV")
+    s.feed(wheel.inputs[0], hue)
+    wheel.inputs[1].default_value = AFTER_SATURATION
+    wheel.inputs[2].default_value = 1.0
+    tint = s.node("ShaderNodeRGB", -1400, 0)
+    tint.name = AFTER_TINT
+    tint.outputs[0].default_value = (0.3, 1.0, 0.8, 1.0)
+    mono = s.node("ShaderNodeValue", -1400, -150)
+    mono.name = AFTER_MONO
+    mono.outputs[0].default_value = 0.0
+    glow = s.node("ShaderNodeValue", -1400, -300)
+    glow.name = AFTER_GLOW
+    glow.outputs[0].default_value = 1.0
+    color = s.lerp(wheel.outputs[0], tint.outputs[0], mono.outputs[0], -1100, 200)
+    facing = s.node("ShaderNodeLayerWeight", -1400, -500)
+    facing.inputs["Blend"].default_value = 0.5
+    rim = m("POWER", facing.outputs["Facing"], 2.0, x=-1200, y=-500)
+    strength = m("MULTIPLY", m("MULTIPLY", fade, glow.outputs[0], x=-1000, y=-200),
+                 m("MULTIPLY_ADD", rim, AFTER_RIM, AFTER_FILL, x=-1000, y=-500), x=-800, y=-300)
+    if image is not None:
+        tex = s.node("ShaderNodeTexImage", -1400, -800, image=image)
+        if uv:
+            s.feed(tex.inputs["Vector"], s.node("ShaderNodeUVMap", -1600, -800, uv_map=uv).outputs[0])
+        strength = m("MULTIPLY", strength, tex.outputs["Alpha"], x=-600, y=-500)
+    add = s.node("ShaderNodeAddShader", -300, 0)
+    nt.links.new(s.node("ShaderNodeBsdfTransparent", -600, -200).outputs[0], add.inputs[0])
+    nt.links.new(s.emission(color, strength, -600, 100), add.inputs[1])
+    nt.links.new(add.outputs[0], out.inputs["Surface"])
+    _blended(mat)
+    for flag in ("use_transparency_overlap", "show_transparent_back"):  # only the nearest layer of each shows (hair
+        if hasattr(mat, flag):  # cards over cards would add up to a blaze)
+            setattr(mat, flag, False)
+    _no_shadow(mat)
+    _two_sided(mat)
+    mat.diffuse_color = (0.3, 1.0, 0.8, 0.4)
+    mat[AFTER_OF] = "%s|%s" % (image.name, uv) if image is not None else ""
+    return mat
+
+
+def after_material(source):
+    """The material an afterimage shows where she shows `source` (one of her materials): the AFTER light, cut out as
+    `source` is (one material for each cut-out texture, made on first use)."""
+    image, uv = _alpha_image(source)
+    if image is None:
+        return ensure_cover_material("AFTER")
+    key = "%s|%s" % (image.name, uv)
+    found = next((m for m in bpy.data.materials if m.get(AFTER_OF) == key), None)
+    if found is not None:
+        return found
+    base = "%s %s" % (_cover_name("AFTER"), image.name[:24])
+    name, n = base, 1
+    while bpy.data.materials.get(name) is not None:
+        n += 1
+        name = "%s %d" % (base, n)
+    return _cover_after(name, image, uv)
+
+
+def after_materials():
+    """All the afterimages' materials."""
+    return [m for m in bpy.data.materials if m.get(AFTER_OF) is not None]
+
+
+def update_after(style, tint, glow):
+    """The afterimages' colours on all their materials: round the colour wheel (RAINBOW) or `tint` for all (MONO),
+    as bright as `glow`."""
+    for mat in after_materials():
+        nodes = mat.node_tree.nodes if mat.node_tree else {}
+        if nodes.get(AFTER_TINT) is not None:
+            nodes[AFTER_TINT].outputs[0].default_value = tuple(tint[:3]) + (1.0,)
+        if nodes.get(AFTER_MONO) is not None:
+            nodes[AFTER_MONO].outputs[0].default_value = 1.0 if style == "MONO" else 0.0
+        if nodes.get(AFTER_GLOW) is not None:
+            nodes[AFTER_GLOW].outputs[0].default_value = glow
+
+
+# --------------------------------------------------------------------------- 1.26: gems (the crown, the particles)
+
+CROWN_COLOR = "MMDD Crown Color"
+GEM_MATERIAL = "MMD Disperse Gem"
+
+
+def _wheel(s, hue, saturation, x, y):
+    """A colour round the colour wheel (hue 0 .. 1), full value."""
+    n = s.node("ShaderNodeCombineColor", x, y, mode="HSV")
+    s.feed(n.inputs[0], hue)
+    n.inputs[1].default_value = saturation
+    n.inputs[2].default_value = 1.0
+    return n.outputs[0]
+
+
+def _gem_bsdf(s, color, emission, normal, x, y):
+    """A glossy gem: Principled BSDF in `color`, a glassy shine (high specular, a clear coat), lit by `emission`."""
+    n = s.node("ShaderNodeBsdfPrincipled", x, y)
+    s.feed(n.inputs["Base Color"], color)
+    _set_input(n, ("Roughness",), 0.05)
+    _set_input(n, ("Metallic",), 0.15)
+    _set_input(n, ("Specular IOR Level", "Specular"), 1.0)
+    _set_input(n, ("Coat Weight", "Clearcoat"), 1.0)
+    _set_input(n, ("Coat Roughness", "Clearcoat Roughness"), 0.02)
+    s.feed(n.inputs.get("Emission Color") or n.inputs.get("Emission"), emission)
+    _set_input(n, ("Emission Strength",), 1.0)
+    if normal is not None:
+        s.feed(n.inputs["Normal"], normal)
+    return n
+
+
+def _cover_crown(name):
+    """The gem crown (CROWN, crown.py): cut crystal in the crown colour (CROWN_COLOR, set by update_crown): glossy
+    facets (its faces are flat), lit from inside and more at the facets turning away, rainbow fire there, flashing as
+    the object's mmdd_crown_flash says and showing as much as its mmdd_crown_fade."""
+    mat, nt, out = _fresh(name)
+    s = _Nodes(nt)
+    m = s.math
+    color = s.node("ShaderNodeRGB", -1600, 400)
+    color.name = CROWN_COLOR
+    color.outputs[0].default_value = (0.55, 0.85, 1.0, 1.0)
+    flash = s.attribute("mmdd_crown_flash", -1600, 100, "OBJECT").outputs[2]
+    fade = s.attribute("mmdd_crown_fade", -1600, -100, "OBJECT").outputs[2]
+    facing = s.node("ShaderNodeLayerWeight", -1600, -300)
+    facing.inputs["Blend"].default_value = 0.3
+    face = facing.outputs["Facing"]
+    _px, _py, pz = s.split(s.node("ShaderNodeTexCoord", -1800, -600).outputs["Object"], -1600, -600)
+    hue = m("FRACT", m("MULTIPLY_ADD", face, 1.6, m("MULTIPLY", pz, 2.5, x=-1400, y=-600), x=-1200, y=-400),
+            x=-1000, y=-400)
+    fire = s.scaled(_wheel(s, hue, 0.7, -800, -400), m("POWER", face, 1.5, x=-1000, y=-600), -600, -400)
+    inside = m("MULTIPLY_ADD", flash, 6.0, m("MULTIPLY_ADD", face, 1.0, 0.22, x=-1200, y=0), x=-1000, y=100)
+    glow = s.add(s.scaled(color.outputs[0], inside, -800, 200), fire, -400, 0)
+    bsdf = _gem_bsdf(s, color.outputs[0], glow, None, -100, 100)
+    nt.links.new(s.mix_shader(fade, s.node("ShaderNodeBsdfTransparent", -100, -300).outputs[0], bsdf.outputs[0], 400,
+                              0), out.inputs["Surface"])
+    _blended(mat)
+    _no_shadow(mat)
+    mat.diffuse_color = (0.55, 0.85, 1.0, 1.0)
+    return mat
+
+
+def update_crown(color):
+    mat = bpy.data.materials.get(_cover_name("CROWN"))
+    node = mat.node_tree.nodes.get(CROWN_COLOR) if mat is not None and mat.node_tree else None
+    if node is not None:
+        node.outputs[0].default_value = tuple(color[:3]) + (1.0,)
+        mat.diffuse_color = tuple(color[:3]) + (1.0,)
+
+
+def ensure_gem_material():
+    """Gems (the particle shape GEM): cut gems, each its own colour round the wheel (the instance's random number)
+    leaning to the particle colour (MMDD_Color), glossy facets (its faces are flat), lit from inside, rainbow fire at
+    its outline and a glint as a facet turns square to the camera, as bright as MMDD_Strength."""
+    mat, nt, out = _fresh(GEM_MATERIAL)
+    if mat is None:
+        return bpy.data.materials[GEM_MATERIAL]
+    s = _Nodes(nt)
+    m = s.math
+    rnd = s.node("ShaderNodeObjectInfo", -1600, 0).outputs["Random"]
+    tint = s.node("ShaderNodeRGB", -1600, 400)
+    tint.name = tint.label = "MMDD_Color"
+    strength = s.node("ShaderNodeValue", -1600, -200)
+    strength.name = strength.label = "MMDD_Strength"
+    color = s.lerp(tint.outputs[0], _wheel(s, rnd, 0.75, -1400, 100), 0.6, -1200, 300)
+    facing = s.node("ShaderNodeLayerWeight", -1600, -400)
+    facing.inputs["Blend"].default_value = 0.3
+    face = facing.outputs["Facing"]
+    square = s.smooth(m("SUBTRACT", 1.0, face, x=-1400, y=-500), 0.8, 1.0, -1200, -500)
+    fire = s.scaled(_wheel(s, m("FRACT", m("MULTIPLY_ADD", face, 1.5, m("MULTIPLY", rnd, 3.0, x=-1400, y=-800),
+                                           x=-1200, y=-700), x=-1000, y=-700), 0.7, -800, -700),
+                    m("POWER", face, 2.0, x=-1000, y=-900), -600, -700)
+    lit = m("MULTIPLY", m("MULTIPLY_ADD", square, 3.0, 0.4, x=-1000, y=-500), strength.outputs[0], x=-800, y=-400)
+    glow = s.add(s.scaled(color, lit, -600, 0), s.scaled(fire, 0.8, -400, -700), -300, -200)
+    nt.links.new(_gem_bsdf(s, color, glow, None, 0, 0).outputs[0], out.inputs["Surface"])
+    mat.diffuse_color = (0.7, 0.85, 1.0, 1.0)
+    return mat
+
+
+GEM_TILT = 0.35  # turn to gem: how far each facet tilts the normal (its own way) ...
+GEM_EDGE = 0.035  # ... how wide the light along the facets' edges is (a share of a facet) ...
+GEM_GLINTS = 0.07  # ... and the share of the small cells that glint
+
+
+def _gem(nt, near, rest, x, y):
+    """The surface turns to cut gem in patches (Pokémon's Terastallization): flat facets (Voronoi cells of the rest
+    position, each tilting the normal its own way), glossy, in the surface colour shading a little from facet to
+    facet, lit from inside along the facets' edges, rainbow fire where the facets turn away from the camera and glints
+    twinkling over it (SURFACE + " Gem Color" is the colour, " Gem Facets" / " Gem Edges" / " Gem Glints" the cells,
+    sized by update_surface). Returns (factor, shader)."""
+    fac = _creeping(nt, near, rest, 0.3, 0.65, x, y + 400)
+
+    def n(idname, name, xx, yy, **props):
+        return _new(nt, idname, "%s Gem %s" % (SURFACE, name), xx, yy, **props)
+
+    def m(op, a, b=None, c=None, xx=0, yy=0, clamp=False):
+        return _math(nt, SURFACE + " Gem", op, a, b, c, x=xx, y=yy, clamp=clamp)
+
+    def v(op, a, b=None, scale=None, xx=0, yy=0):
+        node = n("ShaderNodeVectorMath", "%s %d %d" % (op, xx, yy), xx, yy, operation=op)
+        _feed(nt, node.inputs[0], a)
+        if b is not None:
+            _feed(nt, node.inputs[1], b)
+        if scale is not None:
+            _feed(nt, node.inputs[3], scale)
+        return node.outputs["Vector"]
+
+    facets = n("ShaderNodeTexVoronoi", "Facets", x - 2100, y - 100, voronoi_dimensions="3D", feature="F1")
+    nt.links.new(rest, facets.inputs["Vector"])
+    edges = n("ShaderNodeTexVoronoi", "Edges", x - 2100, y - 400, voronoi_dimensions="3D",
+              feature="DISTANCE_TO_EDGE")
+    nt.links.new(rest, edges.inputs["Vector"])
+    glints = n("ShaderNodeTexVoronoi", "Glints", x - 2100, y - 1100, voronoi_dimensions="3D", feature="F1")
+    nt.links.new(rest, glints.inputs["Vector"])
+    cell = facets.outputs["Color"]
+    split = n("ShaderNodeSeparateXYZ", "Cell", x - 1900, y - 100)
+    nt.links.new(cell, split.inputs[0])
+    cr, cg, cb = split.outputs[0], split.outputs[1], split.outputs[2]
+    # each facet tilts the normal its own way
+    geometry = n("ShaderNodeNewGeometry", "Geometry", x - 1900, y - 700)
+    tilt = v("SCALE", v("SUBTRACT", cell, (0.5, 0.5, 0.5), xx=x - 1700, yy=y - 600), scale=2.0 * GEM_TILT,
+             xx=x - 1500, yy=y - 600)
+    normal = v("NORMALIZE", v("ADD", geometry.outputs["Normal"], tilt, xx=x - 1300, yy=y - 700), xx=x - 1100,
+               yy=y - 700)
+    # the colour, a little different from facet to facet
+    color = n("ShaderNodeRGB", "Color", x - 1500, y + 200)
+    color.outputs[0].default_value = (0.55, 0.85, 1.0, 1.0)
+    shade = n("ShaderNodeHueSaturation", "Shade", x - 1100, y + 100)
+    _feed(nt, shade.inputs["Hue"], m("MULTIPLY_ADD", cg, 0.3, 0.35, xx=x - 1300, yy=y + 50))
+    shade.inputs["Saturation"].default_value = 1.5
+    _feed(nt, shade.inputs["Value"], m("MULTIPLY_ADD", cr, 0.75, 0.4, xx=x - 1300, yy=y - 100))
+    nt.links.new(color.outputs[0], shade.inputs["Color"])
+    # rainbow fire where a facet turns away from the camera
+    facing = n("ShaderNodeLayerWeight", "Facing", x - 900, y - 700)
+    facing.inputs["Blend"].default_value = 0.35
+    nt.links.new(normal, facing.inputs["Normal"])
+    face = facing.outputs["Facing"]
+    wheel = n("ShaderNodeCombineColor", "Fire Color", x - 500, y - 800, mode="HSV")
+    _feed(nt, wheel.inputs[0], m("FRACT", m("MULTIPLY_ADD", face, 1.8, cb, xx=x - 900, yy=y - 900),
+                                 xx=x - 700, yy=y - 900))
+    wheel.inputs[1].default_value = 0.65
+    wheel.inputs[2].default_value = 1.0
+    fire = v("SCALE", wheel.outputs[0], scale=m("MULTIPLY", m("POWER", face, 2.0, xx=x - 700, yy=y - 1000), 1.4,
+                                                xx=x - 500, yy=y - 1000), xx=x - 300, yy=y - 800)
+    # light inside, brighter along the facets' edges
+    line = m("SUBTRACT", 1.0, _smooth_node(nt, SURFACE + " Gem Line", edges.outputs["Distance"], 0.0, GEM_EDGE,
+                                           x - 1700, y - 400), xx=x - 1500, yy=y - 400)
+    inside = v("SCALE", shade.outputs[0], scale=m("MULTIPLY_ADD", line, 0.35, 0.05, xx=x - 1100, yy=y - 400),
+               xx=x - 900, yy=y - 300)
+    # glints twinkling: a few of the small cells, a sharp dot each, each on its own beat
+    gr = n("ShaderNodeSeparateXYZ", "Glint Cell", x - 1900, y - 1200)
+    nt.links.new(glints.outputs["Color"], gr.inputs[0])
+    picked = m("GREATER_THAN", gr.outputs[0], 1.0 - GEM_GLINTS, xx=x - 1700, yy=y - 1200)
+    dot = m("POWER", m("SUBTRACT", 1.0, m("DIVIDE", glints.outputs["Distance"], 0.22, xx=x - 1900, yy=y - 1000,
+                                          clamp=True), xx=x - 1700, yy=y - 1000), 4.0, xx=x - 1500, yy=y - 1000)
+    time = _camo_time(nt, SURFACE + " Gem Time", x - 1900, y - 1400)
+    beat = m("POWER", m("MULTIPLY_ADD", m("SINE", m("MULTIPLY_ADD", time, 0.3, m(
+        "MULTIPLY", gr.outputs[1], 6.283, xx=x - 1700, yy=y - 1400), xx=x - 1500, yy=y - 1400), xx=x - 1300,
+        yy=y - 1400), 0.5, 0.5, xx=x - 1100, yy=y - 1400), 3.0, xx=x - 900, yy=y - 1400)
+    glint = m("MULTIPLY", m("MULTIPLY", dot, picked, xx=x - 1300, yy=y - 1100), m("MULTIPLY", beat, 8.0, xx=x - 700,
+                                                                                yy=y - 1400), xx=x - 500, yy=y - 1200)
+    # a facet turned square to the camera flashes white, as a cut gem's facets catch the light one by one
+    square = _smooth_node(nt, SURFACE + " Gem Square", m("SUBTRACT", 1.0, face, xx=x - 700, yy=y - 1600), 0.975,
+                          0.995, x - 500, y - 1600)  # (1 - Facing = |cos|^0.7: within about 12 degrees)
+    white = m("ADD", glint, m("MULTIPLY", square, 1.1, xx=x - 300, yy=y - 1600), xx=x - 300, yy=y - 1400)
+    glow = v("ADD", v("ADD", inside, fire, xx=x - 100, yy=y - 500), v("SCALE", (1.0, 1.0, 1.0), scale=white,
+                                                                       xx=x - 100, yy=y - 1200), xx=x + 100,
+             yy=y - 700)
+    bsdf = n("ShaderNodeBsdfPrincipled", "BSDF", x - 100, y - 200)
+    nt.links.new(shade.outputs[0], bsdf.inputs["Base Color"])
+    _set_input(bsdf, ("Roughness",), 0.04)
+    _set_input(bsdf, ("Metallic",), 0.15)
+    _set_input(bsdf, ("Specular IOR Level", "Specular"), 0.7)
+    _set_input(bsdf, ("Coat Weight", "Clearcoat"), 0.6)
+    _set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.02)
+    nt.links.new(normal, bsdf.inputs["Normal"])
+    coat = bsdf.inputs.get("Coat Normal") or bsdf.inputs.get("Clearcoat Normal")
+    if coat is not None:  # (the coat's highlights on the facets too)
+        nt.links.new(normal, coat)
+    nt.links.new(glow, bsdf.inputs.get("Emission Color") or bsdf.inputs.get("Emission"))
+    _set_input(bsdf, ("Emission Strength",), 1.0)
+    return fac, bsdf
+
+
 def _cover_eyelid(name):
     """Eyelids closing over the picture (EYELID, domain.py's blink): black from the top and the bottom down to an
     edge that bows in the middle, as far as the object's mmdd_lid says (0 open .. 1 shut), on a sheet across the
@@ -6433,7 +6736,8 @@ _COVER_MAKERS = {"TALISMAN": _cover_talisman, "ASH": _cover_ash, "PLUMAGE": _cov
                  "POLAROID": _cover_polaroid, "EARTH": _cover_earth, "EARTH_CLOUDS": _cover_earth_clouds,
                  "EARTH_AIR": _cover_earth_air, "SPACE": _cover_space, "CLOUD_SHEET": _cover_cloud_sheet,
                  "IRIS": _cover_iris, "ECHO": _cover_echo,
-                 "EYELID": _cover_eyelid, "TITLE": _cover_title, "SEAL_FRAME": _cover_seal_frame}
+                 "EYELID": _cover_eyelid, "TITLE": _cover_title, "SEAL_FRAME": _cover_seal_frame,
+                 "AFTER": _cover_after, "CROWN": _cover_crown}
 
 
 # --------------------------------------------------------------------------- 1.14: the print (printer.py)

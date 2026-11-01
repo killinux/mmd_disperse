@@ -86,7 +86,7 @@ def find_armature(ob):
 HELPERS = ("mmd_disperse_picture_front", "mmd_disperse_glint", "mmd_disperse_finish", "mmd_disperse_light",
            "mmd_disperse_mist", "mmd_disperse_replay", "mmd_disperse_shell", "mmd_disperse_spirit",
            "mmd_disperse_peel", "mmd_disperse_fumble", "mmd_disperse_talisman",
-           "mmd_disperse_plumage")  # (twins of ours that render)
+           "mmd_disperse_plumage", "mmd_disperse_after", "mmd_disperse_crown")  # (twins of ours that render)
 
 
 def resolve(ob):

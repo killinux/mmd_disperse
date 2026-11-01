@@ -797,6 +797,40 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                  description="How hard the gust blows")
     wind_time: FloatProperty(name="Wind Time", default=2.0, min=0.2, soft_max=8.0, update=_sync,
                              description="Seconds the gust takes to die away after the big moment")
+    # --- 1.26: the rainbow afterimages (afterimage.py)
+    after_enable: BoolProperty(name="Rainbow Afterimages", default=False, update=_sync,
+                               description="Round the big moment she leaves a trail of afterimages behind her: one "
+                                           "every few frames stays where she was, glowing in a colour a step further "
+                                           "round the colour wheel than the one before, and fades as it drifts back; "
+                                           "the old outfit's before the moment, the new outfit's after it (彩虹残影: "
+                                           "Cyberpunk: Edgerunners' Sandevistan)")
+    after_style: EnumProperty(
+        name="Afterimage Colors",
+        items=(("RAINBOW", "Rainbow", "Each afterimage a step further round the colour wheel"),
+               ("MONO", "Glow Color", "All of them in the glow colour")),
+        default="RAINBOW", update=_sync)
+    after_count: IntProperty(name="Afterimages", default=8, min=2, max=24, update=_sync,
+                             description="How many afterimages show at once (the oldest is gone as a new one comes)")
+    after_gap: IntProperty(name="Every", default=2, min=1, max=12, update=_sync,
+                           description="Frames from one afterimage to the next")
+    after_lead: FloatProperty(name="Trail Before", default=1.0, min=0.0, soft_max=6.0, update=_sync,
+                              description="Seconds before the big moment the trail starts")
+    after_tail: FloatProperty(name="Trail After", default=0.6, min=0.0, soft_max=6.0, update=_sync,
+                              description="Seconds after the big moment it goes on (in the new outfit)")
+    after_drift: FloatProperty(name="Drift", default=0.5, min=0.0, soft_max=3.0, update=_sync,
+                               description="How fast the afterimages drift back from the camera and to the side she "
+                                           "came from as they age, in her heights a second (0: each stays just where "
+                                           "she was)")
+    after_glow: FloatProperty(name="Afterimage Glow", default=1.0, min=0.0, soft_max=5.0, update=_sync,
+                              description="How brightly the afterimages glow")
+    # --- 1.26: the gem crown (crown.py)
+    crown_enable: BoolProperty(name="Gem Crown", default=False, update=_sync,
+                               description="A crown of crystal grows over her head on the way to the big moment, "
+                                           "flashes at it and floats over the new outfit for Crown Time, then bursts "
+                                           "(宝石冠: Pokémon's Tera Jewel; in the surface color with Turn to Gem, "
+                                           "else the glow color)")
+    crown_time: FloatProperty(name="Crown Time", default=2.0, min=0.0, soft_max=10.0, update=_sync,
+                              description="Seconds the crown floats over her after the big moment")
     # --- 1.20: the fumble (fumble.py)
     fumble_enable: BoolProperty(name="Fumble", default=False, update=_sync,
                                 description="A little after she has changed, a few loose parts of the new outfit come "
@@ -1262,7 +1296,11 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                ("CAMO", "Optical Camouflage", "The old outfit turns invisible in patches ahead of the edge: clear "
                                               "glass bending what is behind it, a web of hexagons glinting on it in "
                                               "the glow color (光学迷彩: the Predator, Ghost in the Shell; pair it "
-                                              "with the Optical Camouflage veil)")),
+                                              "with the Optical Camouflage veil)"),
+               ("GEM", "Turn to Gem", "The old outfit turns to cut gem in patches ahead of the edge: flat facets "
+                                      "in the surface color, lit from inside along their edges, rainbow fire and "
+                                      "glints twinkling on it (宝石化: Pokémon's Terastallization; pair it with "
+                                      "Gems, All at Once and the Gem Crown)")),
         default="NONE", update=_sync)
     surface_width: _distance("Surface Reach", "How far ahead of the edge the old outfit starts to change", 3.0)
     surface_color: FloatVectorProperty(name="Surface Color", subtype="COLOR", size=3, min=0.0, max=1.0,
@@ -1506,7 +1544,9 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                # (numbered: files saved before keep Custom Object, which came after Paper Birds)
                ("GLITTER", "Glitter", "Flat sequins that tumble and flash in a rainbow sheen as they turn to the "
                                       "camera (KPop Demon Hunters' glitter)", 17),
-               ("OBJECT", "Custom Object", "Copies of any mesh object", 16)),
+               ("OBJECT", "Custom Object", "Copies of any mesh object", 16),
+               ("GEM", "Gems", "Cut gems, each its own colour round the wheel leaning to the particle color, that "
+                               "glint as they tumble (with Turn to Gem)", 18)),
         default="NONE", update=_sync)
     particle_object: PointerProperty(name="Particle Object", type=bpy.types.Object, poll=_mesh_object,
                                      update=_sync, description="Mesh used for every particle")

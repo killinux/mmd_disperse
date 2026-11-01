@@ -31,9 +31,11 @@ PEBBLE = "MMD Disperse Pebble"
 PAPER_BIRD = "MMD Disperse Paper Bird"
 GLITTER = "MMD Disperse Glitter"
 BLOSSOM = "MMD Disperse Blossom"  # 1.24 (plumage.py): the flowers blooming on her
+GEM = "MMD Disperse Gem"  # 1.26: cut gems (turn to gem)
 NAMES = {"PETAL": PETAL, "BUTTERFLY": BUTTERFLY, "STAR": STAR, "CUBE": CUBE, "COIN": COIN, "SHARD": SHARD,
          "EMBER": EMBER, "CRYSTAL": CRYSTAL, "NOTE": NOTE, "CARD": CARD, "FEATHER": FEATHER, "BAT": BAT, "INK": INK,
-         "GLYPH": GLYPH, "PEBBLE": PEBBLE, "PAPER_BIRD": PAPER_BIRD, "GLITTER": GLITTER, "BLOSSOM": BLOSSOM}
+         "GLYPH": GLYPH, "PEBBLE": PEBBLE, "PAPER_BIRD": PAPER_BIRD, "GLITTER": GLITTER, "BLOSSOM": BLOSSOM,
+         "GEM": GEM}
 FLAPPING = ("BUTTERFLY", "BAT", "PAPER_BIRD")  # shapes with two wings in the XY plane (x > 0, x < 0) that flap
 UPRIGHT = ("NOTE", "GLYPH")  # shapes that stand facing the front (-Y) and only sway
 VARIANTS = ("GLYPH",)  # shapes made of several (ATTR_VARIANT on their faces), one shown at a time
@@ -368,6 +370,24 @@ def _glyphs():
     return verts, faces, [(1.0, 0.5)] * len(verts), variants
 
 
+def _gem(sides=8):
+    """A cut gem 1 unit across: a flat table on top, the crown sloping down to the girdle, the pavilion down to a
+    point (flat facets, faces out)."""
+    verts = []
+    for radius, z in ((0.28, 0.2), (0.5, 0.02)):
+        for i in range(sides):
+            angle = math.pi * 2.0 * i / sides
+            verts.append((radius * math.cos(angle), radius * math.sin(angle), z))
+    verts.append((0.0, 0.0, -0.48))
+    culet = 2 * sides
+    faces = [tuple(range(sides))]
+    for i in range(sides):
+        j = (i + 1) % sides
+        faces.append((sides + i, sides + j, j, i))
+        faces.append((sides + j, sides + i, culet))
+    return verts, faces, [(1.0, 0.5)] * len(verts)
+
+
 def _pebble():
     """Pebble about 1 unit across: an icosahedron with its corners pushed in and out a little, flattened."""
     t = (1.0 + math.sqrt(5.0)) / 2.0
@@ -385,7 +405,7 @@ def _pebble():
 _SHAPES = {"PETAL": _petal, "BUTTERFLY": _butterfly, "STAR": _star, "CUBE": _cube, "COIN": _coin, "SHARD": _shard,
            "EMBER": _ember, "CRYSTAL": _crystal, "NOTE": _note, "CARD": _card, "FEATHER": _feather, "BAT": _bat,
            "INK": _ink_drop, "GLYPH": _glyphs, "PEBBLE": _pebble, "PAPER_BIRD": _paper_bird, "GLITTER": _sequin,
-           "BLOSSOM": _blossom}
+           "BLOSSOM": _blossom, "GEM": _gem}
 
 
 def _material(kind):
@@ -405,6 +425,8 @@ def _material(kind):
         return materials.ensure_paper_material()
     if kind == "GLITTER":
         return materials.ensure_glitter_material()
+    if kind == "GEM":
+        return materials.ensure_gem_material()
     return materials.ensure_particle_material()
 
 
@@ -457,7 +479,7 @@ def remove_assets():
                  materials.BAT_MATERIAL, materials.INK_MATERIAL, materials.SMOKE_MATERIAL, materials.DUST_MATERIAL,
                  materials.PEBBLE_MATERIAL, materials.ARC_MATERIAL, materials.BEAM_MATERIAL, materials.FLAME_MATERIAL,
                  materials.LOTUS_MATERIAL, materials.SOUL_MATERIAL, materials.SHOCK_MATERIAL,
-                 materials.GLITTER_MATERIAL):
+                 materials.GLITTER_MATERIAL, materials.GEM_MATERIAL):
         mat = bpy.data.materials.get(name)
         if mat is not None and mat.users == 0:
             bpy.data.materials.remove(mat)

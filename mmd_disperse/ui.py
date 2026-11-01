@@ -804,6 +804,12 @@ class MMDDISPERSE_PT_surface(_Panel, bpy.types.Panel):
             sub = col.column(align=True)
             sub.active = s.silk_threads
             sub.prop(s, "thread_turns")
+        elif s.old_surface == "GEM":  # (1.26)
+            col = layout.column(align=True)
+            col.prop(s, "crown_enable")
+            sub = col.column(align=True)
+            sub.active = s.crown_enable
+            sub.prop(s, "crown_time")
 
 
 class MMDDISPERSE_PT_tint(_Panel, bpy.types.Panel):
@@ -1190,6 +1196,32 @@ class MMDDISPERSE_PT_echo(_Panel, bpy.types.Panel):
         col.prop(s, "echo_length")
 
 
+class MMDDISPERSE_PT_afterimage(_Panel, bpy.types.Panel):
+    bl_label = "Rainbow Afterimages"
+    bl_parent_id = "MMDDISPERSE_PT_main"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw_header(self, context):
+        self.layout.prop(context.scene.mmd_disperse, "after_enable", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        s = context.scene.mmd_disperse
+        layout.active = s.after_enable
+        layout.prop(s, "after_style")
+        col = layout.column(align=True)
+        col.prop(s, "after_count")
+        col.prop(s, "after_gap")
+        col = layout.column(align=True)
+        col.prop(s, "after_lead")
+        col.prop(s, "after_tail")
+        col = layout.column(align=True)
+        col.prop(s, "after_drift")
+        col.prop(s, "after_glow")
+
+
 class MMDDISPERSE_PT_hologram(_Panel, bpy.types.Panel):
     bl_label = "Hologram / Veil"
     bl_parent_id = "MMDDISPERSE_PT_main"
@@ -1459,6 +1491,7 @@ classes = (
     MMDDISPERSE_PT_shadowplay,
     MMDDISPERSE_PT_mirror,
     MMDDISPERSE_PT_echo,
+    MMDDISPERSE_PT_afterimage,
     MMDDISPERSE_PT_title,
     MMDDISPERSE_PT_sweat,
     MMDDISPERSE_PT_peel,

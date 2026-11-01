@@ -4605,6 +4605,217 @@ def run():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.25 checks")
 
+    # --- 1.26: the rainbow afterimages; turn to gem (the surface, the gems, the crown)
+    from mmd_disperse import afterimage, crown  # noqa: E402  (particles: imported at the top)
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "exit_timing", "easing", "frame_start", "frame_end", "edge_glow",
+        "beat_sync", "trigger", "finale", "time_warp", "particles", "particle_count", "old_surface", "surface_color",
+        "after_enable", "after_style", "after_count", "after_gap", "after_lead", "after_tail", "after_drift",
+        "after_glow", "crown_enable", "crown_time")}
+    fps = scene.render.fps / scene.render.fps_base
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.path, s.entrance, s.exit_style, s.easing, s.edge_glow = "SPHERE", "SWAP", "SHRINK", "LINEAR", False
+    s.frame_start, s.frame_end = 20, 80
+    made_camera_ = None
+    if scene.camera is None:  # (the afterimages drift away from the camera)
+        made_camera_ = bpy.data.objects.new("Test Camera 1.26", bpy.data.cameras.new("Test Camera 1.26"))
+        scene.collection.objects.link(made_camera_)
+        made_camera_.location = (0.0, -3.0 * height, 0.55 * height)
+        made_camera_.rotation_euler = (1.5708, 0.0, 0.0)
+        scene.camera = made_camera_
+    s.after_enable, s.after_style, s.after_count, s.after_gap = True, "RAINBOW", 6, 2
+    s.after_lead, s.after_tail, s.after_drift = 0.8, 0.5, 0.0
+    # (her left arm raised, so the new outfit, following the old armature, is not in its rest pose either)
+    lifted_ = base.armature.pose.bones.get("腕.L") or base.armature.pose.bones.get("左腕")
+    lift_rest_ = lifted_.matrix_basis.copy() if lifted_ is not None else None
+    if lifted_ is not None:
+        lifted_.matrix_basis = Matrix.Rotation(math.radians(60.0), 4, "X")
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build with the rainbow afterimages")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    twins_ = afterimage.objects(s.mask, "TWIN")
+    records_ = afterimage.objects(s.mask, "RECORDING")
+    old_twins_ = [o_ for o_ in twins_ if o_.get(afterimage.P_SOURCE) in {m_.name for m_ in base.meshes}]
+    new_twins_ = [o_ for o_ in twins_ if o_.get(afterimage.P_SOURCE) in {m_.name for m_ in target.meshes}]
+    first_ = int(round(moment - s.after_lead * fps))
+    snaps_ = [first_ + 2 * k_ for k_ in range(int((moment + s.after_tail * fps - first_) // 2) + 1)]
+    old_snaps_ = [f_ for f_ in snaps_ if f_ < moment]
+    sizes_ok_ = all(len(r_.data.vertices) == len(bpy.data.objects[r_[afterimage.P_SOURCE]].data.vertices) * (
+        len(old_snaps_) if r_[afterimage.P_SOURCE] in {m_.name for m_ in base.meshes}
+        else len(snaps_) - len(old_snaps_)) for r_ in records_)
+    check(old_twins_ and new_twins_ and len(records_) == len(twins_) and sizes_ok_
+          and all(all(sl_.link == "OBJECT" and sl_.material is not None
+                      and sl_.material.get(materials.AFTER_OF) is not None for sl_ in o_.material_slots)
+                  for o_ in twins_),
+          "afterimages: a twin and a recording for each mesh of both outfits (%d, %d; %d + %d snapshots), in the "
+          "afterimages' own materials" % (len(old_twins_), len(new_twins_), len(old_snaps_),
+                                         len(snaps_) - len(old_snaps_)))
+
+    def showing(objs_, f_):
+        """How many copies of its mesh each of `objs_` shows at frame `f_`."""
+        scene.frame_set(int(round(f_)))
+        return [round(evaluated_counts(o_) / max(len(o_.data.vertices), 1), 2) for o_ in objs_]
+
+    big_old_ = max(old_twins_, key=lambda o_: len(o_.data.vertices))
+    big_new_ = max(new_twins_, key=lambda o_: len(o_.data.vertices))
+    counts_ = {"before": showing([big_old_, big_new_], first_ - 4), "old": showing([big_old_, big_new_], moment - 4),
+               "new": showing([big_old_, big_new_], moment + 6), "later": showing([big_old_, big_new_],
+                                                                                  moment + 2 * 6 + 3)}
+    check(counts_["before"] == [0.0, 0.0] and counts_["old"][0] == 6.0 and counts_["old"][1] == 0.0
+          and 0.0 < counts_["new"][0] < 6.0 and counts_["new"][1] >= 3.0 and counts_["later"][0] == 0.0,
+          "afterimages: none before the trail, six of the old outfit before the moment, the new outfit's after it "
+          "while the old ones go (%s)" % counts_)
+    # each copy is a snapshot: the newest one at a frame is the recording of the last snapshot taken by then
+    f_ = int(round(moment - 4))
+    scene.frame_set(f_)
+    copy_ = evaluated_values(big_old_, "mmdd_copy")
+    hue_ = evaluated_values(big_old_, "mmdd_after_hue")
+    fade_ = evaluated_values(big_old_, "mmdd_after_fade")
+    pts_ = evaluated_positions(big_old_)
+    rec_ = next(r_ for r_ in records_ if r_[afterimage.P_SOURCE] == big_old_[afterimage.P_SOURCE])
+    n_ = len(big_old_.data.vertices)
+    rec_co_ = np.zeros(len(rec_.data.vertices) * 3, dtype=np.float32)
+    rec_.data.vertices.foreach_get("co", rec_co_)
+    rec_co_ = rec_co_.reshape(-1, 3)
+    taken_ = (f_ - first_) // 2  # the newest snapshot taken by now
+    mod_ = next(m_ for m_ in big_old_.modifiers if m_.type == "NODES")
+    push_ = np.array(mod_[input_identifiers(mod_.node_group)["Push"]][:], dtype=np.float32)
+    newest_ = pts_[copy_ == 0] if copy_ is not None else np.zeros((0, 3))
+    exact_ = (len(newest_) == n_ and float(np.abs(newest_ - push_ - rec_co_[taken_ * n_:(taken_ + 1) * n_]).max())
+              < 1e-3 * height and 0.03 * height < float(np.linalg.norm(push_)) < 0.05 * height)
+    # ... and the recording is where she was then (only the skinning: the effect's modifiers off)
+    scene.frame_set(old_snaps_[taken_])
+    her_ = skinned(bpy.data.objects[big_old_[afterimage.P_SOURCE]]) @ np.array(
+        bpy.data.objects[big_old_[afterimage.P_SOURCE]].matrix_world)[:3, :3].T + np.array(
+        bpy.data.objects[big_old_[afterimage.P_SOURCE]].matrix_world)[:3, 3]
+    where_ = float(np.median(np.linalg.norm(her_ - rec_co_[taken_ * n_:(taken_ + 1) * n_], axis=1))) \
+        if len(her_) == n_ else -1.0
+    olds_ = sorted({int(c_) for c_ in copy_}) if copy_ is not None else []
+    by_copy_ = [(float(hue_[copy_ == c_].mean()), float(fade_[copy_ == c_].mean())) for c_ in olds_] \
+        if hue_ is not None and fade_ is not None else []
+    check(exact_ and 0.0 <= where_ < 0.01 * height and len(by_copy_) == 6
+          and len({round(h_, 3) for h_, _f in by_copy_}) == 6
+          and all(a_[1] >= b_[1] - 1e-4 for a_, b_ in zip(by_copy_[2:], by_copy_[3:])),
+          "afterimages: each copy is its snapshot (the newest exactly the recording pushed back %s), recorded where "
+          "she was (median %.4f off), each its own hue, the older the fainter (%s)"
+          % (exact_, where_, [(round(h_, 3), round(fd_, 2)) for h_, fd_ in by_copy_]))
+    # the new outfit's are where it was too (it follows the old armature: that is kept while the dance is played)
+    rec_new_ = next(r_ for r_ in records_ if r_[afterimage.P_SOURCE] == big_new_[afterimage.P_SOURCE])
+    src_new_ = bpy.data.objects[big_new_[afterimage.P_SOURCE]]
+    n_new_ = len(src_new_.data.vertices)
+    new_co_ = np.zeros(len(rec_new_.data.vertices) * 3, dtype=np.float32)
+    rec_new_.data.vertices.foreach_get("co", new_co_)
+    scene.frame_set(snaps_[len(old_snaps_)])
+    mw_new_ = np.array(src_new_.matrix_world)
+    her_new_ = skinned(src_new_) @ mw_new_[:3, :3].T + mw_new_[:3, 3]
+    group_ = src_new_.vertex_groups.get(lifted_.name) if lifted_ is not None else None
+    arm_ = np.array([v_.index for v_ in src_new_.data.vertices
+                     if group_ is not None and any(g_.group == group_.index and g_.weight > 0.5 for g_ in v_.groups)],
+                    dtype=np.int64)
+    off_ = np.linalg.norm(her_new_ - new_co_.reshape(-1, 3)[:n_new_], axis=1) if len(her_new_) == n_new_ else None
+    where_new_ = (float(off_[arm_].max()) if len(arm_) else float(np.median(off_))) if off_ is not None else -1.0
+    check(0.0 <= where_new_ < 0.01 * height,
+          "afterimages: the new outfit's first snapshot is where it was then (%s %.4f off; her left arm raised: %s)"
+          % ("its raised arm at most" if len(arm_) else "median", where_new_, lifted_ is not None))
+    # (a new outfit with bones of its own copies the old armature's pose through constraints: those must stay on while
+    # the dance is recorded; the rigid bodies' pull on the bones goes off)
+    pb_ = target.armature.pose.bones[0]
+    follow_ = pb_.constraints.new("COPY_TRANSFORMS")
+    follow_.target = base.armature
+    pull_ = pb_.constraints.new("DAMPED_TRACK")
+    puller_ = bpy.data.objects.new("Test Rigid Body 1.26", None)
+    scene.collection.objects.link(puller_)
+    pull_.target = puller_
+    held_ = afterimage._physics(scene, target.armature)
+    check(follow_ not in held_ and pull_ in held_,
+          "afterimages: while recording, the bones following the old armature keep following, the rigid bodies' pull "
+          "is off")
+    pb_.constraints.remove(follow_)
+    pb_.constraints.remove(pull_)
+    bpy.data.objects.remove(puller_)
+    # drifting: an older copy has drifted further, Drift heights a second
+    s.after_drift = 1.0
+    scene.frame_set(f_)
+    copy_ = evaluated_values(big_old_, "mmdd_copy")
+    pts_ = evaluated_positions(big_old_)
+    drifted_ = []
+    for c_ in (0, 3):
+        snap_ = taken_ - c_
+        got_ = pts_[copy_ == c_] if copy_ is not None else np.zeros((0, 3))
+        drifted_.append(float(np.linalg.norm((got_ - push_ - rec_co_[snap_ * n_:(snap_ + 1) * n_]).mean(axis=0)))
+                        if len(got_) == n_ else -1.0)
+    ages_ = [f_ - (first_ + 2 * (taken_ - c_)) for c_ in (0, 3)]
+    pace_ = 1.0 * height / fps
+    check(all(d_ >= 0.0 for d_ in drifted_) and abs(drifted_[0] - ages_[0] * pace_) < 0.02 * height
+          and abs(drifted_[1] - ages_[1] * pace_) < 0.02 * height,
+          "afterimages drift %s for ages %s (Drift 1: %.4f a frame)" % ([round(d_, 3) for d_ in drifted_], ages_,
+                                                                        pace_))
+    s.after_style = "MONO"
+    mono_ = [m_.node_tree.nodes[materials.AFTER_MONO].outputs[0].default_value for m_ in materials.after_materials()]
+    check(mono_ and all(v_ == 1.0 for v_ in mono_), "afterimages in the glow colour: every material in the one colour")
+    check(not draw_panels(bpy.context), "panels draw with the afterimages")
+    s.after_enable = False
+    check(not afterimage.objects(s.mask) and not materials.after_materials(), "afterimages off: twins, recordings and "
+                                                                             "materials gone")
+    if lifted_ is not None:
+        lifted_.matrix_basis = lift_rest_
+
+    # turn to gem: the surface, the gems flying off, the crown over her head
+    s.old_surface, s.surface_color, s.exit_style, s.exit_timing = "GEM", (0.5, 0.82, 1.0), "FRAGMENTS", "AT_ONCE"
+    s.particles, s.particle_count, s.crown_enable, s.crown_time = "GEM", 300, True, 1.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build turning to gem")
+    moment = effect._frame_at(s.mask, effect._finale_start(s, float(s.mask.get(effect.P_WAVE, 0.0)), s.mask))
+    gem_mats_ = {sl_.material for m_ in base.meshes for sl_ in m_.material_slots if sl_.material is not None}
+    gemmed_ = [m_ for m_ in gem_mats_ if m_.get(materials.P_SURFACE) == "GEM"
+               and m_.node_tree.nodes.get(materials.SURFACE + " Gem Facets") is not None]
+    asset_ = bpy.data.objects.get(particles.GEM)
+    check(gemmed_ and asset_ is not None and asset_.data.materials[0].name == materials.GEM_MATERIAL
+          and all(not p_.use_smooth for p_ in asset_.data.polygons),
+          "turn to gem: the old outfit's materials turn to cut gem (%d), the gems are flat-faceted in their own "
+          "material" % len(gemmed_))
+    released_ = 0
+    for f_ in (3, 8, 15):
+        scene.frame_set(int(moment) + f_)
+        released_ = max([released_] + [instance_count(m_) for m_ in base.meshes])
+    check(released_ > 0, "gems fly off her at the moment (%d)" % released_)
+    crowns_ = crown.objects(s.mask)
+    head_ = crown._head(base.armature)
+
+    def crowned(f_):
+        scene.frame_set(int(round(f_)))
+        ob_ = crowns_[0].evaluated_get(bpy.context.evaluated_depsgraph_get())
+        return ob_.matrix_world.to_scale().length / math.sqrt(3.0), ob_.matrix_world.translation.copy(), \
+            float(ob_.get("mmdd_crown_flash", 0.0)), float(ob_.get("mmdd_crown_fade", 1.0))
+
+    if crowns_ and head_ is not None:
+        early_, at_, held_, gone_ = (crowned(moment - 2.0 * fps), crowned(moment), crowned(moment + 0.5 * fps),
+                                     crowned(moment + (1.0 + crown.BURST) * fps + 2))
+        scene.frame_set(int(round(moment)))
+        tip_ = base.armature.matrix_world @ base.armature.pose.bones[head_].tail
+        check(early_[0] < 1e-4 and abs(at_[0] - crown.SIZE * height) < 0.05 * height and held_[0] > 0.5 * at_[0]
+              and gone_[0] < 1e-4 and at_[2] > 0.5 and held_[3] == 1.0 and at_[1].z > tip_.z
+              and math.hypot(at_[1].x - tip_.x, at_[1].y - tip_.y) < 0.05 * height
+              and crowns_[0].data.materials[0].name == materials._cover_name("CROWN"),
+              "gem crown: none before, %.3f across at the moment (flash %.2f) over her head (%.3f over its tip), "
+              "still there after, gone after Crown Time" % (at_[0], at_[2], at_[1].z - tip_.z))
+    else:
+        check(False, "gem crown made (%d) over her head bone (%s)" % (len(crowns_), head_))
+    check(not draw_panels(bpy.context), "panels draw turning to gem")
+    s.crown_enable = False
+    s.old_surface = "NONE"
+    check(not crown.objects(s.mask) and not any(m_.get(materials.P_SURFACE) for m_ in gem_mats_),
+          "gem off: the crown and the surface gone")
+    for key_, preset_ in (("SANDEVISTAN", "after_enable"), ("TERASTAL", "crown_enable")):
+        presets.apply(s, key_)
+        s.frame_start, s.frame_end = 20, 80
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"} and getattr(s, preset_),
+              "preset %s builds" % key_)
+    if made_camera_ is not None:
+        scene.camera = None
+        bpy.data.objects.remove(made_camera_)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.26 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

@@ -20,6 +20,7 @@ _OFF = dict(
     ghost_enable=False, puppet_enable=False, shadow_enable=False, shadow_style="SHADOW", mirror_enable=False,
     echo_enable=False, title_enable=False, sweat_enable=False, peel_enable=False, peel_threads=0.0, peel_layers=1, fumble_enable=False, talisman_enable=False,
     plume_enable=False, morph_enable=False, dim_reverse=False, dim_cel=False, dim_outline=1.0, wind_style="NONE",
+    after_enable=False, crown_enable=False,
 )
 # (the finishing pose is not reset: it is a layer over any preset)
 
@@ -819,6 +820,20 @@ PRESETS = (
      dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, domain_enable=True,
           domain_style="DREAM", domain_arrive="BLINK", domain_open=0.6, domain_hold=0.6, finale=True,
           finale_white=0.3, glow_color=(1.0, 0.2, 0.3))),
+    ("SANDEVISTAN", "Rainbow Afterimages", "She dances on leaving a trail of afterimages behind her, each a colour "
+                                           "further round the rainbow, fading as they drift back; at the big moment "
+                                           "she changes in a flash and the trail goes on in the new outfit (彩虹残影: "
+                                           "Cyberpunk: Edgerunners' Sandevistan)",
+     dict(_OFF, path="SPHERE", entrance="SWAP", easing="LINEAR", edge_glow=False, after_enable=True,
+          after_style="RAINBOW", finale=True, finale_white=0.35, glow_color=(0.35, 1.0, 0.75))),
+    ("TERASTAL", "Terastallize", "Cut gem creeps up the old outfit from the feet, glinting in rainbow colours, and a "
+                                 "crown of crystal grows over her head; at the big moment the gem bursts into "
+                                 "glittering gems and she stands there in the new outfit under the crown (宝石化: "
+                                 "Pokémon's Terastallization)",
+     dict(_OFF, path="UP", old_surface="GEM", surface_color=(0.4, 0.6, 1.0), exit_style="FRAGMENTS",
+          exit_timing="AT_ONCE", frag_glow=True, frag_glow_strength=1.5, particles="GEM", particle_count=700,
+          particle_color=(0.6, 0.85, 1.0), particle_glow=1.5, crown_enable=True, crown_time=2.0, finale=True,
+          finale_white=0.5, glow_color=(0.55, 0.85, 1.0), frag_wind_dir=(0.0, 0.2, 0.5))),
 )
 
 ITEMS = tuple((key, label, description) for key, label, description, _values in PRESETS)
@@ -832,7 +847,7 @@ WHITE_FLASH = {"NANO_FINALE", "CLAMP", "GHOSTS", "BEAT_DROP", "EVOLUTION", "SPAR
                "SIX_ARMS", "THOUSAND_HANDS", "FOLLOW_SPOT", "PHOTO_POSE", "COLOR_TUG", "ERAS",
                "POWER_UP", "DIMENSION_BEATS", "SLOT_MACHINE", "TOTEM", "MARIONETTE", "SHADOW_PLAY", "PAINTING", "MIRROR_FIRST", "POLAROID",
                "WORLD_FOLD", "MULTI_EXPOSURE", "DREAM_WORLD", "BIG_TITLE", "AB_SIDE", "TOUCH_CHANGE",
-               "CHEST_BEAT", "FUMBLE"}
+               "CHEST_BEAT", "FUMBLE", "SANDEVISTAN", "TERASTAL"}
 REFRACTION = {"ICE", "OPTICAL_CAMO"}  # presets with clear ice or optical camouflage: EEVEE's raytracing (screen
 # space refraction before 4.2) goes on
 

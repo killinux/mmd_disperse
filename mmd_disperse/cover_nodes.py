@@ -77,8 +77,11 @@ ATTR_GROW = "mmdd_grow"  # on the old outfit's meshes (a face attribute): 1 wher
 MORPH_GROUP = "MMDDisperse Morph"  # 1.24 (morph.py): the new outfit from the old one's shape, or its skirt dropping
 ATTR_MORPH = "mmdd_morph"  # on the new outfit's meshes (a point vector, at rest): to the old outfit's nearest surface
 ATTR_SKIRT = "mmdd_skirt"  # ... (a point float): 1 on the skirt that drops
+AFTER_GROUP = "MMDDisperse Afterimage"  # 1.26 (afterimage.py): her snapshots left behind her, fading
+ATTR_AFTER_HUE = "mmdd_after_hue"  # on the afterimages (point floats): each one's hue (0 .. 1) ...
+ATTR_AFTER_FADE = "mmdd_after_fade"  # ... and how much it shows
 PUFF = "MMD Disperse Totem Puff"
-REVISION = 21  # bumped when one of these groups changes
+REVISION = 25  # bumped when one of these groups changes
 
 
 def _current(name):
@@ -2042,6 +2045,12 @@ def build_peel_group():
     cx, cy, cz = b.split_xyz(gi.outputs["Centre"], x=-3200, y=-600)
     tear = b.named_attribute(ATTR_TEAR, "BOOLEAN", x=-3400, y=300)[0]
     torn = b.delete(gi.outputs["Geometry"], b.boolean("NOT", tear, x=-3200, y=300), "FACE", x=-3200, y=0)
+
+    def no_wires(mesh, x, y):
+        """`mesh` without its wire edges (in no face): welding seams leaves some where a sliver face collapsed, and
+        a wire edge between two pieces stretches between them as they part (Remake's gloves, 1.26)."""
+        return b.delete(mesh, b.compare("EQUAL", b.node("GeometryNodeInputMeshEdgeNeighbors", x - 200, y - 300).outputs[
+            "Face Count"], 0.0, x=x, y=y - 300), "EDGE", x=x + 200, y=y)
     rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=-3400, y=-1100)[0]
     shoulder_rel = b.math("SUBTRACT", gi.outputs["Shoulder"], cz, x=-3000, y=-1800)
     count = b.math("MAXIMUM", gi.outputs["Strips"], 1.0, x=-3000, y=-1950)
@@ -2276,9 +2285,13 @@ def build_peel_group():
     column = b.vmath("ADD", b.combine(rest_x, rest_y, b.math("ADD", cz, front, x=-1200, y=y0 - 1300), x=-1000,
                                       y=y0 - 1250), inward, x=-600, y=y0 - 1300)
 
+    # (1.25: found on the strips only: a column of her side found her arm, which bursts off apart, at rest by it)
+    strips_at_rest = b.delete(at_rest, b.compare("GREATER_THAN", loose_f, 0.5, x=-1200, y=y0 - 1900), "FACE",
+                              x=-1000, y=y0 - 1900)
+
     def nearest(name, yy):
         n = b.node("GeometryNodeSampleNearestSurface", -800, yy, data_type="FLOAT_VECTOR")
-        b.feed(n.inputs["Mesh"], at_rest)
+        b.feed(n.inputs["Mesh"], strips_at_rest)
         b.feed(_enabled(n.inputs, "Value")[0], b.named_attribute(name, "FLOAT_VECTOR", x=-1000, y=yy - 150)[0])
         b.feed(n.inputs["Sample Position"], column)
         return _enabled(n.outputs, "Value")[0]
@@ -2369,7 +2382,7 @@ def build_peel_group():
                                             y=y0 - 850),
                      b.math("MULTIPLY", b.map_range(t, 0.55, PEEL_POP, x=-1800, y=y0 - 1000), 0.05, x=-1600,
                             y=y0 - 1000), 1.0, x=-1400, y=y0 - 900)
-    smooth_ = smoothed(welded.outputs["Geometry"], swell, 20, -1400, y0)
+    smooth_ = smoothed(no_wires(welded.outputs["Geometry"], -1700, y0 + 300), swell, 20, -1400, y0)
     puffed = b.set_position(smooth_, offset=b.vmath("SCALE", normal, scale=b.math("MULTIPLY", b.math(
         "MULTIPLY", swell, tremble, x=-800, y=y0 - 700), b.math("MULTIPLY", h, 0.11, x=-800, y=y0 - 850), x=-600,
         y=y0 - 750), x=-400, y=y0 - 600), x=-400, y=y0)
@@ -3361,3 +3374,88 @@ def ensure_morph_group():
     if not _current(MORPH_GROUP):
         build_morph_group()
     return bpy.data.node_groups[MORPH_GROUP]
+
+
+# --------------------------------------------------------------------------- 1.26: the rainbow afterimages
+
+def build_after_group():
+    """The rainbow afterimages (afterimage.py): copies of the mesh (its own faces, UVs and materials) where she was.
+    Recording holds Spawns snapshots of the mesh's vertices one after another (world space), snapshot s taken at
+    frame First + s * Gap. At each frame the Count latest snapshots show (as instances first: the ones not taken yet,
+    or long gone, are dropped before they are made real), each moved by Push (away from the camera: the newest, still
+    where she is, stays behind her) and drifting Drift (units a frame) for each frame of its age, fading out over
+    Count * Gap frames (and in over its first two and a half Gaps); each carries its hue (Hue + s * Hue Step, ATTR_AFTER_HUE) and how much it shows (ATTR_AFTER_FADE) for
+    the material. Nothing at all outside the frames they show."""
+    ng, b = _group(AFTER_GROUP, (
+        ("Recording", "NodeSocketObject"),
+        ("First", "NodeSocketFloat", 0.0),
+        ("Gap", "NodeSocketFloat", 2.0),
+        ("Spawns", "NodeSocketInt", 0),
+        ("Count", "NodeSocketInt", 8),
+        ("Hue", "NodeSocketFloat", 0.0),
+        ("Hue Step", "NodeSocketFloat", 0.07),
+        ("Drift", "NodeSocketVector", (0.0, 0.0, 0.0)),
+        ("Push", "NodeSocketVector", (0.0, 0.0, 0.0)),
+    ))
+    gi = b.node("NodeGroupInput", -2200, 0)
+    go = b.node("NodeGroupOutput", 1800, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -2200, -500).outputs["Frame"]
+    gap = b.math("MAXIMUM", gi.outputs["Gap"], 0.01, x=-2000, y=-650)
+    # the latest snapshot taken by this frame, the last there is, the oldest still showing
+    newest = b.math("FLOOR", b.math("DIVIDE", b.math("SUBTRACT", frame, gi.outputs["First"], x=-2000, y=-500), gap,
+                                    x=-1800, y=-500), x=-1600, y=-500)
+    last = b.math("SUBTRACT", gi.outputs["Spawns"], 1.0, x=-1800, y=-800)
+    oldest = b.math("SUBTRACT", newest, b.math("SUBTRACT", gi.outputs["Count"], 1.0, x=-1800, y=-950), x=-1600,
+                    y=-900)
+    showing = b.boolean("AND", b.compare("GREATER_EQUAL", newest, 0.0, x=-1400, y=-500),
+                        b.compare("LESS_EQUAL", oldest, last, x=-1400, y=-800), x=-1200, y=-600)
+    # Count copies of the mesh, each vertex knowing its own index and each copy its number (0: the newest)
+    mesh = b.store(gi.outputs["Geometry"], "mmdd_vi", b.node("GeometryNodeInputIndex", -2000, 300).outputs[0],
+                   "INT", "POINT", x=-1800, y=200)
+    size = b.node("GeometryNodeAttributeDomainSize", -1800, 500, component="MESH")
+    b.feed(size.inputs["Geometry"], gi.outputs["Geometry"])
+    verts = size.outputs["Point Count"]
+    pts = b.node("GeometryNodePoints", -1600, 0)
+    b.feed(pts.inputs["Count"], gi.outputs["Count"])
+    on = b.node("GeometryNodeInstanceOnPoints", -1400, 200)
+    b.feed(on.inputs["Points"], pts.outputs["Geometry"])
+    b.feed(on.inputs["Instance"], mesh)
+    copies = b.store(on.outputs["Instances"], "mmdd_copy", b.node("GeometryNodeInputIndex", -1400, -100).outputs[0],
+                     "INT", "INSTANCE", x=-1200, y=200)
+    taken = b.math("SUBTRACT", newest, b.node("GeometryNodeInputIndex", -1200, -200).outputs[0], x=-1000, y=-200)
+    unseen = b.boolean("OR", b.compare("LESS_THAN", taken, 0.0, x=-800, y=-150),
+                       b.compare("GREATER_THAN", taken, last, x=-800, y=-300), x=-600, y=-200)
+    real = b.node("GeometryNodeRealizeInstances", -400, 200)
+    b.feed(real.inputs["Geometry"], b.delete(copies, unseen, "INSTANCE", x=-600, y=200))
+    # each point where its vertex was in its snapshot, drifted as it has aged
+    copy = b.named_attribute("mmdd_copy", "INT", x=-400, y=-400)[0]
+    vi = b.named_attribute("mmdd_vi", "INT", x=-400, y=-550)[0]
+    s = b.math("SUBTRACT", newest, copy, x=-200, y=-400)
+    age = b.math("SUBTRACT", frame, b.math("MULTIPLY_ADD", s, gap, gi.outputs["First"], x=-200, y=-600), x=0,
+                 y=-600)
+    rec = b.node("GeometryNodeObjectInfo", -400, -900, transform_space="ORIGINAL")
+    b.feed(rec.inputs["Object"], gi.outputs["Recording"])
+    sample = b.node("GeometryNodeSampleIndex", 0, -900, data_type="FLOAT_VECTOR", domain="POINT")
+    b.feed(sample.inputs["Geometry"], rec.outputs["Geometry"])
+    b.feed(_enabled(sample.inputs, "Value")[0], b.node("GeometryNodeInputPosition", -200, -1100).outputs[0])
+    b.feed(sample.inputs["Index"], b.math("MULTIPLY_ADD", s, verts, vi, x=-200, y=-800))
+    where = b.vmath("ADD", b.vmath("ADD", _enabled(sample.outputs, "Value")[0], gi.outputs["Push"], x=200, y=-900),
+                    b.vmath("SCALE", gi.outputs["Drift"], scale=age, x=0, y=-1200), x=200, y=-1000)
+    moved = b.set_position(real.outputs[0], position=where, x=400, y=200)
+    life = b.math("MULTIPLY", gi.outputs["Count"], gap, x=0, y=-1400)
+    out_ = b.math("POWER", b.math("SUBTRACT", 1.0, b.math("DIVIDE", age, life, x=200, y=-1400, clamp=True), x=400,
+                                  y=-1400), 1.3, x=600, y=-1400)
+    in_ = b.map_range(age, 0.0, b.math("MULTIPLY", gap, 2.5, x=200, y=-1600), 0.0, 1.0, x=400, y=-1600, smooth=True)
+    fade = b.math("MULTIPLY", out_, in_, x=800, y=-1500)
+    hue = b.math("FRACT", b.math("MULTIPLY_ADD", s, gi.outputs["Hue Step"], gi.outputs["Hue"], x=600, y=-1700),
+                 x=800, y=-1700)
+    shaded = b.store(b.store(moved, ATTR_AFTER_FADE, fade, "FLOAT", "POINT", x=1000, y=200), ATTR_AFTER_HUE, hue,
+                     "FLOAT", "POINT", x=1200, y=200)
+    b.feed(go.inputs["Geometry"], b.switch("GEOMETRY", showing, None, shaded, x=1500, y=0))
+    return ng
+
+
+def ensure_after_group():
+    if not _current(AFTER_GROUP):
+        build_after_group()
+    return bpy.data.node_groups[AFTER_GROUP]

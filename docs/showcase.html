@@ -231,13 +231,13 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.25：用 Blender 几何节点给 MMD 模型做换装变身。下面一百七十三段视频都是插件生成的
+    <p>mmd_disperse 1.26：用 Blender 几何节点给 MMD 模型做换装变身。下面一百七十五段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
-      <span><b>173</b> 段演示</span>
+      <span><b>175</b> 段演示</span>
       <span><b>67</b> 组效果</span>
-      <span><b>159</b> 个一键预设</span>
-      <span><b>23400</b> 种基本组合</span>
+      <span><b>161</b> 个一键预设</span>
+      <span><b>24700</b> 种基本组合</span>
       <span>Blender <b>3.6 / 4.5 / 5.1</b></span>
     </div>
     <div class="links">
@@ -295,7 +295,7 @@
 <section id="effects">
   <div class="wrap">
     <h2>效果演示</h2>
-    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.25 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
+    <p class="sub">点缩略图跳到对应的一段。同一种效果的几个版本（静止、跳舞、转圈，或者新旧两版）并排放在一组，组标题旁的「一起播放」让它们从头同时播放，方便对比。视频都是 1080×1920、200 帧（第 10～185 帧变身）；跟着舞蹈动作变的几段从舞里找到的动作开始，标着「有声音」的配了舞曲；1.11～1.26 跳舞的几段截取舞里变身前后的一段，长短不一（130～260 帧）。</p>
 
     <div class="index">
       <a href="#suitup"><img src="../test_output/posters/suitup.jpg" alt="" loading="lazy">纳米战衣</a>
@@ -471,6 +471,8 @@
       <a href="#into-anime"><img src="../test_output/posters/into_anime.jpg" alt="" loading="lazy">走进二次元</a>
       <a href="#magic-variant"><img src="../test_output/posters/magic_variant.jpg" alt="" loading="lazy">魔术遮挡和主换加差分</a>
       <a href="#laser-print-plate"><img src="../test_output/posters/laser_print_plate.jpg" alt="" loading="lazy">紧身衣的打印底板</a>
+      <a href="#terastal"><img src="../test_output/posters/terastal.jpg" alt="" loading="lazy">太晶化</a>
+      <a href="#rainbow-afterimages"><img src="../test_output/posters/rainbow_afterimages.jpg" alt="" loading="lazy">彩虹残影</a>
     </div>
 
     <section class="family card" id="fam-nano">
@@ -1646,8 +1648,8 @@
 
     <section class="family card" id="fam-shell">
       <div class="family-head">
-        <h3>石化、镀金、破茧</h3>
-        <p>和冰封碎裂一样，旧服装先整个变成一层外壳，再一起退场：石像崩成碎石，金像炸成金片和金币，蚕茧裂开飞出蝴蝶。外壳看不透，新服装在它退场的那一刻才出现。</p>
+        <h3>石化、镀金、破茧、宝石化</h3>
+        <p>和冰封碎裂一样，旧服装先整个变成一层外壳，再一起退场：石像崩成碎石，金像炸成金片和金币，蚕茧裂开飞出蝴蝶，宝石像碎成一颗颗宝石（1.26）。外壳看不透，新服装在它退场的那一刻才出现。</p>
         <button type="button" class="together">▶ 一起播放</button>
       </div>
       <div class="variants">
@@ -1708,6 +1710,28 @@
             <li><span class="ui">茧鼓起高度</span> 调茧鼓起多少，<span class="ui">丝线圈数</span> 调每段身体缠几圈；丝线贴着身体的轮廓缠，跳舞时跟着骨骼走。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset COCOON --white-flash</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="terastal">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/terastal.jpg">
+              <source src="../test_output/demo_v28/tifa_terastal_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">太晶化 · 跳舞（有声音）</span><span class="ver">1.26</span><span class="tag">VMD 舞蹈</span><span class="tag">宝石化</span><span class="tag">宝石冠</span><span class="tag">宝石碎片</span><span class="tag">最后一起退场</span></div>
+            <h3>太晶化（新预设）</h3>
+            <p class="lead">宝石从鞋子往上漫过黑色紧身衣：一块块平的晶面，沿棱透光，闪着彩虹火彩，头顶从一点闪光里长出一顶宝石冠；关键时刻整身碎成碎片和一颗颗宝石，Remake 版的蒂法站在宝石冠下面，宝石冠再停两秒散成光（宝可梦的太晶化）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">太晶化（宝石化）</span>：<span class="ui">旧服装表面</span> 选 <span class="v">宝石化</span>，<span class="ui">宝石冠</span> 勾上，<span class="ui">宝石冠停留</span> <span class="v">2</span> 秒。</li>
+            <li><span class="ui">路径</span> 选 <span class="v">从下往上扫</span>，<span class="ui">旧服装退场</span> 选 <span class="v">碎片飞散</span>、<span class="ui">退场时机</span> 选 <span class="v">最后一起退场</span>，<span class="ui">粒子</span> 选 <span class="v">宝石碎片</span>。</li>
+            <li>宝石冠浮在头顶上方，取景时头顶要留出空间（演示把画面放到 1.45 个身高）。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset TERASTAL --vmd "回レ！雪月花.vmd" --wave 130:200 --view 1.45 --aim 0.6 --target-blend "Remake V2.blend" --target-root "Tifa Lockhart Remake 18 V2"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
           </div>
         </article>
       </div>
@@ -2723,8 +2747,8 @@
     </section>
     <section class="family card" id="fam-spirit">
       <div class="family-head">
-        <h3>法相与三头六臂</h3>
-        <p>新服装的样子先以金色的分身出现：身后的法相扑进身体，或者从肩上长出三头六臂，然后一闪换好（1.12）。</p>
+        <h3>法相、三头六臂和重影</h3>
+        <p>新服装的样子先以金色的分身出现：身后的法相扑进身体，或者从肩上长出三头六臂，然后一闪换好（1.12）。迷幻多重曝光和彩虹残影是她自己的一串重影（1.18、1.26）。</p>
         <button type="button" class="together">▶ 一起播放</button>
       </div>
       <div class="variants">
@@ -2808,6 +2832,28 @@
             <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>；<span class="ui">收尾闪光</span> 面板最下面点 <span class="ui">添加闪白</span>。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset MULTI_EXPOSURE --white-flash --vmd "回レ！雪月花.vmd" --wave 150:210</code></p>
+          </div>
+        </article>
+
+        <article class="effect variant" id="rainbow-afterimages">
+          <figure class="clip">
+            <video controls loop playsinline preload="metadata" poster="../test_output/posters/rainbow_afterimages.jpg">
+              <source src="../test_output/demo_v28/tifa_rainbow_afterimages_hd.mp4" type="video/mp4">
+            </video>
+            <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
+          </figure>
+          <div class="info">
+            <div class="meta"><span class="mode">彩虹残影 · 跳舞（有声音）</span><span class="ver">1.26</span><span class="tag">VMD 舞蹈</span><span class="tag">彩虹残影</span><span class="tag">瞬间换装</span><span class="tag">收尾闪光</span></div>
+            <h3>彩虹残影（新预设）</h3>
+            <p class="lead">黑色紧身衣的蒂法跳着，身后拖出一串半透明的残影，一个比一个在色相轮上多转一点，一边变淡一边往后飘；关键时刻一闪换成 AC 版的蒂法，拖尾接着拖新衣服的残影（《赛博朋克：边缘行者》的斯安威斯坦）。</p>
+            <h4>手动操作</h4>
+            <ol class="steps">
+            <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
+            <li><span class="ui">预设</span> 选 <span class="v">彩虹残影</span>：<span class="ui">彩虹残影</span> 面板勾上，<span class="ui">残影配色</span> 选 <span class="v">彩虹（沿色相轮）</span>。</li>
+            <li><span class="ui">每隔几帧留一个</span> <span class="v">2</span>、<span class="ui">同时显示的残影</span> <span class="v">8</span>：每隔两帧留一个，同时看得到八个；<span class="ui">关键时刻前开始</span> <span class="v">1</span> 秒、<span class="ui">关键时刻后持续</span> <span class="v">0.6</span> 秒；<span class="ui">往后飘开</span> <span class="v">0.5</span>。</li>
+            <li><span class="ui">新服装登场</span> 选 <span class="v">瞬间换装</span>，<span class="ui">收尾闪光</span> 打开：关键时刻一闪换好。残影是生成时录下来的，改了动作要重新生成；挑一段动作大的舞，暗背景上最好看。</li>
+            </ol>
+            <p class="cmd">演示参数：<code>--preset SANDEVISTAN --vmd "回レ！雪月花.vmd" --wave 140:200 --target-blend "AC V1.blend" --target-root "Tifa Lockhart FFVII Advent Children 18 V1"（演示打开 Gantz V1.blend，旧衣服是它的全身紧身衣：<code>--base-root "Tifa Gantz 18 V1"</code>）</code></p>
           </div>
         </article>
       </div>
@@ -4500,18 +4546,18 @@
           <li>退场时机：随边缘 / 最后一起退场</li></ul>
       </div>
       <div class="opt card">
-        <h3>粒子 <b>17</b></h3>
+        <h3>粒子 <b>18</b></h3>
         <ul><li>花瓣</li><li>蝴蝶（会扇翅膀）</li><li>星光</li><li>方块</li><li>金币</li><li>冰片</li><li>余烬</li>
           <li>音符</li><li>扑克牌</li><li>羽毛</li><li>蝙蝠（会扇翅膀）</li><li>墨点</li><li>代码字符（边掉边换字）</li>
-          <li>碎石</li><li>纸鸟（会扇翅膀）</li><li>闪粉</li><li>自定义物体</li><li>也可以不要</li></ul>
+          <li>碎石</li><li>纸鸟（会扇翅膀）</li><li>闪粉</li><li>宝石碎片</li><li>自定义物体</li><li>也可以不要</li></ul>
       </div>
       <div class="opt card">
-        <h3>旧服装表面 <b>13</b></h3>
+        <h3>旧服装表面 <b>14</b></h3>
         <ul><li>黑色血管</li><li>结霜（冰晶，冰可以是透明的）</li><li>烧焦</li><li>水墨</li><li>石化</li><li>镀金</li>
-          <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>剪纸窗花</li><li>发光纹身</li><li>LED 屏幕</li><li>电子纸</li><li>光学迷彩</li><li>也可以不变</li></ul>
+          <li>蚕丝茧（缠绕丝线）</li><li>数字雨</li><li>剪纸窗花</li><li>发光纹身</li><li>LED 屏幕</li><li>电子纸</li><li>光学迷彩</li><li>宝石化（宝石冠）</li><li>也可以不变</li></ul>
       </div>
       <div class="opt card">
-        <h3>叠加开关 <b>55</b></h3>
+        <h3>叠加开关 <b>56</b></h3>
         <ul><li>线框层（六边形 / 三角网）</li><li>全息先行（全息 / 星空纱 / 黑剪影 / 冰晶 / 光学迷彩）</li><li>故障风</li><li>光剪影</li><li>光带</li>
           <li>收尾闪光（整身闪光 / 光扫）</li><li>深色内衬（纳米金属 / 共生体黏液）</li><li>背面发光</li>
           <li>毒液共生体（触手、蹼、黏丝；黑色黏液或液态金属）</li>
@@ -4535,7 +4581,7 @@
           <li>镜里先换</li><li>迷幻多重曝光（迷幻配色 / 发光颜色）</li>
           <li>书法大字幕（金色 / 白色 / 墨色；吹散 / 缩成印章；横排 / 竖排）</li><li>汗光</li>
           <li>撕开翻落（撕开 / 翻落 / 扯掉 / 卷起剥落 / 充气爆开 / 融化滴落 / 碎开再熔合；衬里颜色；藕断丝连；层层撕回）</li><li>变身翻车</li>
-          <li>符箓燃尽</li><li>长出羽毛和花（羽毛 / 花）</li><li>形变（从旧形状 / 裙摆落下）</li><li>次元切换的赛璐璐动画风</li><li>换装吹风（迎面 / 上升气流 / 旋风）</li></ul>
+          <li>符箓燃尽</li><li>长出羽毛和花（羽毛 / 花）</li><li>形变（从旧形状 / 裙摆落下）</li><li>次元切换的赛璐璐动画风</li><li>换装吹风（迎面 / 上升气流 / 旋风）</li><li>彩虹残影（彩虹 / 发光颜色）</li></ul>
       </div>
       <div class="opt card">
         <h3>其他</h3>
@@ -4717,6 +4763,8 @@
           <tr><td>从旧形状变过来</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>形变（从旧形状，1.4 秒）、收尾闪光</td></tr>
           <tr><td>裙摆落下</td><td>球形扩散</td><td>瞬间换装</td><td>碎片飞散</td><td>形变（裙摆落下）、星光粒子</td></tr>
           <tr><td>走进二次元</td><td>沿体表流动（只从起点）</td><td>边缘生长</td><td>收缩消失</td><td>次元切换：随前沿、反向、赛璐璐动画风，补光</td></tr>
+          <tr><td>太晶化（宝石化）</td><td>从下往上扫</td><td>（旧服装退场时出现）</td><td>碎片飞散（最后一起退场）</td><td>旧服装表面：宝石化，宝石冠，宝石碎片，收尾闪光</td></tr>
+          <tr><td>彩虹残影</td><td>球形扩散</td><td>瞬间换装</td><td>收缩消失</td><td>彩虹残影（八个，每两帧一个，沿色相轮）、收尾闪光</td></tr>
         </tbody>
       </table>
     </div>

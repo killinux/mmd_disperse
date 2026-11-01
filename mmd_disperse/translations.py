@@ -759,6 +759,20 @@ _ZH = {
     ("*", "Magic Trick"): "魔术（每次换一种遮挡）",
     ("*", "Variant Parts"): "差分（之后藏掉的部件）",
     ("*", "Variant After"): "差分在关键时刻后",
+    ("*", "Rainbow Afterimages"): "彩虹残影",
+    ("*", "Afterimage Colors"): "残影配色",
+    ("*", "Rainbow"): "彩虹（沿色相轮）",
+    ("*", "Afterimages"): "同时显示的残影",
+    ("*", "Every"): "每隔几帧留一个",
+    ("*", "Trail Before"): "关键时刻前开始",
+    ("*", "Trail After"): "关键时刻后持续",
+    ("*", "Drift"): "往后飘开",
+    ("*", "Afterimage Glow"): "残影亮度",
+    ("*", "Turn to Gem"): "宝石化",
+    ("*", "Gems"): "宝石碎片",
+    ("*", "Gem Crown"): "宝石冠",
+    ("*", "Crown Time"): "宝石冠停留",
+    ("*", "Terastallize"): "太晶化（宝石化）",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

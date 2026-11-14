@@ -28,7 +28,7 @@ import os
 
 import bpy
 
-VERSION = 20
+VERSION = 21
 CACHE_PREFIX = "mmd_disperse_node_groups_"  # the main groups, once built, are kept in the user's config folder
 
 FIELD_GROUP = "MMDDisperse Field"
@@ -45,6 +45,7 @@ SHELL_GROUP = "MMDDisperse Shell"
 MIST_GROUP = "MMDDisperse Mist"
 TITLE_GROUP = "MMDDisperse Finish Title"
 TITLE_TEXT = "MMDD Title Text"  # its String to Curves node (finish.py sets its font)
+TONGUE_GROUP = "MMDDisperse Tongue"  # 1.29 (roar.py): the symbiote's tongue
 
 ATTR_EDGE = "disperse_edge"
 ATTR_LOCK = "disperse_lock"
@@ -144,6 +145,12 @@ VENOM_INPUTS = (
     ("Venom Material", "NodeSocketMaterial", None, None, None, None),
     ("Tendril Pulse", "NodeSocketFloat", 1.0, 0.0, 10.0, None),
     ("Goo Drips", "NodeSocketBool", True, None, None, None),
+    # (1.29) the big tendrils off her back come out once the edge is Back Emerge past their root and grow over Back
+    # Grow; all of the goo's tubes snap back in from frame Retract At over Retract Frames (0: never)
+    ("Back Emerge", "NodeSocketFloat", 0.5, 0.0, 1e9, "DISTANCE"),
+    ("Back Grow", "NodeSocketFloat", 2.0, 0.0, 1e9, "DISTANCE"),
+    ("Retract At", "NodeSocketFloat", 1e9, -1e9, 1e9, None),
+    ("Retract Frames", "NodeSocketFloat", 0.0, 0.0, 1e6, None),
 )
 
 # Entrances without a front, timed by the mask radius against Clamp Distance (the moment): the evolution flash
@@ -331,6 +338,11 @@ BASE_INPUTS = FIELD_INPUTS + (
     ("Inner Depth", "NodeSocketFloat", 2.0, 0.0, 1e9, "DISTANCE"),
     ("Surface Ahead", "NodeSocketBool", False, None, None, None),
     ("Surface Reach", "NodeSocketFloat", 3.0, 0.0, 1e9, "DISTANCE"),
+    # (1.29) the surface's prelude: from frame Prelude From it grows in from the start points over Prelude Frames,
+    # before the front sets off (0: no prelude), pulsing with Prelude Beats heartbeats, faster and faster (0: none)
+    ("Prelude From", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Prelude Frames", "NodeSocketFloat", 0.0, 0.0, 1e6, None),
+    ("Prelude Beats", "NodeSocketFloat", 0.0, 0.0, 100.0, None),
     ("Crystals", "NodeSocketBool", False, None, None, None),
     ("Crystal Object", "NodeSocketObject", None, None, None, None),
     ("Crystal Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
@@ -501,6 +513,19 @@ TITLE_INPUTS = (
 )
 
 # Inputs measured in object space: the add-on's sizes are world units, divided by the object's scale.
+# 1.29, roar.py: the symbiote's tongue, in its object's space (+Y out of her mouth, +Z up): Length long and Width
+# wide (half) at its root, Flat as thick as wide; out of her mouth from frame Start over Out Frames, back in by End.
+TONGUE_INPUTS = (
+    ("Length", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
+    ("Width", "NodeSocketFloat", 0.05, 0.0, 1e9, "DISTANCE"),
+    ("Flat", "NodeSocketFloat", 0.45, 0.05, 1.0, None),
+    ("Start", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("End", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Out Frames", "NodeSocketFloat", 9.0, 0.0, 1e6, None),
+    ("Material", "NodeSocketMaterial", None, None, None, None),
+)
+TONGUE_POINTS = 28  # points along the tongue
+
 DISTANCE_INPUTS = frozenset(spec[0] for spec in FIELD_INPUTS + TARGET_INPUTS + BASE_INPUTS if spec[5] == "DISTANCE")
 
 # Blender 3.x has no socket subtypes on group interfaces; the subtype is part of the socket type.
@@ -891,7 +916,10 @@ def _remove_attributes(b, geometry, names, x, y):
 # Point attributes of the symbiote's skeleton (venom.py). End A, end B: three vertex indices and their weights.
 VENOM_ENDS = (("mmdd_a0", "mmdd_a1", "mmdd_a2", "mmdd_aw"), ("mmdd_b0", "mmdd_b1", "mmdd_b2", "mmdd_bw"))
 VENOM_ATTRS = tuple(name for end in VENOM_ENDS for name in end) + (
-    "mmdd_t", "mmdd_kind", "mmdd_s", "mmdd_len", "mmdd_root", "mmdd_rnd", "mmdd_thick")
+    "mmdd_t", "mmdd_kind", "mmdd_s", "mmdd_len", "mmdd_root", "mmdd_rnd", "mmdd_thick", "mmdd_fan")
+BACK_THICK = 4.5  # 1.29: the big tendrils off her back are this many times as thick as the others at their root ...
+BACK_LASH = 0.32  # ... lash about this far at their tips (a share of their length) ...
+BACK_SAG = 0.18  # ... and sag this far under their weight
 _VENOM_AGE = "mmdd_venom_age"  # scratch: age of the bound point
 _VENOM_RADIUS = "mmdd_venom_radius"  # tube radius (kept on the tubes for the goo material, 1.27)
 _VENOM_S = "mmdd_goo_s"  # 1.27, on the goo's tubes for its material: length along the tendril or strand ...
@@ -960,10 +988,13 @@ def build_venom_group():
                     x=-300, y=1400)
     up = b.vmath("NORMALIZE", b.vmath("ADD", na, b.vmath("SCALE", b.vmath("SUBTRACT", nb, na, x=-700, y=1200),
                                                          scale=t, x=-500, y=1200), x=-300, y=1200), x=-100, y=1200)
-    # kind: 0 tendril, 1 strand, 2 web (a membrane of goo in the fork of a tendril, timed like the tendril)
-    web = b.compare("GREATER_THAN", kind, 1.5, x=-700, y=-500)
-    strand = b.boolean("AND", b.compare("GREATER_THAN", kind, 0.5, x=-700, y=-650), b.boolean("NOT", web, x=-500,
-                                                                                               y=-600), x=-500, y=-700)
+    # kind: 0 tendril, 1 strand, 2 web (a membrane of goo in the fork of a tendril, timed like the tendril), 3 a big
+    # tendril off her back (1.29)
+    big = b.compare("GREATER_THAN", kind, 2.5, x=-700, y=-350)
+    web = b.boolean("AND", b.compare("GREATER_THAN", kind, 1.5, x=-700, y=-500), b.boolean("NOT", big, x=-500,
+                                                                                           y=-450), x=-500, y=-500)
+    strand = b.boolean("AND", b.compare("GREATER_THAN", kind, 0.5, x=-700, y=-650),
+                       b.compare("LESS_THAN", kind, 1.5, x=-700, y=-800), x=-500, y=-700)
     thick_attr, has_thick = b.named_attribute("mmdd_thick", "FLOAT", x=-900, y=-1400)
     thick_f = b.switch("FLOAT", has_thick, 1.0, thick_attr, x=-700, y=-1400)
     thick = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Tendril Radius"], thick_f, x=-700, y=-1250),
@@ -1071,18 +1102,90 @@ def build_venom_group():
     b.feed(drops_real.inputs["Geometry"], drop_on.outputs["Instances"])
     drops = _remove_attributes(b, drops_real.outputs["Geometry"], VENOM_ATTRS + (_VENOM_AGE,), 2300, -4000)
 
+    # --- 1.29: the goo snaps back in from Retract At over Retract Frames (slowly, then fast); the big tendrils off
+    # her back first, in the first 60% of it
+    r_frame = b.node("GeometryNodeInputSceneTime", 300, -5000).outputs["Frame"]
+    r_on = b.compare("GREATER_THAN", gi.outputs["Retract Frames"], 0.5, x=300, y=-5150)
+    r_u = b.math("DIVIDE", b.math("SUBTRACT", r_frame, gi.outputs["Retract At"], x=500, y=-5000),
+                 b.math("MAXIMUM", gi.outputs["Retract Frames"], 1e-3, x=500, y=-5150), x=700, y=-5050, clamp=True)
+    r_u = b.switch("FLOAT", r_on, 0.0, r_u, x=900, y=-5050)
+    retracted = b.math("MULTIPLY", r_u, r_u, x=1100, y=-5050)
+    back_u = b.math("MULTIPLY", r_u, 1.0 / 0.6, x=1100, y=-5200, clamp=True)
+    back_in = b.math("MULTIPLY", back_u, back_u, x=1300, y=-5200)
+    # --- 1.29: a big tendril off her back: out of the goo once the edge is Back Emerge past its root, grown over Back
+    # Grow (the whole tendril stretching out), up and out from her back (fanned out to the side the skeleton says),
+    # lashing about with a wave running along it (bigger towards the tip) and sagging under its weight
+    grow_b = b.math("MULTIPLY", b.map_range(age_a, gi.outputs["Back Emerge"], b.math(
+        "ADD", gi.outputs["Back Emerge"], b.math("MAXIMUM", gi.outputs["Back Grow"], 1e-6, x=300, y=-5500), x=500,
+        y=-5450), x=700, y=-5400, smooth=True), b.math("SUBTRACT", 1.0, back_in, x=700, y=-5550), x=900, y=-5450)
+    u_b = b.math("DIVIDE", s, b.math("MAXIMUM", length, 1e-6, x=300, y=-5700), x=500, y=-5700, clamp=True)
+    s_b = b.math("MULTIPLY", s, grow_b, x=1100, y=-5600)
+    fan = b.named_attribute("mmdd_fan", "FLOAT", x=300, y=-5850)[0]
+    me_b = _self_info(b, 300, -6100)
+    up_w = b.vmath("NORMALIZE", _unrotate(b, me_b, (0.0, 0.0, 1.0), 500, -6100), x=700, y=-6100)
+    out_b = b.vmath("NORMALIZE", na, x=500, y=-6250)
+    side_b = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", up_w, out_b, x=700, y=-6250), x=900, y=-6250)
+    aim_b = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("ADD", b.vmath("SCALE", out_b, scale=0.75, x=900, y=-6400),
+                                                         b.vmath("SCALE", up_w, scale=0.8, x=900, y=-6550),
+                                                         x=1100, y=-6450),
+                                         b.vmath("SCALE", side_b, scale=b.math("MULTIPLY", fan, 0.6, x=900, y=-6700),
+                                                 x=1100, y=-6650), x=1300, y=-6500), x=1500, y=-6500)
+    across_b = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", aim_b, side_b, x=1500, y=-6650), x=1700, y=-6650)
+    t_frame = b.node("GeometryNodeInputSceneTime", 300, -6900).outputs["Frame"]
+    pace = b.math("MULTIPLY_ADD", rnd, 0.4, 0.8, x=500, y=-6900)
+    lash1 = b.math("SINE", b.math("ADD", b.math("MULTIPLY", b.math("MULTIPLY", t_frame, 0.11, x=700, y=-6900), pace,
+                                                x=900, y=-6900),
+                                  b.math("MULTIPLY_ADD", u_b, 7.0, b.math("MULTIPLY", rnd, 6.2832, x=700, y=-7050),
+                                         x=900, y=-7050), x=1100, y=-6950), x=1300, y=-6950)
+    # (the lash out of her back's way only goes back: forwards it would sweep in front of her face)
+    lash2 = b.math("MULTIPLY_ADD", b.math("COSINE", b.math("ADD", b.math("MULTIPLY", b.math(
+        "MULTIPLY", t_frame, 0.085, x=700, y=-7200), pace, x=900, y=-7200), b.math(
+        "MULTIPLY_ADD", u_b, 5.5, b.math("MULTIPLY", rnd, 10.7, x=700, y=-7350), x=900, y=-7350), x=1100, y=-7250),
+        x=1300, y=-7250), 0.5, -0.5, x=1350, y=-7250)
+    reach_b = b.math("MULTIPLY", b.math("MULTIPLY", length, grow_b, x=1300, y=-7450),
+                     b.math("POWER", u_b, 1.6, x=1300, y=-7600), x=1500, y=-7500)
+    lash_amp = b.math("MULTIPLY", reach_b, BACK_LASH, x=1700, y=-7500)
+    me_down = b.vmath("SCALE", up_w, scale=-1.0, x=1700, y=-7650)
+    sag_b = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", length, grow_b, x=1700, y=-7800),
+                                      b.math("MULTIPLY", u_b, u_b, x=1700, y=-7950), x=1900, y=-7850), BACK_SAG,
+                   x=2100, y=-7850)
+    big_pos = b.vmath("ADD", b.vmath("ADD", b.vmath("ADD", pa, b.vmath("SCALE", aim_b, scale=s_b, x=1700, y=-6800),
+                                                    x=1900, y=-6800),
+                                     b.vmath("ADD", b.vmath("SCALE", side_b, scale=b.math("MULTIPLY", lash1, lash_amp,
+                                                                                          x=1500, y=-7050),
+                                                            x=1700, y=-7050),
+                                             b.vmath("SCALE", across_b, scale=b.math("MULTIPLY", lash2, b.math(
+                                                 "MULTIPLY", lash_amp, 0.8, x=1500, y=-7350), x=1700, y=-7300),
+                                                     x=1900, y=-7300), x=2100, y=-7100), x=2300, y=-6900),
+                      b.vmath("SCALE", me_down, scale=sag_b, x=2300, y=-7700), x=2500, y=-7000)
+    flare = b.math("MULTIPLY_ADD", b.math("SUBTRACT", 1.0, b.math("DIVIDE", u_b, 0.12, x=1100, y=-8100), x=1300,
+                                          y=-8100, clamp=True), 0.7, 1.0, x=1500, y=-8100)
+    taper_b = b.math("POWER", b.math("MAXIMUM", b.math("MULTIPLY_ADD", u_b, -0.88, 1.0, x=1100, y=-8250), 0.05,
+                                     x=1300, y=-8250), 0.9, x=1500, y=-8250)
+    big_radius = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", b.math(
+        "MULTIPLY", gi.outputs["Tendril Radius"], BACK_THICK, x=1500, y=-8400), taper_b, x=1700, y=-8300), flare,
+        x=1900, y=-8200), b.math("MULTIPLY", pumped, b.math("MULTIPLY", grow_b, 4.0, x=1700, y=-8550, clamp=True),
+                                  x=1900, y=-8500), x=2100, y=-8350)
+    big_shown = b.compare("GREATER_THAN", grow_b, 0.005, x=2100, y=-8550)
+
     radius = b.switch("FLOAT", strand, tendril_radius, strand_radius, x=1300, y=-500)
+    # (everything else snaps back with the coat)
+    radius = b.switch("FLOAT", big, b.math("MULTIPLY", radius, b.math("SUBTRACT", 1.0, retracted, x=1300, y=-400),
+                                           x=1400, y=-450), big_radius, x=1500, y=-450)
     shown = b.switch("BOOLEAN", strand, tendril_shown, strand_shown, x=1300, y=-700)
+    shown = b.switch("BOOLEAN", big, b.boolean("AND", shown, b.compare("LESS_THAN", retracted, 0.999, x=1300, y=-650),
+                                               x=1400, y=-650), big_shown, x=1500, y=-650)
     # Tendrils lie on the surface, mostly above it; webs lie under their middle.
     lift = b.math("MULTIPLY_ADD", radius, 0.7, rise, x=1300, y=-900)
     offset = b.switch("VECTOR", strand, b.vmath("SCALE", up, scale=lift, x=1500, y=-900), sag, x=1700, y=-800)
     offset = b.switch("VECTOR", web, offset, b.vmath("SCALE", up, scale=b.math("MULTIPLY", thick, 0.45, x=1500,
                                                                                y=-1100), x=1700, y=-1100),
                       x=1900, y=-900)
-    placed = b.set_position(aged, position=b.vmath("ADD", point, offset, x=1700, y=-600), x=1900, y=600)
+    placed = b.set_position(aged, position=b.switch("VECTOR", big, b.vmath("ADD", point, offset, x=1700, y=-600),
+                                                    big_pos, x=1800, y=-600), x=1900, y=600)
     placed = b.store(placed, _VENOM_RADIUS, radius, x=2100, y=600)
-    placed = b.store(placed, _VENOM_S, b.switch("FLOAT", strand, s, b.math("MULTIPLY", t, length, x=2000, y=300),
-                                                x=2100, y=300), x=2200, y=600)
+    placed = b.store(placed, _VENOM_S, b.switch("FLOAT", big, b.switch("FLOAT", strand, s, b.math(
+        "MULTIPLY", t, length, x=2000, y=300), x=2100, y=300), s_b, x=2150, y=300), x=2200, y=600)
     placed = b.delete(placed, b.boolean("NOT", shown, x=2100, y=400), "POINT", x=2300, y=600)
     webs, placed = b.separate(placed, web, "POINT", x=2400, y=800)
     placed = _remove_attributes(b, placed, VENOM_ATTRS + (_VENOM_AGE,), 2500, 600)
@@ -3313,9 +3416,40 @@ def build_base_group(field_group, venom_group):
     reach = b.math("MINIMUM", gi.outputs["Surface Reach"],
                    b.math("MULTIPLY", b.math("MAXIMUM", radius, 0.0, x=-2000, y=-2900), 2.0, x=-1800, y=-2900),
                    x=-1600, y=-2850)
+    # (1.29) The prelude: before the front sets off the zone grows in from the start points over Prelude Frames,
+    # pulsing with a heartbeat that quickens (the veins throb under her skin before the goo comes out: the tips of her
+    # fingers and toes go dark on each beat)
+    pre_frame = b.node("GeometryNodeInputSceneTime", -2400, -3300).outputs["Frame"]
+    pre_on = b.compare("GREATER_THAN", gi.outputs["Prelude Frames"], 0.5, x=-2200, y=-3450)
+    pre_u = b.math("DIVIDE", b.math("SUBTRACT", pre_frame, gi.outputs["Prelude From"], x=-2200, y=-3300),
+                   b.math("MAXIMUM", gi.outputs["Prelude Frames"], 1e-3, x=-2200, y=-3600), x=-2000, y=-3300,
+                   clamp=True)
+    pre_reach = b.math("MULTIPLY", gi.outputs["Surface Reach"], b.map_range(pre_u, 0.0, 1.0, x=-1800, y=-3450,
+                                                                           smooth=True), x=-1600, y=-3450)
+    reach = b.switch("FLOAT", pre_on, reach, b.math("MAXIMUM", reach, pre_reach, x=-1400, y=-3450), x=-1200,
+                     y=-3450)
     wave_d = b.switch("FLOAT", gi.outputs["Clamp"], d, field["Distance"], x=-1600, y=-3100)
     ahead = b.map_range(wave_d, b.math("ADD", radius, reach, x=-1400, y=-2950), radius, x=-1200, y=-2950,
                         smooth=True)
+    # (the beats: a lub and a softer dub, Prelude Beats of them over the prelude and as many again by its end)
+    beats_n = gi.outputs["Prelude Beats"]
+    pre_phase = b.math("MULTIPLY", b.math("MULTIPLY", beats_n, 6.2832, x=-2000, y=-3800),
+                       b.math("MULTIPLY_ADD", b.math("MULTIPLY", pre_u, pre_u, x=-2000, y=-3950), 0.6, pre_u,
+                              x=-1800, y=-3950), x=-1600, y=-3850)
+    lub = b.math("POWER", b.math("MAXIMUM", b.math("SINE", pre_phase, x=-1400, y=-3800), 0.0, x=-1200, y=-3800),
+                 8.0, x=-1000, y=-3800)
+    dub = b.math("MULTIPLY", b.math("POWER", b.math("MAXIMUM", b.math("SINE", b.math(
+        "SUBTRACT", pre_phase, 1.1, x=-1400, y=-4000), x=-1200, y=-4000), 0.0, x=-1000, y=-4000), 8.0, x=-800,
+        y=-4000), 0.6, x=-600, y=-4000)
+    heart = b.math("MAXIMUM", lub, dub, x=-400, y=-3900)
+    weak = b.math("MULTIPLY_ADD", heart, 0.3, 0.7, x=-200, y=-3900)  # (0.7 .. 1 on the beats while it builds up)
+    grown_in = b.math("POWER", pre_u, 3.0, x=-200, y=-4050)
+    strength = b.math("ADD", weak, b.math("MULTIPLY", grown_in, b.math("SUBTRACT", 1.0, weak, x=0, y=-4000), x=200,
+                                          y=-4000), x=400, y=-3950)
+    # (and fuller while it runs, so the veins are thick enough to see on her hands and feet: the zone's values raised
+    # to a power that goes from 0.55 back to 1 by the end)
+    fuller = b.math("POWER", ahead, b.math("MULTIPLY_ADD", grown_in, 0.45, 0.55, x=400, y=-4150), x=600, y=-4100)
+    ahead = b.switch("FLOAT", pre_on, ahead, b.math("MULTIPLY", fuller, strength, x=600, y=-3950), x=800, y=-3950)
     # Silk cocoon: where the silk spreads it swells the old outfit out (locked parts stay).
     puff = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Swell"], ahead, x=-1000, y=-3100),
                   b.switch("FLOAT", free, 0.0, 1.0, x=-1000, y=-3250), x=-800, y=-3150)
@@ -5149,6 +5283,105 @@ def build_title_group():
     b.feed(shaded.inputs["Material"], gi.outputs["Material"])
     b.feed(go.inputs["Geometry"], shaded.outputs["Geometry"])
     return ng
+
+
+def build_tongue_group():
+    """The symbiote's tongue (1.29, roar.py), made from nothing every frame in its object's space: a curve out of her
+    mouth (+Y) whose heading bends down over her chin more and more towards the tip and sways from side to side and up
+    and down (waves running along it), a flat tube round it (Flat: thickness / width) tapering to a round tip, as long
+    as it is out: from Start over Out Frames, back in over as many before End (nothing outside that)."""
+    ng = _new_group(TONGUE_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in TONGUE_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -2400, 0)
+    go = b.node("NodeGroupOutput", 2400, 0)
+    frame = b.node("GeometryNodeInputSceneTime", -2400, 600).outputs["Frame"]
+    out_f = b.math("MAXIMUM", gi.outputs["Out Frames"], 1e-3, x=-2200, y=400)
+    out = b.math("MULTIPLY", b.map_range(frame, gi.outputs["Start"], b.math("ADD", gi.outputs["Start"], out_f,
+                                                                            x=-2000, y=500), x=-1800, y=500,
+                                         smooth=True),
+                 b.math("SUBTRACT", 1.0, b.map_range(frame, b.math("SUBTRACT", gi.outputs["End"], out_f, x=-2000,
+                                                                    y=300), gi.outputs["End"], x=-1800, y=300,
+                                                     smooth=True), x=-1600, y=300), x=-1400, y=400)
+    line = b.node("GeometryNodeCurvePrimitiveLine", -2200, -200, mode="POINTS")
+    line.inputs["Start"].default_value = (0.0, 0.0, 0.0)
+    line.inputs["End"].default_value = (0.0, 1.0, 0.0)
+    resample = b.node("GeometryNodeResampleCurve", -2000, -200)
+    b.feed(resample.inputs["Curve"], line.outputs["Curve"])
+    resample.inputs["Count"].default_value = TONGUE_POINTS
+    u = b.node("GeometryNodeSplineParameter", -2000, -500).outputs["Factor"]
+    ds = b.math("DIVIDE", b.math("MULTIPLY", gi.outputs["Length"], out, x=-1600, y=-400), float(TONGUE_POINTS - 1),
+                x=-1400, y=-400)
+    # its heading: out of her mouth (+Y), then hanging down in the world more and more towards the tip (less while it
+    # comes out; also when her head tilts back), waves running along it from side to side and up and down
+    me = _self_info(b, -1800, -1800)
+    down = b.vmath("NORMALIZE", _unrotate(b, me, (0.0, 0.0, -1.0), -1600, -1800), x=-1400, y=-1800)
+    hang = b.math("MULTIPLY", b.math("MULTIPLY", b.math("POWER", u, 1.15, x=-1600, y=-700), 0.9, x=-1400, y=-700),
+                  b.math("MULTIPLY_ADD", out, 0.6, 0.4, x=-1400, y=-850), x=-1200, y=-750, clamp=True)
+    along = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("SCALE", (0.0, 1.0, 0.0), scale=b.math(
+        "SUBTRACT", 1.0, hang, x=-1000, y=-700), x=-800, y=-700), b.vmath("SCALE", down, scale=hang, x=-800, y=-850),
+        x=-600, y=-750), x=-400, y=-750)
+    lift = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", (1.0, 0.0, 0.0), along, x=-400, y=-900), x=-200, y=-900)
+    bob = b.math("MULTIPLY", b.math("SINE", b.math("MULTIPLY_ADD", u, 5.5, b.math("MULTIPLY", frame, 0.21, x=-1600,
+                                                                                    y=-1000), x=-1400, y=-1000),
+                                    x=-1200, y=-1000), b.math("MULTIPLY", u, 0.22, x=-1200, y=-1150), x=-1000, y=-1050)
+    sway = b.math("MULTIPLY", b.math("SINE", b.math("ADD", b.math("MULTIPLY_ADD", u, 4.0, 1.0, x=-1600, y=-1300),
+                                                    b.math("MULTIPLY", frame, 0.15, x=-1600, y=-1450), x=-1400,
+                                                    y=-1350), x=-1200, y=-1350),
+                  b.math("MULTIPLY", u, 0.35, x=-1200, y=-1500), x=-1000, y=-1400)
+    heading = b.vmath("NORMALIZE", b.vmath("ADD", b.vmath("ADD", along, b.vmath("SCALE", (1.0, 0.0, 0.0), scale=sway,
+                                                                                x=-400, y=-1300), x=-200, y=-1200),
+                                           b.vmath("SCALE", lift, scale=bob, x=-200, y=-1050), x=0, y=-1100),
+                      x=-100, y=-1100)
+    pos = b.accumulate(b.vmath("SCALE", heading, scale=ds, x=0, y=-1100), 0, "FLOAT_VECTOR", x=200, y=-1100,
+                       output="Trailing")
+    shaped = b.set_position(resample.outputs["Curve"], position=pos, x=400, y=-200)
+    # a round tip, as thick as it is out
+    radius = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Width"], b.math("MULTIPLY", out, 3.0, x=200, y=-1500,
+                                                                               clamp=True), x=400, y=-1500),
+                    b.math("SQRT", b.math("MAXIMUM", b.math("SUBTRACT", 1.0, b.math("POWER", u, 4.0, x=0, y=-1700),
+                                                            x=200, y=-1700), 0.0004, x=400, y=-1700), x=600, y=-1700),
+                    x=800, y=-1600)
+    sized = b.node("GeometryNodeSetCurveRadius", 600, -200)
+    b.feed(sized.inputs["Curve"], shaped)
+    b.feed(sized.inputs["Radius"], radius)
+    # flat side to side: tilt the curve so the profile's wide side lies along +X (its normal's side of it)
+    normal = b.node("GeometryNodeInputNormal", 600, -500).outputs[0]
+    tangent = b.node("GeometryNodeInputTangent", 600, -650).outputs[0]
+    binormal = b.vmath("CROSS_PRODUCT", tangent, normal, x=800, y=-600)
+    tilt = b.math("ARCTAN2", b.vmath("DOT_PRODUCT", (1.0, 0.0, 0.0), binormal, x=1000, y=-650),
+                  b.vmath("DOT_PRODUCT", (1.0, 0.0, 0.0), normal, x=1000, y=-500), x=1200, y=-550)
+    tilted = b.node("GeometryNodeSetCurveTilt", 1000, -200)
+    b.feed(tilted.inputs["Curve"], sized.outputs["Curve"])
+    b.feed(tilted.inputs["Tilt"], tilt)
+    circle = b.node("GeometryNodeCurvePrimitiveCircle", 1000, -900, mode="RADIUS")
+    circle.inputs["Resolution"].default_value = 14
+    circle.inputs["Radius"].default_value = 1.0
+    flat = b.node("GeometryNodeTransform", 1200, -900)
+    b.feed(flat.inputs["Geometry"], circle.outputs["Curve"])
+    b.feed(flat.inputs["Scale"], b.combine(1.0, gi.outputs["Flat"], 1.0, x=1000, y=-1100))
+    tube_node = b.curve_to_mesh(tilted.outputs["Curve"], flat.outputs["Geometry"], x=1400, y=-200)
+    caps = tube_node.node.inputs.get("Fill Caps")
+    if caps is not None:
+        caps.default_value = True
+    smooth = b.node("GeometryNodeSetShadeSmooth", 1600, -200)
+    b.feed(smooth.inputs["Geometry"], tube_node)
+    mat = b.node("GeometryNodeSetMaterial", 1800, -200)
+    b.feed(mat.inputs["Geometry"], smooth.outputs["Geometry"])
+    b.feed(mat.inputs["Material"], gi.outputs["Material"])
+    shown = b.switch("GEOMETRY", b.compare("GREATER_THAN", out, 0.01, x=1800, y=200), None, mat.outputs["Geometry"],
+                     x=2100, y=0)
+    b.feed(go.inputs["Geometry"], shown)
+    return ng
+
+
+def ensure_tongue_group():
+    if not _is_current(TONGUE_GROUP):
+        build_tongue_group()
+    return bpy.data.node_groups[TONGUE_GROUP]
 
 
 def ensure_title_group():

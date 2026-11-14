@@ -794,6 +794,14 @@ _ZH = {
     ("*", "Symbiote from the Hands"): "毒液·从手开始",
     ("*", "Symbiote at the Head Whip"): "毒液·甩头变脸",
     ("*", "Symbiote, the Classic Beats"): "毒液·经典变身",
+    ("*", "Back Tendrils"): "后背大触手",
+    ("*", "Back Tendril Length"): "后背触手长度",
+    ("*", "Roar"): "咆哮（张嘴吐舌仰头）",
+    ("*", "Roar Time"): "咆哮时长",
+    ("*", "Snaps Back"): "一下缩回",
+    ("*", "Snaps Back After"): "关键时刻后几秒缩回",
+    ("*", "Prelude"): "前奏",
+    ("*", "Symbiote, Then It Snaps Back"): "毒液·一下缩回",
     ("*", "Eyes need the goo on her face: unlock Face* and Eye*"): "要长出眼睛，黏液得盖到脸上：把 Face*、Eye* 从锁定里去掉",
 }
 

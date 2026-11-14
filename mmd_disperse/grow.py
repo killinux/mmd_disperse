@@ -48,8 +48,12 @@ def remove(mask):
         _undo(arm)
 
 
-def sync(settings, mask, model, moment):
-    """Grow the old (or only) `model` at frame `moment` as the panel says; nothing when it is 0."""
+def sync(settings, mask, model, moment, until=None, taller=True):
+    """Grow the old (or only) `model` at frame `moment` as the panel says; nothing when it is 0. With `until` (first
+    frame, frames: 1.29, the goo snapping back in) it shrinks back then. Without `taller` only the chest grows (1.29,
+    with the symbiote: the armature object's scale cannot grow a new outfit bound to it (the Armature modifier undoes
+    an object's scale) and would pull what rides on the old model's bones and surface off her: the tendrils, the
+    tongue)."""
     remove(mask)
     arm = model.armature if model is not None else None
     if settings.body_grow <= 0.0 or arm is None or moment is None:
@@ -57,12 +61,15 @@ def sync(settings, mask, model, moment):
     scene = settings.id_data
     fps = scene.render.fps / scene.render.fps_base
     ease = "smoothstep(%.2f, %.2f, frame)" % (moment - BEFORE * fps, moment + AFTER * fps)
-    taller = TALLER * settings.body_grow
+    if until is not None:
+        ease = "(%s * (1 - smoothstep(%.2f, %.2f, frame)))" % (ease, until[0], until[0] + until[1])
+    tall = TALLER * settings.body_grow if taller else 0.0
     broader = BROADER * settings.body_grow
     arm[P_GROW] = mask
-    arm[P_SCALE] = list(arm.delta_scale)
-    for k in range(3):
-        _drive(arm, "delta_scale", k, "%.5f * (1 + %.4f * %s)" % (arm.delta_scale[k], taller, ease))
+    if tall:
+        arm[P_SCALE] = list(arm.delta_scale)
+        for k in range(3):
+            _drive(arm, "delta_scale", k, "%.5f * (1 + %.4f * %s)" % (arm.delta_scale[k], tall, ease))
     bones = {}
     chest = motion.find_bone(arm, CHEST)
     neck = motion.find_bone(arm, NECK)

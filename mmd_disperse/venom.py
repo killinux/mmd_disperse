@@ -21,6 +21,10 @@ other, so they stretch when the body opens up again.
 The result is a hidden mesh, the skeleton: one chain of vertices per tendril, branch or strand and a grid of faces
 per web, with the bindings and the timing as point attributes. It holds for the settings it was traced with (its
 signature); effect.sync() traces it again when they change.
+
+1.29: the big tendrils off her back (Venom's back tentacles) are chains too, every point bound to the root (a face
+of her upper back between the shoulder blades, found by rays from behind); the node tree grows them out of the goo,
+up and out, and lashes them about. Only one mesh of the outfit carries them: the one those rays meet first.
 """
 
 import math
@@ -37,6 +41,7 @@ SKELETON = "MMD Disperse Venom"
 P_SKELETON = "mmd_disperse_venom"  # on an outfit mesh: its skeleton
 P_SIGNATURE = "mmd_disperse_venom_signature"  # on the skeleton: the settings it was traced with
 P_VERTICES = "mmd_disperse_venom_vertices"  # ... and the vertex count of the mesh it is bound to
+P_BACK = "mmd_disperse_venom_back"  # ... and how many big tendrils off her back it carries (1.29)
 
 # Point attributes of the skeleton (besides the bindings of end A, a tendril point or the first end of a strand, and
 # end B, the other end of a strand: VENOM_ENDS, three vertex indices and their weights each).
@@ -47,6 +52,7 @@ ATTR_LENGTH = "mmdd_len"  # tendrils, webs: s at the end of the branch; strands:
 ATTR_ROOT = "mmdd_root"  # tendrils, webs: skeleton index of the root, whose age times the whole tendril
 ATTR_RND = "mmdd_rnd"  # random number per tendril / strand
 ATTR_THICK = "mmdd_thick"  # thickness factor per tendril / strand (1.27: the feelers are thin)
+ATTR_FAN = "mmdd_fan"  # 1.29, big tendrils off her back: which way they fan out (-1 .. 1 across her back)
 
 STEPS = 24  # trace steps per tendril length
 STRAND_POINTS = 8
@@ -61,6 +67,11 @@ COIL_TURN = 0.75  # 1.27, coiling tendrils: a steady turn (radians) off the fiel
 FEELERS = 2  # 1.27: feelers off each tendril near its tip: short, thin branches ...
 FEELER_LENGTH = (0.12, 0.22)  # ... this share of the tendril's length ...
 FEELER_THICK = 0.45  # ... this share of its thickness
+BACK_POINTS = 16  # 1.29: points along a big tendril off her back ...
+BACK_SPREAD = 0.075  # ... their roots spread this far either side of her spine (a share of her height) ...
+BACK_LEVEL = 0.65  # ... this far up from her chest bone's head to her neck's (between the shoulder blades)
+BACK_CHEST = ("上半身2", "upper body2", "UpperBody2", "Chest", "chest", "J_Bip_C_Chest", "上半身", "UpperBody",
+              "upper body", "Spine2")
 
 
 def skeleton(ob):
@@ -68,12 +79,14 @@ def skeleton(ob):
     return sk if isinstance(sk, bpy.types.Object) else None
 
 
-def signature(settings, s):
+def signature(settings, s, back=False):
     """What the skeleton of a mesh with scale `s` depends on (object units; the frames the strands are looked for in
-    come from the transformation's frame range)."""
+    come from the transformation's frame range); with `back` it carries the big tendrils off her back (1.29)."""
+    count = int(getattr(settings, "venom_back", 0)) if back else 0
     return (float(settings.venom_tendrils), float(settings.venom_strands), settings.venom_length / s,
             float(settings.venom_webs), float(settings.frame_start), float(settings.frame_end),
-            float(getattr(settings, "venom_coil", 0.0)), float(getattr(settings, "venom_feelers", False)))
+            float(getattr(settings, "venom_coil", 0.0)), float(getattr(settings, "venom_feelers", False)),
+            float(count), getattr(settings, "venom_back_length", 0.0) * settings.size_reference / s if count else 0.0)
 
 
 def _encode(values):
@@ -248,6 +261,7 @@ class _Chain:
         self.root = None  # chain whose first point is the root (tendrils, webs), filled in later
         self.faces = []  # webs: faces, indices into points
         self.thick = 1.0  # thickness factor (feelers are thin)
+        self.fan = 0.0  # big tendrils off her back: which way they fan out (1.29)
 
 
 def _trace(surface, k, p, heading, length, step, rng, s0=0.0, bias=0.0):
@@ -476,9 +490,119 @@ def _mesh(name, surface, chains):
     put(ATTR_LENGTH, "FLOAT", per_point(lambda c: c.length, np.float32))
     put(ATTR_RND, "FLOAT", per_point(lambda c: c.rnd, np.float32))
     put(ATTR_THICK, "FLOAT", per_point(lambda c: c.thick, np.float32))
+    put(ATTR_FAN, "FLOAT", per_point(lambda c: c.fan, np.float32))
     put(ATTR_ROOT, "INT", np.concatenate([np.full(len(c.points), first[id(c.root)] if c.root is not None
                                                   else start, dtype=np.int32) for c, start in zip(chains, starts)]))
     return me
+
+
+def back_frame(ob):
+    """(spine point, forward, up) of her upper back in the object space of mesh `ob` (rest pose, numpy arrays): the
+    point BACK_LEVEL of the way from her chest bone's head to her neck's, the way she faces (her eyes in front of her
+    head bone; else -Y of her armature) and her armature's up. None without a chest and a neck bone."""
+    from . import motion
+    from .model import find_armature
+
+    arm = find_armature(ob)
+    if arm is None:
+        return None
+    bones = arm.data.bones
+
+    def bone(names):
+        return next((bones[n] for n in names if n in bones), None)
+
+    chest, neck, head = bone(BACK_CHEST), bone(motion.NECK), bone(motion.HEAD)
+    if chest is None or neck is None:
+        return None
+    to_mesh = ob.matrix_world.inverted() @ arm.matrix_world
+    spine = to_mesh @ chest.head_local.lerp(neck.head_local, BACK_LEVEL)
+    ahead = Vector((0.0, -1.0, 0.0))
+    eyes = [bone(names) for names in motion.EYES]
+    if head is not None and all(e is not None for e in eyes):
+        way = (eyes[0].head_local + eyes[1].head_local) / 2.0 - head.head_local
+        way.z = 0.0
+        if way.length > 1e-6:
+            ahead = way.normalized()
+    turn = to_mesh.to_3x3()
+    forward = (turn @ ahead).normalized()
+    up = (turn @ Vector((0.0, 0.0, 1.0))).normalized()
+    return np.array(spine, dtype=np.float64), np.array(forward, dtype=np.float64), np.array(up, dtype=np.float64)
+
+
+def _from_behind(bvh, free, normals, target, forward, height):
+    """(point, triangle) where a ray from behind `target` (towards `forward`) first meets a free triangle facing back,
+    passing through locked or front-facing ones; None when it meets none."""
+    origin = target - forward * (0.6 * height)
+    for _ in range(64):  # (through long hair: many cards of it)
+        loc, _nor, k, _d = bvh.ray_cast(Vector(origin), Vector(forward), 1.5 * height)
+        if loc is None:
+            return None
+        p = np.array(loc)
+        if free[k] and float(np.dot(normals[k], -forward)) > 0.05:
+            return p, k
+        origin = p + forward * (1e-4 * height)
+    return None
+
+
+def _back(surface, frame, count, length, height, rng):
+    """The big tendrils off her back (1.29): `count` chains of BACK_POINTS points, their roots spread across her
+    upper back (rays from behind), every point bound to its root, about `length` long (object units, rest pose straight
+    out along the root's normal; the node tree shapes them)."""
+    spine, forward, up = frame
+    side = np.cross(forward, up)
+    side = side / max(np.linalg.norm(side), 1e-12)
+    chains = []
+    for i in range(count):
+        share = (2.0 * (i + 0.5) / count - 1.0) if count > 1 else 0.0
+        target = (spine + side * (share * BACK_SPREAD * height)
+                  + up * ((rng.random() - 0.5) * 0.03 * height - abs(share) * 0.025 * height))
+        hit = _from_behind(surface.bvh, surface.free, surface.normals, target, forward, height)
+        if hit is None:
+            continue
+        p, k = hit
+        chain = _Chain(3, float(rng.random()))
+        chain.root = chain
+        chain.fan = share
+        chain.length = length * (0.85 + 0.3 * float(rng.random()))
+        weights = surface.weights(k, p)
+        for j in range(BACK_POINTS):
+            sj = chain.length * j / (BACK_POINTS - 1)
+            chain.points.append(p + surface.normals[k] * sj)
+            chain.a.append((k, weights))
+            chain.b.append((k, weights))
+            chain.t.append(sj / chain.length)
+            chain.s.append(sj)
+        chains.append(chain)
+    return chains
+
+
+_BACK_MESH = {}  # (meshes, their vertex counts, her height) -> the name of the mesh the big tendrils grow out of
+
+
+def back_mesh(meshes, height):
+    """The mesh of `meshes` the big tendrils off her back grow out of (1.29): the one rays from behind her upper back
+    meet first on a free face facing back; None when they meet none (or there are no chest and neck bones). `height`:
+    hers, world units."""
+    key = tuple((ob.name, len(ob.data.vertices)) for ob in meshes) + (round(height, 6),)  # (forget() on a rebuild)
+    if key in _BACK_MESH:
+        name = _BACK_MESH[key]
+        return next((ob for ob in meshes if ob.name == name), None)
+    best, nearest = None, None
+    for ob in meshes:
+        frame = back_frame(ob)
+        if frame is None:
+            continue
+        s = max(sum(abs(v) for v in ob.matrix_world.to_scale()) / 3.0, 1e-9)
+        surface = _Surface(ob, np.zeros(len(ob.data.vertices)))
+        spine, forward, _up = frame
+        hit = _from_behind(surface.bvh, surface.free, surface.normals, spine, forward, height / s)
+        if hit is None:
+            continue
+        behind = float(np.dot(hit[0] - spine, -forward)) * s  # (how far behind her spine: world units)
+        if nearest is None or behind > nearest:
+            best, nearest = ob, behind
+    _BACK_MESH[key] = best.name if best is not None else ""
+    return best
 
 
 def _motion(ob):
@@ -510,6 +634,7 @@ def forget():
     """Drop the poses and strands kept from earlier traces (a rebuild: the motion may have changed)."""
     _POSES.clear()
     _STRANDS.clear()
+    _BACK_MESH.clear()
 
 
 def sample_poses(scene, ob, frames, quiet):
@@ -561,10 +686,11 @@ def sample_poses(scene, ob, frames, quiet):
     return poses, key
 
 
-def build(ob, values, settings, height, scene, poses=(), pose_key=None):
+def build(ob, values, settings, height, scene, poses=(), pose_key=None, back=False):
     """Trace the tendrils, webs and strands of mesh `ob` (field `values` per vertex, object units) and give it a new
     skeleton; strands are also looked for in `poses` (vertex positions, object space), and kept for the next trace when
-    those have a `pose_key` (sample_poses). Returns (tendrils, strands)."""
+    those have a `pose_key` (sample_poses); with `back` the big tendrils off her back too (1.29). Returns (tendrils,
+    strands)."""
     remove(ob)
     s = max(sum(abs(v) for v in ob.matrix_world.to_scale()) / 3.0, 1e-9)
     surface = _Surface(ob, values)
@@ -582,11 +708,18 @@ def build(ob, values, settings, height, scene, poses=(), pose_key=None):
                            np.random.default_rng(len(ob.data.vertices) + 104729))
         if key is not None:
             _STRANDS[key] = strands
-    me = _mesh(SKELETON, surface, tendrils + strands)
+    bigs = []
+    count = int(getattr(settings, "venom_back", 0))
+    frame = back_frame(ob) if back and count > 0 else None
+    if frame is not None:
+        bigs = _back(surface, frame, count, getattr(settings, "venom_back_length", 0.45) * height / s, height / s,
+                     np.random.default_rng(len(ob.data.vertices) + 31337))
+    me = _mesh(SKELETON, surface, tendrils + strands + bigs)
     sk = bpy.data.objects.new(SKELETON, me)
     sk.hide_render = True
     particles.asset_collection(scene).objects.link(sk)
-    sk[P_SIGNATURE] = _encode(signature(settings, s))
+    sk[P_SIGNATURE] = _encode(signature(settings, s, back))
+    sk[P_BACK] = len(bigs)
     sk[P_VERTICES] = len(ob.data.vertices)
     ob[P_SKELETON] = sk
     return sum(1 for c in tendrils if c.kind == 0 and c.root is c), len(strands)

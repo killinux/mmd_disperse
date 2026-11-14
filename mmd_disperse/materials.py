@@ -17,6 +17,7 @@ WIRE_MATERIAL = "MMD Disperse Wire"
 RIBBON_MATERIAL = "MMD Disperse Ribbon"
 PARTICLE_MATERIAL = "MMD Disperse Particle"
 GOO_MATERIAL = "MMD Disperse Goo"
+TONGUE_MATERIAL = "MMD Disperse Tongue"  # 1.29: the symbiote's tongue (roar.py)
 COIN_MATERIAL = "MMD Disperse Coin"
 ICE_MATERIAL = "MMD Disperse Ice"
 CARD_MATERIAL = "MMD Disperse Card"
@@ -45,6 +46,7 @@ INNER = "MMDD Inner"
 P_INNER = "mmd_disperse_inner"
 LAYER = "MMDD Layer"
 P_LAYER = "mmd_disperse_layer"
+LAYER_REVISION = 2  # bumped when the undersuit's nodes change (1.29: the snap back, the roaring mouth): made again
 SURFACE = "MMDD Surface"
 P_SURFACE = "mmd_disperse_surface"  # the style the surface nodes were made for
 SURFACE_STYLES = ("VEINS", "FROST", "CHAR", "INK", "STONE", "GOLD", "SILK", "CODE", "PAPERCUT", "TATTOO", "LED",
@@ -976,6 +978,34 @@ def ensure_goo_material():
     return mat
 
 
+def ensure_tongue_material():
+    """The symbiote's tongue (1.29): wet, dark pink going red, a little translucent, fine bumps over it."""
+    mat = bpy.data.materials.get(TONGUE_MATERIAL)
+    if mat is not None:
+        return mat
+    mat = bpy.data.materials.new(TONGUE_MATERIAL)
+    if mat.node_tree is None:
+        mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = _new(nt, "ShaderNodeOutputMaterial", "Output", 400, 0)
+    bsdf = _new(nt, "ShaderNodeBsdfPrincipled", "Tongue BSDF", 100, 0)
+    _set_input(bsdf, ("Base Color",), (0.42, 0.045, 0.07, 1.0))
+    _set_input(bsdf, ("Roughness",), 0.18)
+    _set_input(bsdf, ("Subsurface Weight", "Subsurface"), 0.25)
+    _set_input(bsdf, ("Coat Weight", "Clearcoat"), 0.4)
+    coord = _new(nt, "ShaderNodeTexCoord", "Tongue Coordinates", -700, -300)
+    bumps = _new(nt, "ShaderNodeTexNoise", "Tongue Bumps", -500, -300, noise_dimensions="3D")
+    nt.links.new(coord.outputs["Object"], bumps.inputs["Vector"])
+    bumps.inputs["Scale"].default_value = 90.0
+    bump = _new(nt, "ShaderNodeBump", "Tongue Bump", -250, -300)
+    bump.inputs["Strength"].default_value = 0.2
+    nt.links.new(bumps.outputs[0], bump.inputs["Height"])
+    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
+    return mat
+
+
 def update_goo_material(color, cell, metallic=0.0, sheen=None, pulse=None):
     mat = bpy.data.materials.get(GOO_MATERIAL)
     if mat is None or mat.node_tree is None:
@@ -1411,8 +1441,9 @@ def add_layer(mat):
     """Where `disperse_layer` > 0 the surface is a dark, glossy undersuit with a fine web of glowing lines (cells
     on the rest position, so they stick to the body), or the symbiote's wet black goo."""
     nt = mat.node_tree
-    if nt is None or mat.get(P_LAYER):
+    if nt is None or mat.get(P_LAYER) == LAYER_REVISION:
         return
+    remove_layer(mat)  # (one of an older revision)
     outputs = _outputs(nt)
     if not outputs:
         return
@@ -1458,12 +1489,27 @@ def add_layer(mat):
     shown = _math(nt, LAYER, "MULTIPLY", _math(nt, LAYER, "MAXIMUM", attr.outputs[2], stay.outputs[0], x=x - 700,
                                               y=y + 350), _math(nt, LAYER, "SUBTRACT", 1.0, split, x=x - 500,
                                                                 y=y + 350), x=x - 300, y=y + 350)
+    # (1.29) the goo snaps back into her chest: gone outside a ball round " Retract Centre" whose radius " Retract
+    # Radius" (a frame driver) shrinks to nothing, its edge " Retract Width" soft
+    centre = _new(nt, "ShaderNodeCombineXYZ", LAYER + " Retract Centre", x - 1300, y + 700)
+    radius = _new(nt, "ShaderNodeValue", LAYER + " Retract Radius", x - 1300, y + 550)
+    radius.outputs[0].default_value = 1e6
+    width = _new(nt, "ShaderNodeValue", LAYER + " Retract Width", x - 1300, y + 450)
+    width.outputs[0].default_value = 1.0
+    far = _new(nt, "ShaderNodeVectorMath", LAYER + " Retract Distance", x - 1100, y + 650, operation="DISTANCE")
+    nt.links.new(rest.outputs["Vector"], far.inputs[0])
+    nt.links.new(centre.outputs[0], far.inputs[1])
+    gone = _smooth_node(nt, LAYER + " Retract Gone", far.outputs["Value"],
+                        _math(nt, LAYER, "SUBTRACT", radius.outputs[0], width.outputs[0], x=x - 1100, y=y + 500),
+                        radius.outputs[0], x - 900, y + 600)
+    shown = _math(nt, LAYER, "MULTIPLY", shown, _math(nt, LAYER, "SUBTRACT", 1.0, gone, x=x - 700, y=y + 600),
+                  x=x - 200, y=y + 500)
     for i, out in enumerate(outputs):
         mix = _new(nt, "ShaderNodeMixShader", "%s Mix %d" % (LAYER, i), out.location.x - 180, out.location.y + 450)
         nt.links.new(shown, mix.inputs[0])
         nt.links.new(pick.outputs[0], mix.inputs[2])
         _splice(nt, out, mix)
-    mat[P_LAYER] = 1
+    mat[P_LAYER] = LAYER_REVISION
 
 
 EYE_TILT = 0.5236  # the symbiote's eyes: tilted up and out this far (radians, 30 degrees) ...
@@ -1471,6 +1517,8 @@ EYE_SHAPE = (0.6, 0.32, 0.5)  # ... half their length, half their width, their d
 # inner points stop short of the nose, the outer ones reach the temples)
 TEETH_SHAPE = (1.0, 1.3, 0.19, 3.5)  # the grin: this far under the eye line, half its width, half its height (eye
 # distances), this many teeth across an eye distance
+MOUTH_GAP = 0.55  # 1.29, the roar: the jaws part this far at the middle (eye distances), less towards the corners ...
+MOUTH_INSIDE = (0.09, 0.006, 0.012)  # ... the mouth dark red inside
 SPLIT_SHAPE = (0.9, 1.25, 1.7, 0.3)  # the mask splitting: half the opening at its widest, the face's half width and
 # half height (eye distances), how far under the eye line the face's middle is
 FACE_DEPTH = (0.7, 1.0)  # the front of her head: this far from the eyes' plane the face marks fade (eye distances)
@@ -1508,7 +1556,7 @@ def _symbiote_face(nt, rest, shader, x, y):
     size = _new(nt, "ShaderNodeValue", LAYER + " Eye Size", x - 400, y)
     size.outputs[0].default_value = 1.0
     strengths = {}
-    for i, name in enumerate((" Eye Strength", " Teeth Strength", " Split Open")):
+    for i, name in enumerate((" Eye Strength", " Teeth Strength", " Split Open", " Mouth Open")):
         node = _new(nt, "ShaderNodeValue", LAYER + name, x - 400, y - 150 - 120 * i)
         node.outputs[0].default_value = 0.0  # (frame drivers when they open and shut: update_layer)
         strengths[name] = node.outputs[0]
@@ -1553,8 +1601,15 @@ def _symbiote_face(nt, rest, shader, x, y):
     saw = m("MULTIPLY", m("ABSOLUTE", m("SUBTRACT", m("FRACT", m("MULTIPLY_ADD", gx, TEETH_SHAPE[3], 0.5)), 0.5)),
             2.0)
     half = m("MULTIPLY", m("MULTIPLY", taper, TEETH_SHAPE[2]), m("MULTIPLY_ADD", saw, 0.55, 0.45))
-    teeth = m("MULTIPLY", m("SUBTRACT", 1.0, smooth(m("SUBTRACT", m("ABSOLUTE", tz), half), 0.0, 0.05)),
+    # (1.29) the roar: the jaws part (Mouth Open), the upper teeth up and the lower ones down, dark red between them
+    gap = m("MULTIPLY", m("MULTIPLY", strengths[" Mouth Open"], MOUTH_GAP), m("SQRT", taper))
+    rows = [m("SUBTRACT", 1.0, smooth(m("SUBTRACT", m("ABSOLUTE", m(op, tz, m("MULTIPLY", gap, 0.5))), half), 0.0,
+                                      0.05)) for op in ("SUBTRACT", "ADD")]
+    teeth = m("MULTIPLY", m("MAXIMUM", rows[0], rows[1]),
               m("MULTIPLY", smooth(taper, 0.0, 0.08), strengths[" Teeth Strength"]))
+    inside = m("MULTIPLY", m("MULTIPLY", m("SUBTRACT", 1.0, smooth(m("ABSOLUTE", tz), m("MULTIPLY", gap, 0.38),
+                                                                  m("MULTIPLY", gap, 0.5))),
+                             smooth(taper, 0.0, 0.08)), m("MULTIPLY", front, smooth(gap, 0.0, 0.02)), clamp=True)
     white_mask = m("MULTIPLY", m("MAXIMUM", eyes, teeth), front, clamp=True)
     # --- the mask splitting down the middle: her face shows inside a band round the middle line, Split Open wide
     opening = m("MULTIPLY", strengths[" Split Open"], SPLIT_SHAPE[0])
@@ -1565,12 +1620,19 @@ def _symbiote_face(nt, rest, shader, x, y):
     split = m("MULTIPLY", m("MULTIPLY", m("SUBTRACT", 1.0, smooth(m("ABSOLUTE", gx), m("MULTIPLY", opening, 0.85),
                                                                  opening)),
                             smooth(opening, 0.0, 0.02)), m("MULTIPLY", face, front), clamp=True)
+    mouth = _new(nt, "ShaderNodeBsdfPrincipled", LAYER + " Mouth Inside", x - 400, y - 1300)
+    _set_input(mouth, ("Base Color",), MOUTH_INSIDE + (1.0,))
+    _set_input(mouth, ("Roughness",), 0.25)
+    gaping = _new(nt, "ShaderNodeMixShader", LAYER + " Mouth Mix", x - 250, y - 1250)
+    nt.links.new(inside, gaping.inputs[0])
+    nt.links.new(shader, gaping.inputs[1])
+    nt.links.new(mouth.outputs[0], gaping.inputs[2])
     white = _new(nt, "ShaderNodeEmission", LAYER + " Eye White", x - 400, y - 1050)
     white.inputs["Color"].default_value = (0.92, 0.96, 1.0, 1.0)
     white.inputs["Strength"].default_value = 1.8
     mix = _new(nt, "ShaderNodeMixShader", LAYER + " Eye Mix", x - 150, y - 1050)
     nt.links.new(white_mask, mix.inputs[0])
-    nt.links.new(shader, mix.inputs[1])
+    nt.links.new(gaping.outputs[0], mix.inputs[1])
     nt.links.new(white.outputs[0], mix.inputs[2])
     return mix.outputs[0], split
 
@@ -1585,6 +1647,53 @@ def eyes_open_at(cover, back):
     return float(cover) + min(EYES_OPEN[1], EYES_OPEN[3] * span)
 
 
+ROAR_LEAD = 0.25  # 1.29: the roar starts this many seconds after the grin is open ...
+ROAR_OPEN = (0.2, 0.25)  # ... the jaws part over this many seconds and close over this many at its end ...
+SPLIT_AFTER_ROAR = 0.15  # ... and the mask splits no sooner than this many seconds after it
+
+
+def face_beats(cover, back, fps, teeth=True, split=None, roar=0.0, retract=None):
+    """When the symbiote's face does what, in frames (1.27, 1.29), for a goo coat that reaches her eyes at frame
+    `cover` and leaves them at `back` (a thin coat squeezes the beats; past cover + 1e5 it stays): {"fps", "eyes": the
+    eyes open from .. to, "shut": they shut from .. to, "teeth": the grin opens from .. to (None without `teeth`),
+    "roar": (start, end) the jaws are parted roaring for `roar` seconds after the grin (None: no roar, or no room for
+    one before the coat leaves or the goo snaps back in at frame `retract`), "split": (open at, frames it takes,
+    close at or None) with `split` (seconds after `cover` the mask splits, seconds it stays open; 0: for good), after
+    the roar}."""
+    cover, back = float(cover), float(back)
+    span = max(back - cover, 1.0)  # (frames the coat covers her eyes)
+    lasting = back > cover + 1e5  # (the goo coat stays: the mask closes again after Stays Open)
+
+    def at(frames, share):
+        return min(frames, share * span)
+
+    out = {"fps": fps, "eyes": (cover + at(EYES_OPEN[0], EYES_OPEN[2]), eyes_open_at(cover, back)),
+           "shut": (back - at(6.0, 0.3), back - at(2.0, 0.1)),
+           "teeth": (cover + at(8.0, 0.4), cover + at(13.0, 0.55)) if teeth else None, "roar": None, "split": None}
+    if roar > 0.0:
+        start = (out["teeth"] or out["eyes"])[1] + ROAR_LEAD * fps
+        end = start + roar * fps
+        if not lasting:
+            end = min(end, back - at(8.0, 0.4))
+        if retract is not None:
+            end = min(end, float(retract))
+        if end - start >= 0.3 * fps:
+            out["roar"] = (start, end)
+    if split is not None:
+        after, hold = split
+        open_at = max(cover + at(6.0, 0.3), cover + after * fps)
+        if out["roar"] is not None:
+            open_at = max(open_at, out["roar"][1] + SPLIT_AFTER_ROAR * fps)
+        if not lasting:
+            open_at = min(open_at, back - at(8.0, 0.4))
+        opens = at(5.0, 0.15)
+        close_at = open_at + opens + hold * fps if hold > 0.0 else None
+        if close_at is not None and not lasting and close_at > back - at(4.0, 0.2):
+            close_at = None  # (the coat goes before it would close: it stays open)
+        out["split"] = (open_at, opens, close_at)
+    return out
+
+
 def _face_clock(sock, expression):
     """A frame driver `expression` on the value socket `sock` (None: no driver, 0)."""
     sock.driver_remove("default_value")
@@ -1595,12 +1704,13 @@ def _face_clock(sock, expression):
         driver.expression = expression
 
 
-def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=False):
+def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=False, retract=None):
     """Undersuit colour, colour and brightness of its lines, cell size in object units; `goo` = (colour, smear size,
     metallic, sheen, pulse) for the symbiote's goo instead, and with it `eyes` = (left centre, right centre, the axis
     from the left to the right, the eye distance, clock) for the symbiote's face on it (None: none). The clock is a
-    strength, or a dict: cover and back (the frames the goo coat reaches her eyes and leaves them), fps, teeth (the
-    grin too) and split (None, or (seconds after cover the mask splits, seconds it stays open; 0: for good))."""
+    strength, or the face's beats (face_beats). `retract` (1.29): (centre, radius, width, first frame, frames) of the
+    goo snapping back into her chest (object space: it is gone outside a ball round the centre shrinking from the
+    radius to nothing), or None."""
     nodes = mat.node_tree.nodes if mat.node_tree else {}
     bsdf = nodes.get(LAYER + " BSDF")
     if bsdf is not None:
@@ -1622,31 +1732,19 @@ def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=
     strength = nodes.get(LAYER + " Eye Strength")
     if strength is not None:
         when = eyes[4] if eyes is not None else 0.0
-        clocks = {" Eye Strength": None, " Teeth Strength": None, " Split Open": None}
+        clocks = {" Eye Strength": None, " Teeth Strength": None, " Split Open": None, " Mouth Open": None}
         if isinstance(when, dict):
-            cover, back = float(when["cover"]), float(when["back"])
-            span = max(back - cover, 1.0)  # (frames the coat covers her eyes; a thin coat squeezes the beats)
-
-            def at(frames, share):
-                return min(frames, share * span)
-
-            shut = "(1 - smoothstep(%.2f, %.2f, frame))" % (back - at(6.0, 0.3), back - at(2.0, 0.1))
-            clocks[" Eye Strength"] = "smoothstep(%.2f, %.2f, frame) * %s" % (cover + at(EYES_OPEN[0], EYES_OPEN[2]),
-                                                                            eyes_open_at(cover, back), shut)
-            if when.get("teeth"):
-                clocks[" Teeth Strength"] = "smoothstep(%.2f, %.2f, frame) * %s" % (cover + at(8.0, 0.4),
-                                                                                  cover + at(13.0, 0.55), shut)
+            fps = float(when.get("fps", 30.0))
+            shut = "(1 - smoothstep(%.2f, %.2f, frame))" % when["shut"]
+            clocks[" Eye Strength"] = "smoothstep(%.2f, %.2f, frame) * %s" % (when["eyes"] + (shut,))
+            if when.get("teeth") is not None:
+                clocks[" Teeth Strength"] = "smoothstep(%.2f, %.2f, frame) * %s" % (when["teeth"] + (shut,))
+            if when.get("roar") is not None:
+                start, end = when["roar"]
+                clocks[" Mouth Open"] = "smoothstep(%.2f, %.2f, frame) * (1 - smoothstep(%.2f, %.2f, frame))" % (
+                    start, start + ROAR_OPEN[0] * fps, end - ROAR_OPEN[1] * fps, end)
             if when.get("split") is not None:
-                after, hold = when["split"]
-                fps = float(when.get("fps", 30.0))
-                lasting = back > cover + 1e5  # (the goo coat stays: the mask closes again after Hold)
-                open_at = max(cover + at(6.0, 0.3), cover + after * fps)
-                if not lasting:
-                    open_at = min(open_at, back - at(8.0, 0.4))
-                opens = at(5.0, 0.15)
-                close_at = open_at + opens + hold * fps if hold > 0.0 else None
-                if close_at is not None and not lasting and close_at > back - at(4.0, 0.2):
-                    close_at = None  # (the coat goes before it would close: it stays open)
+                open_at, opens, close_at = when["split"]
                 clocks[" Split Open"] = "smoothstep(%.2f, %.2f, frame)" % (open_at, open_at + opens) + (
                     " * (1 - smoothstep(%.2f, %.2f, frame))" % (close_at, close_at + opens) if close_at is not None
                     else "")
@@ -1664,6 +1762,20 @@ def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=
                         node.inputs[i].default_value = float(vector[i])
             if nodes.get(LAYER + " Eye Size") is not None:
                 nodes[LAYER + " Eye Size"].outputs[0].default_value = float(eyes[3])
+    # (1.29) the goo snapping back into her chest: the ball it is left in shrinks from the radius to nothing, slowly
+    # then fast
+    radius = nodes.get(LAYER + " Retract Radius")
+    if radius is not None:
+        radius.outputs[0].driver_remove("default_value")
+        radius.outputs[0].default_value = 1e6
+        centre = nodes.get(LAYER + " Retract Centre")
+        width = nodes.get(LAYER + " Retract Width")
+        if retract is not None and centre is not None and width is not None:
+            for i in range(3):
+                centre.inputs[i].default_value = float(retract[0][i])
+            width.outputs[0].default_value = float(retract[2])
+            _face_clock(radius.outputs[0], "%.5f * (1 - pow(clamp((frame - %.2f) / %.2f, 0, 1), 2))" % (
+                retract[1], retract[3], max(retract[4], 1e-3)))
 
 
 def remove_layer(mat):

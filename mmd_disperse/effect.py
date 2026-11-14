@@ -12,6 +12,7 @@ from . import (arrival, beats, chain, compositor, cover, dimension, domain, fini
                echo, ghost, materials, mirror, mist, motion, origins, particles, picture, printer, puppet, pyro,
                afterimage, crown, fumble, gust, morph, peel, plumage, replay, sweat, talisman, title,
                ribbons, rings, sampling, shadowplay, shell, shots, spirit, timewarp, tint, toon, totem, trails, venom)
+from . import roar  # noqa: E402  (1.29: the symbiote's roar)
 from . import model as mdl
 from .node_groups import (ATTR_ARRIVAL, BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups,
                           input_identifiers)
@@ -621,6 +622,7 @@ def remove_effect(mask):
     afterimage.remove(mask)
     crown.remove(mask)
     grow.remove(mask)
+    roar.remove(mask)  # 1.29
     chain.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
     bpy.data.objects.remove(mask)
@@ -700,19 +702,79 @@ def _update_layer(ob, settings):
             settings.venom_pulse) if settings.layer_style == "GOO" else None)
     eyes = _symbiote_eyes(ob, settings) if goo is not None and settings.venom_eyes else None
     if eyes is not None:  # (open and shut by the frame: the goo covers her face, the eyes open, the goo leaves)
-        when = _symbiote_eye_frames(settings, settings.mask)
-        scene = settings.id_data
-        eyes = eyes[:4] + ({"cover": when[0], "back": when[1], "fps": scene.render.fps / scene.render.fps_base,
-                            "teeth": settings.venom_teeth,
-                            "split": ((settings.venom_split_after, settings.venom_split_hold)
-                                      if settings.venom_split else None)},) if when is not None else None
+        beats = _face_beats(settings, settings.mask)
+        eyes = eyes[:4] + (beats,) if beats is not None else None
+    retract = None
+    when = _retract_frames(settings, settings.mask) if goo is not None else None
+    centre = _retract_centre(ob) if when is not None else None
+    if centre is not None:  # (1.29: the goo snaps back into her chest: from the farthest vertex in)
+        co = np.empty(len(ob.data.vertices) * 3, dtype=np.float32)
+        ob.data.vertices.foreach_get("co", co)
+        far = float(np.linalg.norm(co.reshape(-1, 3) - np.array(centre, dtype=np.float32), axis=1).max()) if len(
+            co) else height
+        retract = (tuple(centre), far + RETRACT_RIM * height, RETRACT_RIM * height, when[0], when[1])
     for mat in _glow_materials(ob, settings):
         if settings.layer_enable:
             materials.add_layer(mat)
             materials.update_layer(mat, settings.layer_color, settings.glow_color, settings.layer_lines,
-                                   LAYER_CELL * height, goo, eyes, settings.layer_stay)
+                                   LAYER_CELL * height, goo, eyes, settings.layer_stay or when is not None, retract)
         else:
             materials.remove_layer(mat)
+
+
+RETRACT = 0.45  # 1.29: seconds the goo takes to snap back into her chest ...
+RETRACT_RIM = 0.04  # ... the edge of what is left of it this soft (a share of her height)
+PRELUDE_BEATS = 1.1  # the veins' prelude: this many heartbeats a second at first (then faster, 2.6 times by its end)
+BACK_EMERGE = 0.06  # the big tendrils off her back come out once the edge is this far past their root ...
+BACK_GROW = 0.3  # ... and are grown out once it is this much further (shares of her height)
+
+
+def _retract_frames(settings, mask):
+    """(first frame, frames) the goo snaps back in over (1.29: Snaps Back, Snaps Back After seconds after the big
+    moment as last placed); None when it does not."""
+    if not getattr(settings, "venom_retract", False) or mask is None:
+        return None
+    moment = mask.get(P_MOMENT, -1)
+    if moment is None or moment < 0:
+        return None
+    scene = settings.id_data
+    fps = scene.render.fps / scene.render.fps_base
+    return float(moment) + settings.venom_retract_after * fps, max(RETRACT * fps, 2.0)
+
+
+def _retract_centre(ob):
+    """Where in her chest the goo snaps back to, in mesh `ob`'s object space (rest): the middle of her chest bone;
+    None without one."""
+    arm = mdl.find_armature(ob)
+    if arm is None:
+        return None
+    bone = next((arm.data.bones[n] for n in venom.BACK_CHEST if n in arm.data.bones), None)
+    if bone is None:
+        return None
+    return ob.matrix_world.inverted() @ arm.matrix_world @ ((bone.head_local + bone.tail_local) / 2.0)
+
+
+def _face_beats(settings, mask):
+    """When the symbiote's face does what (materials.face_beats: the eyes, the grin, the roar, the mask splitting), or
+    None (no eyes on a goo coat, or the goo never reaches her eyes)."""
+    if not (settings.layer_enable and settings.layer_style == "GOO" and settings.venom_eyes) or mask is None:
+        return None
+    when = _symbiote_eye_frames(settings, mask)
+    if when is None:
+        return None
+    scene = settings.id_data
+    retract = _retract_frames(settings, mask)
+    return materials.face_beats(when[0], when[1], scene.render.fps / scene.render.fps_base, settings.venom_teeth,
+                                (settings.venom_split_after, settings.venom_split_hold) if settings.venom_split
+                                else None, settings.venom_roar_time if settings.venom_roar else 0.0,
+                                retract[0] if retract is not None else None)
+
+
+def _first_key(mask):
+    """The frame of the mask's first key (where the front sets off); None without keys."""
+    curves = _scale_curves(mask) if mask is not None else []
+    keys = curves[0].keyframe_points if curves else []
+    return float(keys[0].co[0]) if len(keys) else None
 
 
 EYE_SHIFT = (0.15, 0.1)  # the symbiote's eyes sit this far out and up from her eyes (in eye distances)
@@ -750,8 +812,9 @@ def _symbiote_eye_frames(settings, mask):
     round the eye centres, the earliest of its meshes (her face surface; the eyeballs behind it arrive later), and the
     undersuit's width behind the edge. None when the goo never gets there."""
     meshes = [ob for ob in effect_objects(mask) if ob.type == "MESH" and ob.get(P_ROLE) == "TARGET"]
+    stays = settings.layer_stay or getattr(settings, "venom_retract", False)  # (1.29: it stays until it snaps back)
     key = (mask.name, float(mask.get(P_WAVE, 0.0)), mask.get(P_PATH, ""), settings.seeds, settings.frame_start,
-           settings.frame_end, round(_layer(settings), 6), settings.layer_stay, tuple(ob.name for ob in meshes))
+           settings.frame_end, round(_layer(settings), 6), stays, tuple(ob.name for ob in meshes))
     if key in _EYE_FRAMES:
         return _EYE_FRAMES[key]
     _EYE_FRAMES.clear()
@@ -782,7 +845,7 @@ def _symbiote_eye_frames(settings, mask):
     if reach is not None:
         cover = _frame_at(mask, reach)
         if cover is not None:
-            back = None if settings.layer_stay else _frame_at(mask, reach + _layer(settings))
+            back = None if stays else _frame_at(mask, reach + _layer(settings))
             when = (float(cover), float(back) if back is not None else float(cover) + 1e6)
     _EYE_FRAMES[key] = when
     return when
@@ -863,14 +926,15 @@ def _update_venom(settings, mask, objects):
     arrival_path = mask.get(P_PATH, "SPHERE") != "SPHERE"
     height = max(settings.size_reference, 1e-3)
     scene = settings.id_data
+    back = venom.back_mesh(owners, height) if settings.venom_back > 0 else None  # (1.29: the big tendrils' mesh)
     for ob in owners:
-        if not venom.matches(ob, venom.signature(settings, _object_scale(ob))):
+        if not venom.matches(ob, venom.signature(settings, _object_scale(ob), ob == back)):
             values = venom.field_values(ob, mask.matrix_world.translation, arrival_path)
             # strands are also looked for in the poses the body takes while it transforms
             start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
             frames = [int(round(start + (end - start) * (i + 1) / (venom.POSES + 1))) for i in range(venom.POSES)]
             poses, key = venom.sample_poses(scene, ob, frames, objects) if settings.venom_strands > 0 else ([], None)
-            venom.build(ob, values, settings, height, scene, poses, key)
+            venom.build(ob, values, settings, height, scene, poses, key, ob == back)
     goo = materials.ensure_goo_material()
     materials.update_goo_material(settings.venom_color, GOO_CELL * height, settings.venom_metallic,
                                   settings.venom_sheen, settings.venom_pulse)
@@ -1466,7 +1530,11 @@ def sync(settings):
     landing = _frame_at(mask, big) if wave_at > 0.0 else None
     landing = None if landing is None else int(math.ceil(landing - 1e-6))
     toon_anchor = toon.sync(settings, mask, next(iter(_models(settings)), None), settings.frame_start, landing)
-    grow.sync(settings, mask, next(iter(_models(settings)), None), landing)  # 1.13: taller and stronger
+    # 1.13: taller and stronger (1.29: at her face when the big moment is there, and back as the goo snaps back)
+    grow_at = mask.get(P_MOMENT) if settings.moment_at == "FACE" and _at_face(settings, mask) else landing
+    grow.sync(settings, mask, next(iter(_models(settings)), None), grow_at, _retract_frames(settings, mask),
+              taller=not settings.venom_enable)
+    roar.sync(settings, mask, _models(settings), _face_beats(settings, mask))  # 1.29: the symbiote's roar
     # 1.12: the spirit self (the Dharma form, three heads and six arms), about empties following the dancer's joints
     outfit_meshes = [ob for ob in objects if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
     pivots = spirit.sync(settings, mask, next(iter(_models(settings)), None), outfit_meshes) or {}
@@ -1475,6 +1543,9 @@ def sync(settings):
         materials.ensure_spirit_material()
     materials.update_spirit_material(settings.spirit_color, settings.spirit_glow)
     fps = scene.render.fps / scene.render.fps_base
+    retract_at = _retract_frames(settings, mask)  # 1.29: the goo snaps back in
+    first_key = _first_key(mask)
+    prelude = settings.old_surface != "NONE" and settings.surface_prelude > 0.0 and first_key is not None
     common = {
         "Mask": mask,
         "Use Rest Position": settings.space == "REST",
@@ -1500,6 +1571,10 @@ def sync(settings):
         "Venom Material": goo,
         "Tendril Pulse": settings.venom_pulse,
         "Goo Drips": settings.venom_drips,
+        "Back Emerge": BACK_EMERGE * height,
+        "Back Grow": BACK_GROW * height,
+        "Retract At": retract_at[0] if retract_at is not None else 1e9,
+        "Retract Frames": retract_at[1] if retract_at is not None else 0.0,
         "Edge Glow": settings.edge_glow,
         "Scales": settings.entrance == "SCALES",
         "Scale Size": settings.scale_size,
@@ -1638,6 +1713,10 @@ def sync(settings):
             "Particle Size": settings.particle_size,
             "Surface Ahead": settings.old_surface != "NONE",
             "Surface Reach": settings.surface_width,
+            "Prelude From": (first_key - settings.surface_prelude * fps) if prelude else 0.0,
+            "Prelude Frames": settings.surface_prelude * fps if prelude else 0.0,
+            "Prelude Beats": (max(settings.surface_prelude * PRELUDE_BEATS, 1.0)
+                              if prelude and settings.old_surface == "VEINS" else 0.0),
             "Crystals": crystal is not None,
             "Crystal Object": crystal,
             "Crystal Size": settings.crystal_size,

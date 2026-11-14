@@ -5103,6 +5103,215 @@ def run():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.28 checks")
 
+    # --- 1.29: the symbiote's prelude (black veins throbbing under her skin before the front sets off), the big
+    # tendrils off her back, the roar (the jaws parting, the tongue, her head tilting back), the goo snapping back in
+    from mmd_disperse import grow as grow_
+    from mmd_disperse import roar as roar_
+
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "venom_enable", "venom_eyes", "venom_teeth", "venom_split",
+        "venom_split_after", "venom_split_hold", "venom_tendrils", "venom_strands", "old_surface", "layer_enable",
+        "layer_style", "layer_width", "layer_stay", "moment_at", "shot_enable", "impact_enable", "surface_width",
+        "surface_prelude", "venom_back", "venom_back_length", "venom_roar", "venom_roar_time", "venom_retract",
+        "venom_retract_after", "body_grow")}
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.shot_enable, s.impact_enable, s.moment_at, s.body_grow = False, False, "FACE", 0.0
+    s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
+    s.layer_width, s.layer_stay, s.surface_width = 0.3 * height, True, 0.18 * height
+    s.edge_glow, s.frame_start, s.frame_end = False, 40, 100
+    s.venom_enable, s.old_surface, s.layer_enable, s.layer_style = True, "VEINS", True, "GOO"
+    s.venom_eyes, s.venom_teeth, s.venom_split, s.venom_split_after, s.venom_split_hold = True, True, True, 1.2, 1.0
+    s.venom_tendrils, s.venom_strands = 60, 20
+    s.venom_back, s.venom_roar, s.venom_retract, s.surface_prelude = 0, False, False, 0.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build for the 1.29 checks")
+    fps_ = scene.render.fps / scene.render.fps_base
+    first_ = effect._first_key(s.mask)
+
+    def ahead_max(f_):
+        scene.frame_set(int(f_))
+        vals_ = [evaluated_values(m_, "disperse_ahead") for m_ in base.meshes]
+        vals_ = [v_ for v_ in vals_ if v_ is not None and len(v_)]
+        return round(float(max(float(v_.max()) for v_ in vals_)), 4) if vals_ else -1.0
+
+    # the prelude: nothing before it, the veins near the start points while it runs (throbbing: weak, strong), none
+    # there without it
+    no_prelude_ = ahead_max(first_ - 10)
+    s.surface_prelude = 1.0
+    span_ = 1.0 * fps_
+    before_ = ahead_max(first_ - span_ - 6)
+    during_ = [ahead_max(first_ - span_ + k_) for k_ in range(int(span_ * 0.45), int(span_) - 1, 2)]
+    check(first_ is not None and no_prelude_ == 0.0 and before_ == 0.0 and max(during_) > 0.05
+          and max(during_) - min(during_) > 0.02,
+          "veins' prelude: none before it (%.3f) or without it (%.3f), throbbing near the start points while it runs "
+          "(%s)" % (before_, no_prelude_, during_))
+    mod_ = next(m_ for m_ in base.meshes[0].modifiers if m_.type == "NODES" and m_.node_group is not None
+                and m_.node_group.name == node_groups.BASE_GROUP)
+    ids_ = node_groups.input_identifiers(mod_.node_group)
+    s.old_surface = "FROST"
+    check(mod_[ids_["Prelude Beats"]] == 0.0 and mod_[ids_["Prelude Frames"]] > 0.0,
+          "prelude of the frost: no heartbeat (%s, %s)" % (mod_[ids_["Prelude Beats"]], mod_[ids_["Prelude Frames"]]))
+    s.old_surface = "VEINS"
+    # the big tendrils off her back: one mesh carries them, rooted behind her spine, sticking far out of the body once
+    # the edge has passed and lashing about; none before
+    s.venom_back, s.venom_back_length = 4, 0.45
+    backs_ = [m_ for m_ in base.meshes if venom.skeleton(m_) is not None and venom.skeleton(m_).get(venom.P_BACK, 0)]
+    back_ = backs_[0] if len(backs_) == 1 else None
+    roots_ok_, count_ = False, 0
+    if back_ is not None:
+        sk_ = venom.skeleton(back_)
+        count_ = int(sk_[venom.P_BACK])
+        me_ = sk_.data
+        kind_ = np.zeros(len(me_.vertices), dtype=np.float32)
+        me_.attributes["mmdd_kind"].data.foreach_get("value", kind_)
+        s_ = np.zeros(len(me_.vertices), dtype=np.float32)
+        me_.attributes["mmdd_s"].data.foreach_get("value", s_)
+        co_ = np.zeros(len(me_.vertices) * 3, dtype=np.float32)
+        me_.vertices.foreach_get("co", co_)
+        roots_ = co_.reshape(-1, 3)[(kind_ > 2.5) & (s_ < 1e-6)]
+        spine_, forward_, _up_ = venom.back_frame(back_)
+        roots_ok_ = len(roots_) == count_ and bool(np.all((roots_ - spine_) @ forward_ < 0.0))
+    check(back_ is not None and count_ >= 2 and roots_ok_,
+          "big tendrils off her back: on one mesh (%s), %d of them, rooted behind her spine (%s)"
+          % ([m_.name for m_ in backs_], count_, roots_ok_))
+
+    def far_goo(f_, mesh_):
+        scene.frame_set(int(f_))
+        pts_ = goo_points(mesh_)
+        if not len(pts_):
+            return 0.0, pts_
+        pts_ = pts_[::max(1, len(pts_) // 1500)]
+        return float(surface_distance(pts_, mesh_).max()), pts_
+
+    if back_ is not None:
+        late_ = s.frame_end + 40
+        early_far_, _p = far_goo(first_ + 1, back_)
+        late_far_, late_pts_ = far_goo(late_, back_)
+        _far2, later_pts_ = far_goo(late_ + 6, back_)
+        moved_ = (float(np.abs(later_pts_ - late_pts_).max()) if later_pts_.shape == late_pts_.shape
+                  and len(late_pts_) else -1.0)
+        check(early_far_ < 0.15 * height and late_far_ > 0.25 * height and moved_ > 0.01 * height,
+              "big tendrils: none at the start (%.3f), far out of her back once the edge has passed (%.3f of %.3f), "
+              "lashing about (moved %.3f)" % (early_far_, late_far_, height, moved_))
+    # the roar: after the grin, before the mask splits; the jaws part on the coat, the tongue comes out, her head
+    # tilts back (a constraint on top of the dance); none of it without Roar
+    s.venom_roar, s.venom_roar_time = True, 1.4
+    beats_ = effect._face_beats(s, s.mask)
+    span_r_ = beats_.get("roar") if beats_ else None
+    coats_ = [sl_.material for m_ in target.meshes for sl_ in m_.material_slots
+              if sl_.material is not None and sl_.material.node_tree is not None
+              and sl_.material.node_tree.nodes.get(materials.LAYER + " Mouth Open") is not None]
+    check(span_r_ is not None and span_r_[0] > beats_["teeth"][1] and beats_["split"][0] >= span_r_[1]
+          and abs(span_r_[1] - span_r_[0] - 1.4 * fps_) < 1.0 and coats_,
+          "roar: after the grin (%s), %.1f frames, the mask splits after it (%s; %d coats with a mouth)"
+          % (beats_.get("teeth") if beats_ else None, (span_r_[1] - span_r_[0]) if span_r_ else -1.0,
+             beats_.get("split") if beats_ else None, len(coats_)))
+    if span_r_ is not None and coats_:
+        mid_ = 0.5 * (span_r_[0] + span_r_[1])
+        node_ = coats_[0].node_tree.nodes[materials.LAYER + " Mouth Open"]
+        ad_ = coats_[0].node_tree.animation_data
+        drv_ = next((d_ for d_ in (ad_.drivers if ad_ else []) if d_.data_path == node_.outputs[0].path_from_id(
+            "default_value")), None)
+        scene.frame_set(int(span_r_[0]) - 3)
+        shut_ = float(node_.outputs[0].default_value)
+        scene.frame_set(int(mid_))
+        open_ = float(node_.outputs[0].default_value)
+        tongue_ = next((ob_ for ob_ in roar_.objects(s.mask) if ob_.type == "MESH"), None)
+        tilt_ = next((ob_ for ob_ in roar_.objects(s.mask) if ob_.type == "EMPTY"), None)
+        arm_ = base.armature
+        head_ = next((arm_.pose.bones[n_] for n_ in motion.HEAD if n_ in arm_.pose.bones), None)
+        tilted_ = arm_.pose.bones.get(tilt_[roar_.P_BONE][1]) if tilt_ is not None else None  # (her neck)
+        con_ = tilted_.constraints.get(roar_.CONSTRAINT) if tilted_ is not None else None
+        bpy.context.view_layer.update()
+        tip_on_ = arm_.matrix_world @ head_.tail if head_ is not None else None
+        out_ = evaluated_positions(tongue_) if tongue_ is not None else np.zeros((0, 3))
+        if con_ is not None:
+            con_.mute = True
+            bpy.context.view_layer.update()
+        tip_off_ = arm_.matrix_world @ head_.tail if head_ is not None else None
+        if con_ is not None:
+            con_.mute = False
+            bpy.context.view_layer.update()
+        ahead_ = arm_.matrix_world.to_3x3() @ roar_._ahead(arm_.data.bones[head_.name], [
+            next(arm_.data.bones[n_] for n_ in names_ if n_ in arm_.data.bones) for names_ in motion.EYES])
+        back_tilt_ = float((tip_on_ - tip_off_).dot(ahead_.normalized())) if tip_on_ is not None else 0.0
+        near_root_ = out_[out_[:, 1] < 0.02 * height] if len(out_) else out_
+        wide_ = (float(np.ptp(near_root_[:, 0])), float(np.ptp(near_root_[:, 2]))) if len(near_root_) else (0.0, 1.0)
+        scene.frame_set(int(span_r_[0]) - 3)
+        in_ = evaluated_positions(tongue_) if tongue_ is not None else np.zeros((1, 3))
+        reach_ = float(np.ptp(out_[:, 1])) if len(out_) else 0.0
+        check(shut_ < 0.01 and open_ > 0.9 and drv_ is not None and drv_.driver.is_simple_expression,
+              "roar: the jaws part on the coat (%.2f before, %.2f in the middle), a simple driver" % (shut_, open_))
+        check(tongue_ is not None and len(in_) == 0 and len(out_) > 100 and reach_ > 0.05 * height
+              and wide_[0] > 1.5 * wide_[1],
+              "roar: the tongue comes out (%d vertices before, %d in the middle, %.3f long), flat side to side "
+              "(%.3f wide, %.3f thick at its root)" % (len(in_), len(out_), reach_, wide_[0], wide_[1]))
+        check(tilt_ is not None and con_ is not None and con_.target == tilt_ and back_tilt_ < -0.15 * head_.length
+              and tilt_.animation_data.drivers[0].driver.is_simple_expression,
+              "roar: her head tilts back (its tip %.3f the way she faces, head bone %.3f long), a simple driver"
+              % (back_tilt_, head_.length if head_ is not None else -1.0))
+    s.venom_roar = False
+    check(not roar_.objects(s.mask) and not any(c_.name == roar_.CONSTRAINT for pb_ in base.armature.pose.bones
+                                                for c_ in pb_.constraints)
+          and all(m_.node_tree.nodes[materials.LAYER + " Mouth Open"].outputs[0].default_value == 0.0
+                  for m_ in coats_),
+          "roar off: the tongue and the empty gone, the constraint off her head, the jaws shut")
+    # the goo snaps back in: the coat stays until then, the ball it is left in shrinks to nothing, the big tendrils
+    # whip back in, the growth goes
+    s.layer_stay, s.body_grow = False, 1.0
+    s.venom_retract, s.venom_retract_after = True, 1.0
+    when_r_ = effect._retract_frames(s, s.mask)
+    moment_ = s.mask.get(effect.P_MOMENT)
+    check(when_r_ is not None and abs(when_r_[0] - (moment_ + 1.0 * fps_)) < 0.01
+          and abs(when_r_[1] - effect.RETRACT * fps_) < 0.01,
+          "snaps back: a second after the big moment (frame %s: %s)" % (moment_, when_r_))
+    if when_r_ is not None and coats_:
+        a_, d_ = when_r_
+        rad_ = coats_[0].node_tree.nodes[materials.LAYER + " Retract Radius"].outputs[0]
+        stay_ = coats_[0].node_tree.nodes[materials.LAYER + " Stay"].outputs[0].default_value
+        ad_ = coats_[0].node_tree.animation_data
+        drv_ = next((d for d in (ad_.drivers if ad_ else []) if d.data_path == rad_.path_from_id("default_value")),
+                    None)
+        values_ = []
+        grown_ = []
+        far_ = []
+        chest_ = grow_.motion.find_bone(base.armature, grow_.CHEST)
+        for f_ in (int(a_) - 2, int(a_ + 0.5 * d_), int(a_ + d_) + 2):
+            scene.frame_set(f_)
+            values_.append(round(float(rad_.default_value), 4))
+            grown_.append(round(float(chest_.scale[0]), 4) if chest_ is not None else -1.0)
+            far_.append(round(far_goo(f_, back_)[0], 4) if back_ is not None else 0.0)
+        driven_ = [d.data_path for d in (base.armature.animation_data.drivers
+                                         if base.armature.animation_data else [])]
+        check(drv_ is not None and drv_.driver.is_simple_expression and stay_ == 1.0 and values_[0] > 0.5 * height
+              and values_[1] < values_[0] and values_[2] == 0.0,
+              "snaps back: the coat stays until then (Stay %.0f), the ball it is left in shrinks to nothing (%s)"
+              % (stay_, values_))
+        check(grown_[0] > grown_[2] + 1e-4 and abs(grown_[2] - grown_[0] / (1.0 + grow_.BROADER)) < 1e-3
+              and "delta_scale" not in driven_,
+              "snaps back: the growth goes (her chest %s; with the symbiote the armature object is not scaled: %s)"
+              % (grown_, driven_))
+        check(back_ is None or (far_[0] > 0.25 * height and far_[2] < 0.05 * height),
+              "snaps back: the big tendrils whip back in (%s)" % far_)
+        s.venom_roar = True
+        beats_ = effect._face_beats(s, s.mask)
+        check(beats_ is not None and (beats_["roar"] is None or beats_["roar"][1] <= a_ + 1e-6),
+              "snaps back: the roar is over by then (%s, %.1f)" % (beats_.get("roar") if beats_ else None, a_))
+        s.venom_roar = False
+    s.venom_retract, s.body_grow = False, 0.0
+    check(all(m_.node_tree.nodes[materials.LAYER + " Retract Radius"].outputs[0].default_value >= 1e5
+              for m_ in coats_), "snaps back off: the coat keeps its goo")
+    check(not draw_panels(bpy.context), "panels draw with the 1.29 options")
+    for key_ in ("VENOM_CLASSIC", "VENOM_SNAP"):
+        presets.apply(s, key_)
+        s.frame_start, s.frame_end = 40, 100
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"} and s.surface_prelude > 0.0 and s.venom_back > 0
+              and s.venom_roar and s.body_grow > 0.0 and s.venom_retract == (key_ == "VENOM_SNAP"),
+              "preset %s builds" % key_)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.29 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

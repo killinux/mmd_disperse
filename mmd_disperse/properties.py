@@ -1306,6 +1306,26 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
     venom_split_hold: FloatProperty(name="Stays Open", default=1.0, min=0.0, soft_max=10.0, update=_sync,
                                     description="Seconds the gap stays open before the mask closes again (0: for "
                                                 "good); when the goo coat leaves anyway it just stays open")
+    # (1.29)
+    venom_back: IntProperty(name="Back Tendrils", default=0, min=0, max=8, update=_sync,
+                            description="Big tendrils grow out of her upper back once the goo has covered it, up and "
+                                        "out, and lash about (Venom's back tentacles; 0: none; the tendrils are "
+                                        "traced again)")
+    venom_back_length: FloatProperty(name="Back Tendril Length", default=0.45, min=0.05, soft_max=1.0, update=_sync,
+                                     description="How long the big tendrils off her back grow, a share of her height")
+    venom_roar: BoolProperty(name="Roar", default=False, update=_sync,
+                             description="With the eyes: after the grin the jaws part wide (two rows of teeth, dark "
+                                         "red inside), a long tongue lolls out over her chin and sways and her head "
+                                         "tilts back; the mask splits only after it (needs a head bone)")
+    venom_roar_time: FloatProperty(name="Roar Time", default=1.4, min=0.3, soft_max=5.0, update=_sync,
+                                   description="Seconds the roar lasts")
+    venom_retract: BoolProperty(name="Snaps Back", default=False, update=_sync,
+                                description="The goo snaps back into her chest: in less than half a second it is "
+                                            "gone, from her hands, feet and head inwards, the big tendrils whip back "
+                                            "in and the growth goes; what is under the coat shows again (the coat "
+                                            "stays on until then)")
+    venom_retract_after: FloatProperty(name="Snaps Back After", default=4.0, min=0.0, soft_max=20.0, update=_sync,
+                                       description="Seconds after the big moment the goo snaps back in")
 
     # --- the old outfit's surface ahead of the edge
     old_surface: EnumProperty(
@@ -1352,6 +1372,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                       "Gems, All at Once and the Gem Crown)")),
         default="NONE", update=_sync)
     surface_width: _distance("Surface Reach", "How far ahead of the edge the old outfit starts to change", 3.0)
+    surface_prelude: FloatProperty(name="Prelude", default=0.0, min=0.0, soft_max=5.0, update=_sync,
+                                   description="Seconds before the front sets off the change already creeps out from "
+                                               "the start points, weak at first; black veins throb with a heartbeat "
+                                               "that quickens (1.29; 0: none)")
     surface_color: FloatVectorProperty(name="Surface Color", subtype="COLOR", size=3, min=0.0, max=1.0,
                                        default=(0.006, 0.006, 0.009), update=_sync,
                                        description="Color of the veins, the ice, the char, the stone, the gold or the "

@@ -793,6 +793,20 @@ class MMDDISPERSE_PT_venom(_Panel, bpy.types.Panel):
         sub2.active = s.venom_eyes and s.venom_split
         sub2.prop(s, "venom_split_after")
         sub2.prop(s, "venom_split_hold")
+        sub.prop(s, "venom_roar")
+        sub3 = sub.column(align=True)
+        sub3.active = s.venom_eyes and s.venom_roar
+        sub3.prop(s, "venom_roar_time")
+        col = layout.column(align=True)
+        col.prop(s, "venom_back")
+        sub = col.column(align=True)
+        sub.active = s.venom_back > 0
+        sub.prop(s, "venom_back_length")
+        col = layout.column(align=True)
+        col.prop(s, "venom_retract")
+        sub = col.column(align=True)
+        sub.active = s.venom_retract
+        sub.prop(s, "venom_retract_after")
         if s.venom_eyes and s.use_lock and any(p.strip().lower().startswith(("face", "eye"))
                                                for p in s.lock_patterns.split(";")):
             layout.label(text="Eyes need the goo on her face: unlock Face* and Eye*", icon="INFO")
@@ -817,6 +831,7 @@ class MMDDISPERSE_PT_surface(_Panel, bpy.types.Panel):
             return
         col = layout.column(align=True)
         col.prop(s, "surface_width")
+        col.prop(s, "surface_prelude")
         if s.old_surface == "CODE":
             layout.label(text="Uses the glow color of the wire layer", icon="INFO")
         elif s.old_surface != "INK":

@@ -189,8 +189,10 @@ def hd_material(mat):
         nt.links.new(hsv.outputs["Color"], bsdf.inputs["Base Color"])
     else:
         nt.links.new(color.outputs["Color"], bsdf.inputs["Base Color"])
-    if "specular" in cfg:
-        bsdf.inputs["Specular IOR Level"].default_value = cfg["specular"]
+    if "specular" in cfg:  # (Blender 3.6 calls it Specular)
+        spec = bsdf.inputs.get("Specular IOR Level") or bsdf.inputs.get("Specular")
+        if spec is not None:
+            spec.default_value = cfg["specular"]
     if kind in ("hair", "eye") or base.name.lower().endswith(".png"):
         nt.links.new(color.outputs["Alpha"], bsdf.inputs["Alpha"])
     if rough is not None:
@@ -246,11 +248,15 @@ def setup_stage(scene, bounds, args):
     if hasattr(scene.render.image_settings, "media_type"):
         scene.render.image_settings.media_type = "IMAGE"
     scene.render.image_settings.file_format = "PNG"
-    scene.view_settings.view_transform = "AgX"
-    try:
+    try:  # (Blender 3.6 has no AgX: Filmic, high contrast)
+        scene.view_settings.view_transform = "AgX"
         scene.view_settings.look = "AgX - Medium High Contrast"
     except TypeError:
-        pass
+        scene.view_settings.view_transform = "Filmic"
+        try:
+            scene.view_settings.look = "Medium High Contrast"
+        except TypeError:
+            pass
     scene.frame_start, scene.frame_end = 1, args.length
 
     # World: studio HDRI for reflections, near-black background for the camera.

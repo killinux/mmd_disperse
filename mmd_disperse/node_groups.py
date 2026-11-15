@@ -28,7 +28,7 @@ import os
 
 import bpy
 
-VERSION = 24
+VERSION = 25
 CACHE_PREFIX = "mmd_disperse_node_groups_"  # the main groups, once built, are kept in the user's config folder
 
 FIELD_GROUP = "MMDDisperse Field"
@@ -261,7 +261,14 @@ RIDGE_INPUTS = (
     ("Retract Reach", "NodeSocketFloat", 0.0, 0.0, 1e9, None),
     ("Retract Width", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
     ("Retract Ridge", "NodeSocketFloat", 0.0, 0.0, 1e9, None),
+    # (1.32) drops of goo flung off that edge: this many on each unit of the outfit's area (0: none), this big
+    # (radius), flying this far in their life (object units), of this material
+    ("Retract Drops", "NodeSocketFloat", 0.0, 0.0, 1e9, None),
+    ("Drop Size", "NodeSocketFloat", 0.0, 0.0, 1e9, None),
+    ("Drop Fling", "NodeSocketFloat", 0.0, 0.0, 1e9, None),
+    ("Drop Material", "NodeSocketMaterial", None, None, None, None),
 )
+DROP_LIFE = 1.6  # (1.32) a drop flies for this many times the frames the goo takes to snap back
 RIDGE_SHAPE = (4.0, 1.2, 0.2)  # the ridge rises from this many widths inside the ball's edge, is highest this many in,
 # gone this many in
 
@@ -564,7 +571,8 @@ SLIME_INPUTS = (  # 1.31 (roar.py): the jaws parting as the face's Mouth Open, t
 SLIME_KEEP = (0.24, 0.1)  # a snapped strand's upper half keeps this share of its length (a hanging drop), the lower
 SLIME_REST = 6.0  # a strand this many times as long as it is thick (radius) is as thick as at rest; longer, thinner ...
 SLIME_THINNEST = 0.42  # ... down to this share, and in its middle this much less again
-SLIME_NECK = 0.45
+SLIME_NECK = 0.35
+SLIME_FOOT = (1.5, 0.3)  # (1.32) the smear at each root: this many times the strand's radius across, this deep
 SLIME_BEADS = (1.4, 1.5)  # stretched, beads of slime along it (a viscous thread breaking up): this much thicker at
 # most (times how stretched it is), about this many along each half
 SLIME_DRIP = (0.5, 1.1, 0.72, 0.2)  # snapped, the upper half a drop: this thick at the teeth, a bulb this much
@@ -1450,6 +1458,69 @@ def build_target_group(field_group, venom_group):
         "Retract Ridge"], x=2500, y=-4400), x=2700, y=-4400), x=1200, y=500)
     suit = b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Retract Ridge"], 0.0, x=1100, y=650), suit,
                     ridged, x=1300, y=350)
+    # (1.32) drops of goo flung off that edge: points spread over the coat, each set free the frame the edge passes it
+    # (where the ball's radius reaches its rest distance from the centre), flying out from the centre and off the
+    # surface, falling, shrinking away; only from the edge setting off until the last drop is gone
+    d_life = b.math("MAXIMUM", b.math("MULTIPLY", gi.outputs["Retract Frames"], DROP_LIFE, x=700, y=-4900), 1e-3,
+                    x=900, y=-4900)
+    d_window = b.boolean("AND", b.compare("GREATER_THAN", r_frame, gi.outputs["Retract At"], x=900, y=-5000),
+                         b.compare("LESS_THAN", r_frame, b.math("ADD", b.math(
+                             "ADD", gi.outputs["Retract At"], gi.outputs["Retract Frames"], x=700, y=-5150), d_life,
+                             x=900, y=-5150), x=1100, y=-5100), x=1300, y=-5050)
+    d_on = b.boolean("AND", b.boolean("AND", b.compare("GREATER_THAN", gi.outputs["Retract Drops"], 0.0, x=1100,
+                                                       y=-5250),
+                                      b.compare("GREATER_THAN", gi.outputs["Retract Frames"], 0.5, x=1100,
+                                                y=-5350), x=1300, y=-5300), d_window, x=1500, y=-5150)
+    d_spread = b.node("GeometryNodeDistributePointsOnFaces", 1300, -5500, distribute_method="RANDOM")
+    b.feed(d_spread.inputs["Mesh"], suit)
+    b.feed(d_spread.inputs["Density"], gi.outputs["Retract Drops"])
+    d_spread.inputs["Seed"].default_value = 31
+    d_rest, d_has_rest = b.named_attribute(ATTR_REST, "FLOAT_VECTOR", x=1300, y=-5800)
+    d_here = b.node("GeometryNodeInputPosition", 1300, -5950).outputs[0]
+    d_rest = b.switch("VECTOR", d_has_rest, d_here, d_rest, x=1500, y=-5850)
+    d_from = b.vmath("SUBTRACT", d_rest, gi.outputs["Retract Centre"], x=1700, y=-5850)
+    d_born = b.math("MULTIPLY_ADD", b.math("SQRT", b.math("MAXIMUM", b.math("SUBTRACT", 1.0, b.math(
+        "DIVIDE", b.vmath("LENGTH", d_from, x=1900, y=-5900), b.math("MAXIMUM", gi.outputs["Retract Reach"], 1e-6,
+                                                                       x=1900, y=-6050), x=2100, y=-5950), x=2300,
+        y=-5950), 0.0, x=2500, y=-5950), x=2700, y=-5950), gi.outputs["Retract Frames"], gi.outputs["Retract At"],
+        x=2900, y=-5950)
+    d_age = b.math("DIVIDE", b.math("SUBTRACT", r_frame, d_born, x=3100, y=-5900), d_life, x=3300, y=-5900)
+    d_alive = b.boolean("AND", b.compare("GREATER_THAN", d_age, 0.0, x=3500, y=-5850),
+                        b.compare("LESS_THAN", d_age, 1.0, x=3500, y=-6000), x=3700, y=-5900)
+    d_live = b.delete(d_spread.outputs["Points"], b.boolean("NOT", d_alive, x=3900, y=-5900), "POINT", x=4100,
+                      y=-5500)
+    d_rnd = b.white_noise(b.vmath("SCALE", d_rest, scale=13.1, x=1700, y=-6150), x=1900, y=-6150)[0]
+    d_fling = b.math("MULTIPLY", gi.outputs["Drop Fling"], b.math("MULTIPLY_ADD", d_rnd, 0.8, 0.6, x=2100, y=-6200),
+                     x=2300, y=-6200)
+    d_t = b.math("MAXIMUM", d_age, 0.0, x=3700, y=-6150)
+    d_down = _unrotate(b, me, (0.0, 0.0, -1.0), 3500, -6400)
+    d_move = b.vmath("ADD", b.vmath("ADD", b.vmath("SCALE", b.vmath("NORMALIZE", d_from, x=3700, y=-6300), scale=b.math(
+        "MULTIPLY", d_fling, b.math("SQRT", d_t, x=3900, y=-6250), x=4100, y=-6250), x=4300, y=-6300), b.vmath(
+        "SCALE", d_spread.outputs["Normal"], scale=b.math("MULTIPLY", b.math("MULTIPLY", d_fling, 0.5, x=3900,
+                                                                             y=-6450), d_t, x=4100, y=-6450),
+        x=4300, y=-6450), x=4500, y=-6350), b.vmath("SCALE", d_down, scale=b.math("MULTIPLY", b.math(
+            "MULTIPLY", d_fling, 1.6, x=3900, y=-6600), b.math("MULTIPLY", d_t, d_t, x=3900, y=-6750), x=4100,
+            y=-6650), x=4300, y=-6600), x=4700, y=-6450)
+    d_flown = b.set_position(d_live, offset=d_move, x=4300, y=-5500)
+    d_bead = b.node("GeometryNodeMeshIcoSphere", 4300, -5700)
+    d_bead.inputs["Subdivisions"].default_value = 2
+    d_bead.inputs["Radius"].default_value = 1.0
+    d_size = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Drop Size"], b.math("MULTIPLY_ADD", d_rnd, 0.9, 0.5,
+                                                                                  x=4300, y=-6900), x=4500, y=-6850),
+                    b.math("POWER", b.math("SUBTRACT", 1.0, d_t, x=4300, y=-7050), 0.7, x=4500, y=-7050), x=4700,
+                    y=-6950)
+    d_beads = b.node("GeometryNodeInstanceOnPoints", 4500, -5500)
+    b.feed(d_beads.inputs["Points"], d_flown)
+    b.feed(d_beads.inputs["Instance"], d_bead.outputs["Mesh"])
+    b.feed(d_beads.inputs["Scale"], b.combine(d_size, d_size, d_size, x=4700, y=-7150))
+    d_real = b.node("GeometryNodeRealizeInstances", 4700, -5500)
+    b.feed(d_real.inputs["Geometry"], d_beads.outputs["Instances"])
+    d_smooth = b.node("GeometryNodeSetShadeSmooth", 4900, -5500)
+    b.feed(d_smooth.inputs["Geometry"], d_real.outputs["Geometry"])
+    d_mat = b.node("GeometryNodeSetMaterial", 5100, -5500)
+    b.feed(d_mat.inputs["Geometry"], d_smooth.outputs["Geometry"])
+    b.feed(d_mat.inputs["Material"], gi.outputs["Drop Material"])
+    retract_drops = b.switch("GEOMETRY", d_on, None, d_mat.outputs["Geometry"], x=5300, y=-5300)
     # Inner glow: 1 at the edge, fading over Inner Depth; materials light up the back faces there, the inside of the
     # outfit seen through the cut.
     cut = b.math("SUBTRACT", 1.0, b.math("DIVIDE", b.math("ABSOLUTE", b.math("SUBTRACT", d, radius, x=-700, y=-3400),
@@ -1907,8 +1978,8 @@ def build_target_group(field_group, venom_group):
         b.feed(join.inputs["Geometry"], part)
     # 1.12: the spirit self (the Dharma form, three heads and six arms) of what the new outfit shows
     spirit = _spirit(b, gi, geo, me, radius, 4000, 56000)
-    b.feed(go.inputs["Geometry"], b.join([_toon(b, gi, join.outputs["Geometry"], True, 2200, 4000), spirit],
-                                         x=2400, y=250))
+    b.feed(go.inputs["Geometry"], b.join([_toon(b, gi, join.outputs["Geometry"], True, 2200, 4000), spirit,
+                                          retract_drops], x=2400, y=250))
     return ng
 
 
@@ -5259,12 +5330,21 @@ def _save_cache(path):
                 pass
 
 
+def _shipped_cache(path):
+    """(1.32) The cache file of the same name shipped with the add-on (its cache folder: made by the same code in the
+    same Blender when the package was built), or None: the first build after an upgrade needs not make the groups."""
+    if path is None:
+        return None
+    shipped = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache", os.path.basename(path))
+    return shipped if os.path.exists(shipped) else None
+
+
 def ensure_node_groups():
     """Return (target_group, base_group), (re)building them if missing or outdated (or appending them from the cache
-    file, when this code built them before in this Blender)."""
+    file, when this code built them before in this Blender, or from the one shipped with the add-on)."""
     if not all(_is_current(name) for name in MAIN_GROUPS):
         path = _cache_file()
-        if not _load_cached(path):
+        if not _load_cached(path) and not _load_cached(_shipped_cache(path)):
             field = build_field_group()
             venom = build_venom_group()
             build_target_group(field, venom)
@@ -5512,7 +5592,7 @@ def build_slime_group():
     # stretched it bows out a little and sways, most in its middle; a snapped drop swings at its end
     neck = b.math("SINE", b.math("MULTIPLY", w, math.pi / 2.0, x=-1400, y=-1650), x=-1200, y=-1650)
     loose = b.math("MULTIPLY", neck, b.math("SUBTRACT", 1.0, pulled, x=-1200, y=-1800), x=-1000, y=-1750)
-    bow = b.math("MULTIPLY", b.math("MULTIPLY", length, b.math("MULTIPLY_ADD", seed, 0.07, 0.03, x=-1000, y=-1900),
+    bow = b.math("MULTIPLY", b.math("MULTIPLY", length, b.math("MULTIPLY_ADD", seed, 0.07, 0.06, x=-1000, y=-1900),
                                     x=-800, y=-1850), loose, x=-600, y=-1850)
     swing = b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.45, b.math("MULTIPLY", seed, 6.283, x=-1200, y=-2050),
                                   x=-1000, y=-2050), x=-800, y=-2050)
@@ -5571,8 +5651,28 @@ def build_slime_group():
     caps = tube.node.inputs.get("Fill Caps")
     if caps is not None:
         caps.default_value = True
+    # (1.32) a smear of slime where each half meets the teeth: a ball flattened onto her face (along Out), wider than
+    # the strand there, so the strand grows out of it and no flat end shows
+    ends = b.node("GeometryNodeCurveToPoints", 1100, -600, mode="EVALUATED")
+    b.feed(ends.inputs["Curve"], sized.outputs["Curve"])
+    feet = b.node("GeometryNodeInstanceOnPoints", 1300, -600)
+    b.feed(feet.inputs["Points"], ends.outputs["Points"])
+    b.feed(feet.inputs["Selection"], b.compare("LESS_THAN", w, 1e-3, x=1100, y=-800))
+    blob = b.node("GeometryNodeMeshIcoSphere", 1100, -950)
+    blob.inputs["Subdivisions"].default_value = 2
+    blob.inputs["Radius"].default_value = 1.0
+    b.feed(feet.inputs["Instance"], blob.outputs["Mesh"])
+    flat = b.node("FunctionNodeAlignEulerToVector", 1100, -1100, axis="Z")
+    b.feed(flat.inputs["Vector"], gi.outputs["Out"])
+    b.feed(feet.inputs["Rotation"], flat.outputs["Rotation"])
+    r_end = b.node("GeometryNodeInputRadius", 900, -1250).outputs[0]
+    wide = b.math("MULTIPLY", r_end, SLIME_FOOT[0], x=1100, y=-1250)
+    b.feed(feet.inputs["Scale"], b.combine(wide, wide, b.math("MULTIPLY", r_end, SLIME_FOOT[1], x=1100, y=-1400),
+                                           x=1300, y=-1300))
+    feet_real = b.node("GeometryNodeRealizeInstances", 1500, -600)
+    b.feed(feet_real.inputs["Geometry"], feet.outputs["Instances"])
     smooth = b.node("GeometryNodeSetShadeSmooth", 1400, 0)
-    b.feed(smooth.inputs["Geometry"], tube)
+    b.feed(smooth.inputs["Geometry"], b.join([tube, feet_real.outputs["Geometry"]], x=1300, y=0))
     mat = b.node("GeometryNodeSetMaterial", 1700, 0)
     b.feed(mat.inputs["Geometry"], smooth.outputs["Geometry"])
     b.feed(mat.inputs["Material"], gi.outputs["Material"])

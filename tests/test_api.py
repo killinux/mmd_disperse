@@ -5749,6 +5749,145 @@ def run():
     s.base, s.target = base_root, target_was31_
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.31 checks")
 
+    # --- 1.32: building faster (the poses for the strands sampled for all the meshes in one pass; the main node groups
+    # also from a cache shipped with the add-on), drops of goo flung off the edge as it snaps back
+    import os as os32_
+    import shutil as shutil32_
+    import tempfile as tempfile32_
+    import time as time32_
+
+    from mmd_disperse import node_groups as ng32_
+    from mmd_disperse import venom as venom32_
+
+    def plain32_(value_):
+        if isinstance(value_, (str, set)):
+            return set(value_) if isinstance(value_, set) else value_
+        return tuple(value_) if hasattr(value_, "__len__") else value_
+
+    saved32_ = {p_.identifier: plain32_(getattr(s, p_.identifier)) for p_ in s.bl_rna.properties
+                if not p_.is_readonly and p_.type not in ("POINTER", "COLLECTION")
+                and p_.identifier not in ("rna_type", "name")}
+    target_was32_ = s.target
+    # the poses: sampled for all the meshes at once they are the ones sampled mesh by mesh (a dance for the armature)
+    arm32_ = base.armature
+    hips32_ = next((arm32_.pose.bones[n_] for n_ in motion.HIPS if n_ in arm32_.pose.bones), None)
+    ad32_ = arm32_.animation_data or arm32_.animation_data_create()
+    action_was32_ = ad32_.action
+    sway32_ = bpy.data.actions.new("MMDD Test Sway 1.32")
+    ad32_.action = sway32_
+    for k_, f_ in enumerate((1, 30, 60, 90)):
+        hips32_.location = (0.1 * height * (1.0 if k_ % 2 else -1.0), 0.0, 0.05 * height * k_)
+        hips32_.keyframe_insert("location", frame=f_)
+    # (the new outfit's own armature dances too: a mesh counts as moving by its own model's armature)
+    other32_ = target.armature if target.armature is not None and target.armature != arm32_ else None
+    other_was32_ = None
+    if other32_ is not None:
+        ado32_ = other32_.animation_data or other32_.animation_data_create()
+        other_was32_ = ado32_.action
+        ado32_.action = sway32_
+    meshes32_ = sorted((ob_ for ob_ in target.meshes + base.meshes if len(ob_.data.vertices) and venom32_._motion(ob_)),
+                       key=lambda ob_: len(ob_.data.vertices))[:4]
+    frames32_ = [25, 50, 75]
+    venom32_.forget()
+    one_by_one_ = [venom32_.sample_poses(scene, ob_, frames32_, [])[0] for ob_ in meshes32_]
+    venom32_.forget()
+    venom32_.sample_poses_many(scene, meshes32_, frames32_, [])
+    kept_ = len(venom32_._POSES)
+    together_ = [venom32_.sample_poses(scene, ob_, frames32_, [])[0] for ob_ in meshes32_]
+    venom32_.forget()
+    ad32_.action = action_was32_
+    if other32_ is not None:
+        other32_.animation_data.action = other_was32_
+    bpy.data.actions.remove(sway32_)
+    hips32_.location = (0.0, 0.0, 0.0)
+    check(meshes32_ and kept_ == len(meshes32_) and all(len(a_) == len(frames32_) for a_ in together_)
+          and all(len(a_) == len(b_) and all(np.array_equal(x_, y_) for x_, y_ in zip(a_, b_))
+                  for a_, b_ in zip(one_by_one_, together_)),
+          "poses for the strands: sampled for %d meshes at once, the same as one by one" % len(meshes32_))
+
+    # drops of goo flung off the edge it snaps back from: only while it pulls back, an ico sphere each
+    s.trigger, s.finale, s.beat_sync, s.time_warp, s.warp_effect = "NONE", False, False, "NONE", False
+    s.shot_enable, s.impact_enable, s.moment_at, s.body_grow, s.surface_prelude = False, False, "FACE", 0.0, 0.0
+    s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
+    s.layer_width, s.layer_stay, s.edge_glow, s.frame_start, s.frame_end = 0.3 * height, False, False, 40, 100
+    s.venom_enable, s.old_surface, s.layer_enable, s.layer_style = True, "VEINS", True, "GOO"
+    s.venom_eyes, s.venom_teeth, s.venom_split, s.venom_roar = True, True, False, False
+    s.venom_back, s.venom_inertia, s.venom_retract, s.venom_retract_after = 0, 0.0, True, 1.0
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "drops as it snaps back: built")
+    when32_ = effect._retract_frames(s, s.mask)
+    body32_ = max(target.meshes, key=lambda m_: len(m_.data.vertices))
+    tmod32_ = next((m_ for m_ in body32_.modifiers if m_.type == "NODES" and m_.node_group is not None
+                    and m_.node_group.name == TARGET_GROUP), None)
+    tids32_ = input_identifiers(tmod32_.node_group) if tmod32_ is not None else {}
+    drops32_ = float(tmod32_[tids32_["Retract Drops"]]) if "Retract Drops" in tids32_ else 0.0
+    if when32_ is not None and drops32_ > 0.0:
+        a32_, d32_ = when32_
+        life32_ = ng32_.DROP_LIFE * d32_
+
+        def extra32_(f_):
+            """How many vertices the drops add at frame f_ (with them against without)."""
+            scene.frame_set(f_)
+            with_ = evaluated_counts(body32_)
+            tmod32_[tids32_["Retract Drops"]] = 0.0
+            body32_.update_tag()
+            bpy.context.view_layer.update()
+            without_ = evaluated_counts(body32_)
+            tmod32_[tids32_["Retract Drops"]] = drops32_
+            body32_.update_tag()
+            bpy.context.view_layer.update()
+            return with_ - without_
+
+        extras32_ = [extra32_(f_) for f_ in (int(a32_) - 2, int(a32_ + 0.6 * d32_), int(a32_ + d32_ + life32_) + 2)]
+        check(extras32_[0] == 0 and extras32_[1] > 0 and extras32_[1] % 42 == 0 and extras32_[2] == 0,
+              "drops as it snaps back: none before, %d flying while it pulls back, none once they are gone"
+              % (extras32_[1] // 42))
+    else:
+        check(False, "drops as it snaps back: set on the new outfit (%s, %.4f)" % (when32_, drops32_))
+    s.venom_retract = False
+    check(tmod32_ is not None and float(tmod32_[tids32_["Retract Drops"]]) == 0.0, "snaps back off: no drops")
+
+    # the main node groups from the cache shipped with the add-on: the first build after an upgrade
+    path32_ = ng32_._cache_file()
+    took32_, current32_ = None, False
+    if path32_ is not None and os32_.path.exists(path32_):
+        shipped_dir32_ = os32_.path.join(os32_.path.dirname(os32_.path.abspath(ng32_.__file__)), "cache")
+        made_dir32_ = not os32_.path.isdir(shipped_dir32_)
+        os32_.makedirs(shipped_dir32_, exist_ok=True)
+        shipped32_ = os32_.path.join(shipped_dir32_, os32_.path.basename(path32_))
+        shutil32_.copy(path32_, shipped32_)
+        empty32_ = tempfile32_.mkdtemp()
+        env_was32_ = os32_.environ.get("MMD_DISPERSE_CACHE")
+        os32_.environ["MMD_DISPERSE_CACHE"] = empty32_
+        try:
+            bpy.data.node_groups[ng32_.TARGET_GROUP]["mmd_disperse_version"] = -1  # (outdated)
+            t32_ = time32_.time()
+            ng32_.ensure_node_groups()
+            took32_ = time32_.time() - t32_
+            current32_ = all(ng32_._is_current(n_) for n_ in ng32_.MAIN_GROUPS)
+            made32_ = os32_.listdir(empty32_)
+        finally:
+            if env_was32_ is None:
+                del os32_.environ["MMD_DISPERSE_CACHE"]
+            else:
+                os32_.environ["MMD_DISPERSE_CACHE"] = env_was32_
+            os32_.remove(shipped32_)
+            if made_dir32_:
+                os32_.rmdir(shipped_dir32_)
+            shutil32_.rmtree(empty32_, ignore_errors=True)
+        check(current32_ and took32_ < 30.0 and not made32_,
+              "node groups from the cache shipped with the add-on: %.1f s, none made" % took32_)
+    else:
+        check(False, "node groups: a cache file to ship (%s)" % path32_)
+    check(not draw_panels(bpy.context), "panels draw with the 1.32 options")
+    for key_, value_ in saved32_.items():
+        if plain32_(getattr(s, key_)) != value_:
+            try:
+                setattr(s, key_, value_)
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                pass
+    s.base, s.target = base_root, target_was32_
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.32 checks")
+
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
     arm = base.armature

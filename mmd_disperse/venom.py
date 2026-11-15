@@ -128,15 +128,28 @@ def field_values(ob, sphere_center, arrival=True):
     return np.linalg.norm(co.reshape(-1, 3).astype(np.float64) - center, axis=1)
 
 
+def _length(v):
+    """The length of the three-vector `v` (1.32: np.linalg.norm costs microseconds a call, and the traces call it a
+    million times)."""
+    return math.sqrt(float(v @ v))
+
+
 def _unit(v):
-    length = np.linalg.norm(v)
+    length = _length(v)
     return v / length if length > 1e-12 else v
+
+
+def _cross(a, b):
+    """a x b for three-vectors (1.32: np.cross is slow on single vectors)."""
+    a0, a1, a2 = float(a[0]), float(a[1]), float(a[2])
+    b0, b1, b2 = float(b[0]), float(b[1]), float(b[2])
+    return np.array((a1 * b2 - a2 * b1, a2 * b0 - a0 * b2, a0 * b1 - a1 * b0))
 
 
 def _turn(v, axis, angle):
     """`v` rotated by `angle` about the unit `axis` (Rodrigues)."""
     c, s = math.cos(angle), math.sin(angle)
-    return v * c + np.cross(axis, v) * s + axis * np.dot(axis, v) * (1.0 - c)
+    return v * c + _cross(axis, v) * s + axis * float(axis @ v) * (1.0 - c)
 
 
 class _Surface:
@@ -180,15 +193,16 @@ class _Surface:
         """Barycentric weights of `p` in triangle `k`."""
         a, b, c = self.co[self.tris[k]]
         v0, v1, v2 = b - a, c - a, p - a
-        d00, d01, d11 = v0 @ v0, v0 @ v1, v1 @ v1
-        d20, d21 = v2 @ v0, v2 @ v1
+        d00, d01, d11 = float(v0 @ v0), float(v0 @ v1), float(v1 @ v1)
+        d20, d21 = float(v2 @ v0), float(v2 @ v1)
         den = d00 * d11 - d01 * d01
         if abs(den) < 1e-30:
             return np.array([1.0, 0.0, 0.0])
         v = (d11 * d20 - d01 * d21) / den
         w = (d00 * d21 - d01 * d20) / den
-        bary = np.clip(np.array([1.0 - v - w, v, w]), 0.0, 1.0)
-        return bary / max(bary.sum(), 1e-12)
+        u, v, w = min(max(1.0 - v - w, 0.0), 1.0), min(max(v, 0.0), 1.0), min(max(w, 0.0), 1.0)
+        total = max(u + v + w, 1e-12)
+        return np.array((u / total, v / total, w / total))
 
     def field(self, k, p):
         return float(self.weights(k, p) @ self.values[self.tris[k]])
@@ -199,15 +213,21 @@ class _Surface:
 
     def samples(self, count, rng):
         """`count` random points on the free triangles, by area: (triangle, point) pairs."""
+        picks, points = self.sample_arrays(count, rng)
+        return list(zip(picks.tolist(), points))
+
+    def sample_arrays(self, count, rng):
+        """(triangles, points) of `count` random points on the free triangles, by area, as arrays (both empty when
+        there are none)."""
         weight = np.where(self.free, self.area, 0.0)
         total = weight.sum()
         if total <= 0.0 or count <= 0:
-            return []
+            return np.zeros(0, dtype=np.int64), np.zeros((0, 3))
         picks = rng.choice(len(weight), size=count, p=weight / total)
         r1, r2 = np.sqrt(rng.random(count)), rng.random(count)
         a, b, c = (self.co[self.tris[picks, i]] for i in range(3))
         points = a * (1.0 - r1)[:, None] + b * (r1 * (1.0 - r2))[:, None] + c * (r1 * r2)[:, None]
-        return list(zip(picks.tolist(), points))
+        return picks, points
 
     def drop(self, q, n, step):
         """The outermost surface point below `q` (a ray down along -n), or the nearest one: (point, triangle)."""
@@ -231,7 +251,7 @@ def _spaced(candidates, spacing):
             for dy in (-1, 0, 1):
                 for dz in (-1, 0, 1):
                     for other in grid.get((key[0] + dx, key[1] + dy, key[2] + dz), ()):
-                        if np.linalg.norm(other - p) < spacing:
+                        if _length(other - p) < spacing:
                             near = True
                             break
                     if near:
@@ -271,27 +291,27 @@ def _trace(surface, k, p, heading, length, step, rng, s0=0.0, bias=0.0):
     path = [(p, k, s0)]
     n = surface.normals[k]
     d = heading if heading is not None else surface.grad[k]
-    d = _unit(d - n * (d @ n))
-    if np.linalg.norm(d) < 0.5:
+    d = _unit(d - n * float(d @ n))
+    if _length(d) < 0.5:
         return path
     f = surface.field(k, p)
     angle = 0.0
     s = s0
     while s - s0 < length:
-        g = surface.grad[k] - n * (surface.grad[k] @ n)
-        g = _unit(g) if np.linalg.norm(g) > 1e-9 else d
+        g = surface.grad[k] - n * float(surface.grad[k] @ n)
+        g = _unit(g) if _length(g) > 1e-9 else d
         if bias:
-            angle = float(np.clip(0.5 * angle + bias + rng.normal(0.0, 0.15), -1.25, 1.25))
+            angle = min(max(0.5 * angle + bias + float(rng.normal(0.0, 0.15)), -1.25), 1.25)
         else:
-            angle = float(np.clip(angle + rng.normal(0.0, 0.3), -0.9, 0.9))
+            angle = min(max(angle + float(rng.normal(0.0, 0.3)), -0.9), 0.9)
         d = _unit(0.6 * d + 0.4 * _turn(g, n, angle))
-        d = _unit(d - n * (d @ n))
+        d = _unit(d - n * float(d @ n))
         q, kq = surface.drop(p + d * step, n, step)
         if q is None or not surface.free[kq]:
             break
         nq = surface.normals[kq]
-        moved = float(np.linalg.norm(q - p))
-        if nq @ n < 0.35 or moved < 0.3 * step or moved > 2.5 * step:
+        moved = _length(q - p)
+        if float(nq @ n) < 0.35 or moved < 0.3 * step or moved > 2.5 * step:
             break
         fq = surface.field(kq, q)
         if fq < f - 0.6 * step:  # running back against the edge
@@ -427,14 +447,25 @@ def _strands(surfaces, count, height, rng):
     rest = surfaces[0]
     near, far = 0.01 * height, 0.12 * height
     pairs = []
+    tilt = math.tan(math.radians(40.0))
     for surface in surfaces:
-        for k, p in surface.samples(count * 40, rng):
-            n = surface.normals[k]
-            d = _unit(n + np.tan(math.radians(40.0)) * math.sqrt(rng.random()) * _unit(np.cross(n, rng.normal(size=3))))
+        # (1.32: the rays aimed all at once, within 40 degrees of the normal; only the casting one by one)
+        ks, ps = surface.sample_arrays(count * 40, rng)
+        if not len(ks):
+            continue
+        ns = surface.normals[ks]
+        side = np.cross(ns, rng.normal(size=(len(ks), 3)))
+        side /= np.maximum(np.sqrt((side * side).sum(axis=1)), 1e-12)[:, None]
+        ds = ns + side * (tilt * np.sqrt(rng.random(len(ks))))[:, None]
+        ds /= np.maximum(np.sqrt((ds * ds).sum(axis=1)), 1e-12)[:, None]
+        starts = ps + ns * (1e-4 * height)
+        for i in range(len(ks)):
+            d = ds[i]
             # (an inner layer under the clothes hits them from inside: they face the same way and are skipped)
-            loc, _nor, kq, dist = surface.bvh.ray_cast(Vector(p + n * 1e-4 * height), Vector(d), far)
-            if loc is None or dist < near or not surface.free[kq] or surface.normals[kq] @ d > -0.2:
+            loc, _nor, kq, dist = surface.bvh.ray_cast(Vector(starts[i]), Vector(d), far)
+            if loc is None or dist < near or not surface.free[kq] or float(surface.normals[kq] @ d) > -0.2:
                 continue
+            k, p = int(ks[i]), ps[i]
             q = np.array(loc)
             wa, wb = surface.weights(k, p), surface.weights(kq, q)
             # where the ends are on the rest pose (the skeleton's own vertices)
@@ -684,6 +715,57 @@ def sample_poses(scene, ob, frames, quiet):
     if key is not None:
         _POSES[key] = poses
     return poses, key
+
+
+def sample_poses_many(scene, obs, frames, quiet):
+    """(1.32) sample_poses for all of the meshes `obs` in one pass over `frames` (a frame change each, not one per mesh
+    and frame): their poses kept for the traces that follow (sample_poses finds them there)."""
+    wanted = sorted(set(frames))
+    todo = []
+    for ob in obs:
+        motion = _motion(ob)
+        key = (ob.name, len(ob.data.vertices), tuple(wanted), motion) if motion else None
+        if key is not None and key not in _POSES:
+            todo.append((ob, key))
+    if not todo:
+        return
+    saved = {}
+    for other in set(quiet) | {ob for ob, _key in todo}:
+        for mod in other.modifiers:
+            ours = mod.type == "NODES" and mod.node_group is not None and mod.node_group.name.startswith("MMDDisperse")
+            if ours and mod.show_viewport:
+                saved[mod] = True
+                mod.show_viewport = False
+    for ob, _key in todo:
+        mods = list(ob.modifiers)
+        last = max((i for i, m in enumerate(mods) if m.type == "ARMATURE"), default=-1)
+        for mod in mods[last + 1:]:
+            if mod.show_viewport:
+                saved[mod] = True
+                mod.show_viewport = False
+    current = scene.frame_current
+    found = {key: [] for _ob, key in todo}
+    try:
+        for frame in wanted:
+            scene.frame_set(frame)
+            deps = bpy.context.evaluated_depsgraph_get()
+            for ob, key in todo:
+                count = len(ob.data.vertices)
+                ev = ob.evaluated_get(deps)
+                me = ev.to_mesh()
+                try:
+                    if len(me.vertices) == count:
+                        co = np.empty(count * 3, dtype=np.float32)
+                        me.vertices.foreach_get("co", co)
+                        found[key].append(co)
+                finally:
+                    ev.to_mesh_clear()
+    finally:
+        for mod in saved:
+            mod.show_viewport = True
+        if scene.frame_current != current:
+            scene.frame_set(current)
+    _POSES.update(found)
 
 
 def build(ob, values, settings, height, scene, poses=(), pose_key=None, back=False):

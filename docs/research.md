@@ -393,6 +393,23 @@ Gantz 模型包里的 V3、None 没穿衣服，服装链的演示改用 Remake V
 
 另外：三个新预设（共一百三十六个），选项都补了中文；测试里加了 1.17 一段。
 
+### 1.32 跟进
+
+用户问「还有哪些待做的」后说「毒液还能再改进的 继续做」（2026-11-15）：生成变慢、拉丝的根、缩回的黏液滴。只做 3.6。
+
+| 项目 | 做法 | 状态 |
+| --- | --- | --- |
+| 先量 | 演示脚本 render_hd.py 在 3.6 里跑女武神「毒液·一下缩回」，cProfile 包住 effect.build：199 秒 = 节点组 96（build_target_group 56、build_base_group 39；Python 每加一个节点、一根连线、设一个属性，Blender 都要更新整棵五千多个节点的树：node 6 ms、feed 3 ms 一次）+ _update_venom 86（venom.build 59：sample_poses 27、_strands 38、_tendrils 20）+ 外壳材质 11。惯性甩动播舞蹈只占 1 秒（原来以为是它）。用户的 3.6 带界面、升级后第一次生成用了 300 秒 | 已完成 |
+| 姿态一起采样 | venom.sample_poses_many：要重新走线的网格挑出来，每个姿态帧 frame_set 一次，挨个 to_mesh 取顶点，填进 _POSES；逐块的 sample_poses 命中缓存。原来 48 块 × 6 帧 = 288 次换帧 | 已完成 |
+| 小向量不走 numpy | _length = sqrt(v·v)、_cross 手写（np.cross 单个向量 29 µs）、weights 用 float 算、np.clip 换成 min/max；_strands 的射线方向整批算（np.cross 对 N×3 一次），只有 ray_cast 留在循环里。随机数的顺序变了，黏丝的位置和 1.31 不同（照样固定）。venom 86 → 19 秒 | 已完成 |
+| 节点组缓存随包 | node_groups._shipped_cache：用户缓存（配置文件夹或 MMD_DISPERSE_CACHE）里没有时，找插件文件夹 cache/ 下同名文件（名字带节点组版本、Blender 版本号、node_groups.py 的 md5 前 12 位）；build_zips.sh 用 3.6.15 跑 ensure_node_groups 生成，1.2 MB | 已完成 |
+| 结果 | 无界面 3.6（分段计时：总 144 秒里节点组 107 秒，其余按缓存命中算）：以后每次 38 秒（原来约 100）、升级后第一次 40 秒（原来约 200）。剩下的大头：外壳材质第一次加节点 12 秒（每个材质几百个节点，可以改成共用一个节点组，没做）、走触手线 19 秒 | — |
+| 缩回甩出黏液滴 | 新服装节点组 RIDGE_INPUTS 加 Retract Drops（每单位面积几颗）、Drop Size、Drop Fling、Drop Material；Distribute Points on Faces 撒在外壳上，出发帧 = Retract At + Frames·√(1 − 距离/R)，寿命 1.6 × Frames，位移 往外·√t + 法线·t/2 + 往下·1.6t²（世界向下换到物体空间），半径 (1 − t)^0.7；只在缩回窗口里求值（Switch 只算用到的一支）；接在节点组最后输出前，前面的步骤删不到它们 | 已完成 |
+| 拉丝的样子 | 材质改成湿黑（朝向过色带 0.012 → 0.07，原来亮端 0.3 的银灰看着像金属）；两头各一团压扁的黏液（Curve to Points 取丝根，二十面体沿 Out 压扁：宽 1.5 倍、深 0.3 倍丝的半径），盖住平的端面；丝根往脸里收 0.015 眼距；前拱 0.06～0.13 × 长度；中间收细 35%（原来 55%）。中间试过：只收丝根（看不出）、银色加大团（像穿孔的金属杠铃） | 已完成 |
+| 演示脚本在 3.6 | render_hd.py 的 AgX（3.6 没有：换 Filmic）、Specular IOR Level（3.6 叫 Specular）兼容了；高清材质里还有 Coat Weight、Subsurface Scale 只在 4.x，3.6 里用 --keep-toon | 部分 |
+
+另外：主节点组版本升到 25；测试加了 1.32 一段（一起采样和逐块采样逐个顶点相同；黏液滴只在缩回时有、每颗 42 个顶点；从随包缓存读节点组几秒、不新建）。
+
 ### 1.31 跟进
 
 用户说「好按你说的做吧」（2026-11-15）：上次列的毒液可以再优化的几处，按建议的顺序做了五项。都在 Blender 3.6 上实现。

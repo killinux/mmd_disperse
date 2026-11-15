@@ -1010,9 +1010,9 @@ def ensure_tongue_material():
 
 
 def ensure_slime_material(color=(0.006, 0.006, 0.009), metallic=0.0):
-    """The strands of slime between the symbiote's jaws (1.31): wet and glossy under a clear coat, glassy - the goo's
-    colour where they face the camera, light along their edges - so they read against the dark mouth; made once, the
-    colours and metal kept up."""
+    """The strands of slime between the symbiote's jaws (1.31): wet black goo under a clear coat, a little lighter
+    along their edges (1.32), the highlights showing them against the dark mouth; made once, the colours and metal
+    kept up."""
     mat = bpy.data.materials.get(SLIME_MATERIAL)
     if mat is None:
         mat = bpy.data.materials.new(SLIME_MATERIAL)
@@ -1032,8 +1032,9 @@ def ensure_slime_material(color=(0.006, 0.006, 0.009), metallic=0.0):
     if nodes.get("Slime Facing") is not None:
         nodes["Slime Facing"].inputs["Blend"].default_value = 0.25
     if nodes.get("Slime Ramp") is not None:
-        _ramp_stops(nodes["Slime Ramp"], [(0.0, tuple(min(1.0, 0.6 * c + 0.02) for c in color) + (1.0,)),
-                                          (1.0, tuple(min(1.0, 0.35 * c + 0.3) for c in color) + (1.0,))])
+        # (1.32: wet black as the goo itself, a little lighter at the edges - the light silver of 1.31 read as metal)
+        _ramp_stops(nodes["Slime Ramp"], [(0.0, tuple(min(1.0, 0.8 * c + 0.012) for c in color) + (1.0,)),
+                                          (1.0, tuple(min(1.0, 0.6 * c + 0.07) for c in color) + (1.0,))])
     bsdf = nodes.get("Slime BSDF")
     if bsdf is not None:
         for names, value in ((("Roughness",), 0.08), (("Specular IOR Level", "Specular"), 0.7),

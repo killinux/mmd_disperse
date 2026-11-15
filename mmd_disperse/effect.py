@@ -750,11 +750,21 @@ def _update_ridge(ob, retract, height):
             mod[ids["Retract Centre"]] = tuple(float(c) for c in retract[0])
             mod[ids["Retract Reach"]] = float(retract[1])
             mod[ids["Retract Width"]] = float(retract[2])
+        if ids.get("Retract Drops") is not None:  # (1.32: the drops flung off its edge, spread over her area)
+            on = retract is not None
+            mod[ids["Retract Drops"]] = RETRACT_DROPS[0] / (BODY_AREA * height * height) if on else 0.0
+            mod[ids["Drop Size"]] = RETRACT_DROPS[1] * height if on else 0.0
+            mod[ids["Drop Fling"]] = RETRACT_DROPS[2] * height if on else 0.0
+            if on and ids.get("Drop Material") is not None:
+                mod[ids["Drop Material"]] = materials.ensure_goo_material()
 
 
 RETRACT = 0.45  # 1.29: seconds the goo takes to snap back into her chest ...
 RETRACT_RIM = 0.04  # ... the edge of what is left of it this soft (a share of her height) ...
-RETRACT_RIDGE = 0.02  # ... (1.31) and the goo bunches up in a ridge this high just inside it
+RETRACT_RIDGE = 0.02  # ... (1.31) and the goo bunches up in a ridge this high just inside it ...
+RETRACT_DROPS = (160, 0.007, 0.07)  # ... (1.32) and flings about this many drops off its edge in all, this big
+# (radius) and flying this far (shares of her height)
+BODY_AREA = 0.7  # (a body's skin is about this many times its height squared)
 PRELUDE_BEATS = 1.1  # the veins' prelude: this many heartbeats a second at first (then faster, 2.6 times by its end)
 BACK_EMERGE = 0.06  # the big tendrils off her back come out once the edge is this far past their root ...
 BACK_GROW = 0.3  # ... and are grown out once it is this much further (shares of her height)
@@ -1044,14 +1054,17 @@ def _update_venom(settings, mask, objects):
     height = max(settings.size_reference, 1e-3)
     scene = settings.id_data
     back = venom.back_mesh(owners, height) if settings.venom_back > 0 else None  # (1.29: the big tendrils' mesh)
-    for ob in owners:
-        if not venom.matches(ob, venom.signature(settings, _object_scale(ob), ob == back)):
-            values = venom.field_values(ob, mask.matrix_world.translation, arrival_path)
-            # strands are also looked for in the poses the body takes while it transforms
-            start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
-            frames = [int(round(start + (end - start) * (i + 1) / (venom.POSES + 1))) for i in range(venom.POSES)]
-            poses, key = venom.sample_poses(scene, ob, frames, objects) if settings.venom_strands > 0 else ([], None)
-            venom.build(ob, values, settings, height, scene, poses, key, ob == back)
+    # strands are also looked for in the poses the body takes while it transforms (1.32: sampled for all the meshes
+    # to trace in one pass over those frames)
+    start, end = settings.frame_start, max(settings.frame_end, settings.frame_start + 1)
+    frames = [int(round(start + (end - start) * (i + 1) / (venom.POSES + 1))) for i in range(venom.POSES)]
+    stale = [ob for ob in owners if not venom.matches(ob, venom.signature(settings, _object_scale(ob), ob == back))]
+    if stale and settings.venom_strands > 0:
+        venom.sample_poses_many(scene, stale, frames, objects)
+    for ob in stale:
+        values = venom.field_values(ob, mask.matrix_world.translation, arrival_path)
+        poses, key = venom.sample_poses(scene, ob, frames, objects) if settings.venom_strands > 0 else ([], None)
+        venom.build(ob, values, settings, height, scene, poses, key, ob == back)
     goo = materials.ensure_goo_material()
     materials.update_goo_material(settings.venom_color, GOO_CELL * height, settings.venom_metallic,
                                   settings.venom_sheen, settings.venom_pulse)

@@ -306,6 +306,8 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
         name="Auto Size", default=True,
         description="Scale all sizes to the model height when a new model is built")
     size_reference: FloatProperty(name="Size Reference", default=0.0, options={"HIDDEN"})
+    last_preset: StringProperty(name="Last Preset", default="", options={"HIDDEN"},
+                                description="The preset applied last (1.31: its sizes made right at build time)")
 
     # --- edge (tutorial: "Displacing Edge")
     noise_scale: FloatProperty(name="Noise Scale", default=0.3, min=0.0, soft_max=10.0, precision=3,
@@ -1325,6 +1327,9 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                          "tilts back; the mask splits only after it (needs a head bone)")
     venom_roar_time: FloatProperty(name="Roar Time", default=1.4, min=0.3, soft_max=5.0, update=_sync,
                                    description="Seconds the roar lasts")
+    venom_slime: BoolProperty(name="Slime Strands", default=True, update=_sync,
+                              description="While it roars, strands of slime stretch between its jaws, thinner the "
+                                          "more they stretch; some snap and pull back to the teeth (1.31)")
     venom_retract: BoolProperty(name="Snaps Back", default=False, update=_sync,
                                 description="The goo snaps back into her chest: in less than half a second it is "
                                             "gone, from her hands, feet and head inwards, the big tendrils whip back "

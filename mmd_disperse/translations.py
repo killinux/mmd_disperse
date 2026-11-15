@@ -803,6 +803,18 @@ _ZH = {
     ("*", "Prelude"): "前奏",
     ("*", "Symbiote, Then It Snaps Back"): "毒液·一下缩回",
     ("*", "Transformation Slows Too"): "变身也一起慢",
+    ("Operator", "Copy the Old Outfit as the New One"): "复制旧服装当新服装",
+    ("Operator", "Copy the old outfit's model as the new one (own materials; it follows the old armature and physics)"):
+        "把旧服装的模型复制一份当新服装（材质各自独立；跟着旧模型的骨架和物理动）",
+    ("*", "Copy the old outfit's model as the new one (own materials; it follows the old armature and physics)"):
+        "把旧服装的模型复制一份当新服装（材质各自独立；跟着旧模型的骨架和物理动）",
+    ("*", "Remove the effect first: the old outfit carries it"): "先移除效果：旧服装上还带着它",
+    ("*", "Copied the old outfit as the new one"): "已把旧服装复制一份当新服装",
+    ("*", "Slime Strands"): "黏液拉丝",
+    ("*", "While it roars, strands of slime stretch between its jaws, thinner the more they stretch; some snap and "
+          "pull back to the teeth (1.31)"):
+        "吼叫张嘴时上下牙之间拉出黏液丝，拉得越长越细；有几根会断开，缩回牙上（1.31）",
+    ("*", "The outfit has no meshes"): "这件服装没有网格",
     ("*", "Inertia"): "惯性甩动",
     ("*", "Eyes need the goo on her face: unlock Face* and Eye*"):
         "要长出眼睛，黏液得盖到脸上：把 face、eye（顔、目）从「旧服装处理 › 材质」里去掉",

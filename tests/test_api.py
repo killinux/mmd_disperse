@@ -4827,7 +4827,7 @@ def run():
         "trigger", "finale", "time_warp", "venom_enable", "venom_tendrils", "venom_strands", "venom_webs", "venom_coil",
         "venom_feelers", "venom_pulse", "venom_sheen", "venom_drips", "venom_eyes", "venom_metallic", "old_surface",
         "layer_enable", "layer_style", "layer_width", "layer_stay", "venom_teeth", "venom_split",
-        "venom_split_after", "venom_split_hold")}
+        "venom_split_after", "venom_split_hold", "use_lock", "lock_patterns", "last_preset")}
     s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
     s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
     s.layer_width = 0.3 * height  # (the goo coat lingers, as the symbiote presets have it)
@@ -5013,7 +5013,8 @@ def run():
         "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
         "trigger", "finale", "time_warp", "warp_length", "venom_enable", "venom_eyes", "venom_tendrils",
         "venom_strands", "old_surface", "layer_enable", "layer_style", "layer_width", "layer_stay", "moment_at",
-        "shot_enable", "shot_style", "shot_length", "impact_enable", "speed_lines", "shockwave", "impact_frames")}
+        "shot_enable", "shot_style", "shot_length", "impact_enable", "speed_lines", "shockwave", "impact_frames",
+        "use_lock", "lock_patterns", "last_preset")}
     s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
     s.shot_enable, s.impact_enable, s.moment_at = False, False, "FACE"
     s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
@@ -5118,7 +5119,8 @@ def run():
         "venom_split_after", "venom_split_hold", "venom_tendrils", "venom_strands", "old_surface", "layer_enable",
         "layer_style", "layer_width", "layer_stay", "moment_at", "shot_enable", "impact_enable", "surface_width",
         "surface_prelude", "venom_back", "venom_back_length", "venom_roar", "venom_roar_time", "venom_retract",
-        "venom_retract_after", "body_grow", "warp_effect", "venom_inertia")}
+        "venom_retract_after", "body_grow", "warp_effect", "venom_inertia", "use_lock", "lock_patterns",
+        "last_preset")}
     s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
     s.shot_enable, s.impact_enable, s.moment_at, s.body_grow = False, False, "FACE", 0.0
     s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
@@ -5220,7 +5222,7 @@ def run():
         shut_ = float(node_.outputs[0].default_value)
         scene.frame_set(int(mid_))
         open_ = float(node_.outputs[0].default_value)
-        tongue_ = next((ob_ for ob_ in roar_.objects(s.mask) if ob_.type == "MESH"), None)
+        tongue_ = roar_.tongue(s.mask)
         tilt_ = next((ob_ for ob_ in roar_.objects(s.mask) if ob_.type == "EMPTY"), None)
         arm_ = base.armature
         head_ = next((arm_.pose.bones[n_] for n_ in motion.HEAD if n_ in arm_.pose.bones), None)
@@ -5327,7 +5329,8 @@ def run():
         "trigger", "finale", "time_warp", "warp_length", "warp_effect", "venom_enable", "venom_eyes", "venom_teeth",
         "venom_split", "venom_tendrils", "venom_strands", "old_surface", "layer_enable", "layer_style", "layer_width",
         "layer_stay", "moment_at", "shot_enable", "impact_enable", "surface_prelude", "venom_back",
-        "venom_back_length", "venom_roar", "venom_roar_time", "venom_retract", "venom_inertia", "body_grow")}
+        "venom_back_length", "venom_roar", "venom_roar_time", "venom_retract", "venom_inertia", "body_grow",
+        "use_lock", "lock_patterns", "last_preset")}
     s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
     s.shot_enable, s.impact_enable, s.moment_at, s.body_grow, s.surface_prelude = False, False, "FACE", 0.0, 0.0
     s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
@@ -5406,7 +5409,7 @@ def run():
     ids30_ = node_groups.input_identifiers(mod30_.node_group)
     ad_ = base.meshes[0].animation_data
     driven_ = [d_.data_path for d_ in (ad_.drivers if ad_ else [])]
-    tongue30_ = next((ob_ for ob_ in roar30_.objects(s.mask) if ob_.type == "MESH"), None)
+    tongue30_ = roar30_.tongue(s.mask)
     tmod30_ = next((m_ for m_ in tongue30_.modifiers if m_.type == "NODES"), None) if tongue30_ else None
     tids_ = node_groups.input_identifiers(tmod30_.node_group) if tmod30_ else {}
     tdriven_ = [d_.data_path for d_ in (tongue30_.animation_data.drivers if tongue30_ and tongue30_.animation_data
@@ -5426,7 +5429,7 @@ def run():
     # inertia: the tongue's lag keyed on its node tree, the big tendrils' on the clock (driving the back mesh), a spring
     # lagging behind her accelerating head; the same on any frame however it is reached
     s.venom_inertia = 1.0
-    tongue30_ = next((ob_ for ob_ in roar30_.objects(s.mask) if ob_.type == "MESH"), None)
+    tongue30_ = roar30_.tongue(s.mask)
     tmod30_ = next((m_ for m_ in tongue30_.modifiers if m_.type == "NODES"), None) if tongue30_ else None
     lag_id_ = node_groups.input_identifiers(tmod30_.node_group).get("Lag") if tmod30_ else None
     lag_path_ = 'modifiers["%s"]["%s"]' % (tmod30_.name, lag_id_) if tmod30_ else ""
@@ -5503,6 +5506,248 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.30 checks")
+
+    # --- 1.31: one click for a second copy of the old outfit as the new one; the symbiote's presets with eyes take her
+    # face out of the lock patterns; a preset chosen before the models gets its sizes at her height at build time;
+    # strands of slime between its jaws as it roars; the goo snapping back with a ridge at its edge, streaming in
+    from mmd_disperse import model as mdl31_
+    from mmd_disperse import node_groups as ng31_
+    from mmd_disperse import roar as roar31_
+
+    def plain31_(value_):
+        if isinstance(value_, (str, set)):
+            return set(value_) if isinstance(value_, set) else value_
+        return tuple(value_) if hasattr(value_, "__len__") else value_
+
+    # (every setting put back as it was afterwards: the presets below set many)
+    saved31_ = {p_.identifier: plain31_(getattr(s, p_.identifier)) for p_ in s.bl_rna.properties
+                if not p_.is_readonly and p_.type not in ("POINTER", "COLLECTION")
+                and p_.identifier not in ("rna_type", "name")}
+    target_was31_ = s.target
+    try:
+        refused_ = bpy.ops.mmd_disperse.copy_outfit() == {"CANCELLED"}
+    except RuntimeError as err_:
+        refused_ = "Remove the effect first" in str(err_)
+    check(refused_ and s.target == target_root, "copy the old outfit: not while the effect is on it")
+    check(bpy.ops.mmd_disperse.remove() == {"FINISHED"} and s.mask is None, "copy the old outfit: effect removed")
+    objects_before_ = set(bpy.data.objects)
+    check(bpy.ops.mmd_disperse.copy_outfit() == {"FINISHED"}, "copy the old outfit: one click")
+    copy31_ = s.target
+    new31_ = set(bpy.data.objects) - objects_before_
+    found31_ = resolve(copy31_)
+    base_mats_ = {sl_.material for ob_ in base.meshes for sl_ in ob_.material_slots if sl_.material}
+    copy_mats_ = {sl_.material for ob_ in found31_.meshes for sl_ in ob_.material_slots if sl_.material}
+    check(copy31_ in new31_ and copy31_ is not base_root and s.follow_base and found31_.armature in new31_
+          and len(found31_.meshes) == len(base.meshes) and set(found31_.meshes) <= new31_
+          and not {ob_.data for ob_ in found31_.meshes} & {ob_.data for ob_ in base.meshes}
+          and copy_mats_ and not copy_mats_ & base_mats_,
+          "copy the old outfit: %d objects, her meshes, armature and %d materials her own"
+          % (len(new31_), len(copy_mats_)))
+    check(not [ob_ for ob_ in new31_ if ob_.rigid_body is not None or ob_.rigid_body_constraint is not None
+               or getattr(ob_, "mmd_type", "NONE") in ("RIGID_BODY", "JOINT", "RIGID_GRP_OBJ", "JOINT_GRP_OBJ")]
+          and all(set(ob_.users_collection) == set(base_root.users_collection) for ob_ in [copy31_])
+          and all(any(m_.type == "ARMATURE" and m_.object is found31_.armature for m_ in ob_.modifiers)
+                  for ob_ in found31_.meshes if any(m_.type == "ARMATURE" for m_ in ob_.modifiers)),
+          "copy the old outfit: no rigid bodies or joints, linked where she is, bound to its own armature")
+    s.frame_start, s.frame_end = 1, 100
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"} and s.mask is not None
+          and all(any(m_.type == "ARMATURE" and m_.object is base.armature for m_ in ob_.modifiers)
+                  for ob_ in found31_.meshes if any(m_.type == "ARMATURE" for m_ in ob_.modifiers)),
+          "copy the old outfit: the effect builds with it, its meshes follow the old armature")
+    scene.frame_set(50)
+    check(evaluated_counts(found31_.meshes[0]) > 0 or evaluated_counts(base.meshes[0]) > 0,
+          "copy the old outfit: halfway, the outfits show")
+    check(bpy.ops.mmd_disperse.remove() == {"FINISHED"}, "copy the old outfit: effect removed again")
+    s.target = target_root
+    datas_ = {ob_.data for ob_ in new31_ if ob_.data is not None}
+    for ob_ in new31_:
+        if ob_.name in bpy.data.objects:
+            bpy.data.objects.remove(ob_)
+    for d_ in datas_:
+        if d_.users == 0 and isinstance(d_, bpy.types.Mesh):
+            bpy.data.meshes.remove(d_)
+        elif d_.users == 0 and isinstance(d_, bpy.types.Armature):
+            bpy.data.armatures.remove(d_)
+    for m_ in copy_mats_:
+        if m_.users == 0:
+            bpy.data.materials.remove(m_)
+
+    # the symbiote's presets with eyes unlock her face (her hair and the rest stay locked)
+    s.use_lock, s.lock_patterns = True, mdl31_.DEFAULT_LOCK_PATTERNS
+    presets.apply(s, "VENOM_CLASSIC")
+    left_ = mdl31_.split_patterns(s.lock_patterns)
+    check(s.use_lock and "*hair*" in left_ and "*髪*" in left_ and "*inner*" in left_
+          and not [p_ for p_ in left_ if any(w_ in p_ for w_ in ("face", "eye", "顔", "目", "mouth", "teeth", "舌"))],
+          "the symbiote's preset unlocks her face: %s" % s.lock_patterns)
+    check("Eyes need the goo on her face: unlock Face* and Eye*" not in draw_panels(bpy.context, labels=True),
+          "the symbiote's preset unlocks her face: the hint is gone")
+    s.use_lock, s.lock_patterns = False, "*face*;*hair*"
+    presets.apply(s, "VENOM_SNAP")
+    check(not s.use_lock and s.lock_patterns == "*face*;*hair*", "nothing locked: the patterns are left alone")
+    s.use_lock = True
+    presets.apply(s, "LIQUID_METAL")
+    check(s.lock_patterns == "*face*;*hair*", "the liquid metal (no eyes) keeps her face locked")
+
+    # a preset chosen before the models: its sizes made at her height when the effect is built
+    s.auto_size, s.base, s.target = True, None, None
+    s.size_reference = 0.0
+    presets.apply(s, "VENOM_CLASSIC")
+    early_ = (s.layer_width, s.surface_width, s.size_reference, s.last_preset)
+    s.base, s.target = base_root, target_root
+    s.frame_start, s.frame_end = 40, 100
+    built_ = bpy.ops.mmd_disperse.build() == {"FINISHED"}
+    tall_ = s.size_reference
+    check(built_ and early_[3] == "VENOM_CLASSIC" and abs(early_[2] - 1.0) < 1e-6 and abs(tall_ - 1.0) > 0.05
+          and abs(s.layer_width - 0.3 * tall_) < 1e-4 * tall_ and abs(s.surface_width - 0.18 * tall_) < 1e-4 * tall_,
+          "preset before the models: its sizes at her height at build (%.3f -> %.3f, measured %.3f)"
+          % (early_[0], s.layer_width, tall_))
+    s.layer_width = 0.2 * tall_
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"} and abs(s.layer_width - 0.2 * tall_) < 1e-6 * tall_,
+          "sizes changed by hand after that stay on a rebuild")
+
+    # the symbiote roaring: strands of slime between its jaws, thinning as they stretch; some snap
+    s.trigger, s.finale, s.beat_sync, s.time_warp, s.warp_effect = "NONE", False, False, "NONE", False
+    s.shot_enable, s.impact_enable, s.moment_at, s.body_grow, s.surface_prelude = False, False, "FACE", 0.0, 0.0
+    s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
+    s.layer_width, s.layer_stay, s.edge_glow, s.frame_start, s.frame_end = 0.3 * height, True, False, 40, 100
+    s.venom_enable, s.old_surface, s.layer_enable, s.layer_style = True, "VEINS", True, "GOO"
+    s.venom_eyes, s.venom_teeth, s.venom_split, s.venom_roar, s.venom_retract = True, True, False, True, False
+    s.venom_back, s.venom_inertia, s.venom_roar_time, s.venom_slime = 0, 0.0, 1.4, True
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "the roar with slime: built")
+    beats31_ = effect._face_beats(s, s.mask)
+    span31_ = beats31_.get("roar") if beats31_ else None
+    slime31_, tongue31_ = roar31_.slime(s.mask), roar31_.tongue(s.mask)
+    per31_ = 2 * roar31_.SLIME_POINTS
+    count31_ = len(slime31_.data.vertices) // per31_ if slime31_ is not None else 0
+    smod31_ = next((m_ for m_ in slime31_.modifiers if m_.type == "NODES"), None) if slime31_ else None
+    check(span31_ is not None and slime31_ is not None and tongue31_ is not None and count31_ >= 4
+          and len(slime31_.data.vertices) == count31_ * per31_
+          and all(slime31_.data.attributes.get(n_) is not None for n_ in roar31_.SLIME_ATTRS)
+          and smod31_ is not None and smod31_.node_group.name == ng31_.SLIME_GROUP
+          and slime31_.constraints.get(roar31_.CONSTRAINT) is not None
+          and slime31_.matrix_basis == tongue31_.matrix_basis,
+          "the roar with slime: %d strands, an object of its own riding on her head as the tongue does" % count31_)
+    if span31_ is not None and smod31_ is not None and count31_:
+        fps31_ = scene.render.fps / scene.render.fps_base
+        a31_, e31_ = span31_
+        open31_, close31_ = materials.ROAR_OPEN[0] * fps31_, materials.ROAR_OPEN[1] * fps31_
+        ids31_ = input_identifiers(smod31_.node_group)
+        up31_ = np.array(smod31_[ids31_["Up"]], dtype=np.float64)
+        me31_ = slime31_.data
+
+        def attr31_(name_):
+            out_ = np.zeros(len(me31_.vertices), dtype=np.float32)
+            me31_.attributes[name_].data.foreach_get("value", out_)
+            return out_[::per31_].astype(np.float64)
+
+        anchors31_ = np.array([me31_.vertices[i_ * per31_].co for i_ in range(count31_)], dtype=np.float64)
+        halves31_ = attr31_("mmdd_gap") - attr31_("mmdd_teeth")  # (the jaws apart past the teeth, wide open)
+        snaps31_ = attr31_("mmdd_snap")
+        arm31_ = base.armature
+        head31_, eyes31_ = roar31_._bones(arm31_)
+        eye31_ = (arm31_.matrix_world @ eyes31_[1].head_local - arm31_.matrix_world @ eyes31_[0].head_local).length
+
+        side31_ = np.cross(up31_, np.array(smod31_[ids31_["Out"]], dtype=np.float64))
+        side31_ /= max(np.linalg.norm(side31_), 1e-9)
+        across31_ = anchors31_ @ side31_  # (where each strand is across her mouth)
+
+        def joined31_(f_):
+            """How many strands still run across the middle of the jaws at frame f_ (any of its points there; each
+            point belongs to the strand nearest it across her mouth)."""
+            scene.frame_set(f_)
+            pts_ = evaluated_positions(slime31_).astype(np.float64)
+            if not len(pts_):
+                return 0, 0, 0.0
+            nearest_ = np.argmin(np.abs((pts_ @ side31_)[:, None] - across31_[None, :]), axis=1)
+            n_ = 0
+            for i_, (p_, half_) in enumerate(zip(anchors31_, halves31_)):
+                mine_ = pts_[nearest_ == i_] - p_
+                n_ += int(len(mine_) > 0 and bool((np.abs(mine_ @ up31_) < 0.1 * half_).any()))
+            return n_, len(pts_), float(np.linalg.norm(pts_, axis=1).max())
+
+        first31_ = a31_ + roar31_.SLIME_FIRST * open31_
+        late31_ = int(e31_ - close31_) - 1
+        pull31_ = roar31_.SLIME_PULL * fps31_
+        before31_, wide31_, late_, after31_ = (joined31_(f_) for f_ in (int(a31_) - 2, int(first31_) - 1, late31_,
+                                                                         int(e31_) + 2))
+        snapping31_ = int((snaps31_ < 1e8).sum())
+        check(before31_[1] == 0 and after31_[1] == 0 and wide31_[1] > 0 and wide31_[2] < 1.6 * eye31_,
+              "the roar with slime: only while the jaws are parted (%d, %d, %d points), at her mouth (%.3f of %.3f)"
+              % (before31_[1], wide31_[1], after31_[1], wide31_[2], eye31_))
+        check(wide31_[0] == count31_ and 0 < snapping31_ < count31_ and late_[0] == count31_ - snapping31_
+              and float(snaps31_[snaps31_ < 1e8].max()) + pull31_ < late31_,
+              "the roar with slime: all %d across the jaws as they part, %d snap and pull back to the teeth, %d stay"
+              % (wide31_[0], snapping31_, late_[0]))
+    s.venom_slime = False
+    check(roar31_.slime(s.mask) is None and roar31_.tongue(s.mask) is not None,
+          "slime strands off: gone (the tongue stays)")
+    s.venom_slime = True
+    check(roar31_.slime(s.mask) is not None, "slime strands on again")
+
+    # the goo snapping back into her chest: a ridge bunching up at the edge it pulls back from, its smears and veins
+    # streaming in towards her chest
+    s.venom_retract, s.venom_retract_after, s.layer_stay = True, 1.0, False
+    when31_ = effect._retract_frames(s, s.mask)
+    body31_ = max(target.meshes, key=lambda m_: len(m_.data.vertices))
+    tmod31_ = next((m_ for m_ in body31_.modifiers if m_.type == "NODES" and m_.node_group is not None
+                    and m_.node_group.name == TARGET_GROUP), None)
+    tids31_ = input_identifiers(tmod31_.node_group) if tmod31_ is not None else {}
+    ridge31_ = float(tmod31_[tids31_["Retract Ridge"]]) if "Retract Ridge" in tids31_ else 0.0
+    to_world31_ = body31_.matrix_world.to_scale()[0]
+    check(when31_ is not None and abs(ridge31_ * to_world31_ - effect.RETRACT_RIDGE * s.size_reference)
+          < 1e-4 * s.size_reference and tmod31_[tids31_["Retract Reach"]] > 0.0,
+          "snaps back: the ridge set on the new outfit (%.4f high)" % (ridge31_ * to_world31_))
+    coat31_ = None
+    if when31_ is not None and ridge31_ > 0.0:
+        a31_, d31_ = when31_
+
+        def lift31_(f_):
+            """How far the ridge stands out at frame f_ (the most any vertex moves with it)."""
+            scene.frame_set(f_)
+            with_ = evaluated_positions(body31_)
+            tmod31_[tids31_["Retract Ridge"]] = 0.0
+            body31_.update_tag()
+            bpy.context.view_layer.update()
+            without_ = evaluated_positions(body31_)
+            tmod31_[tids31_["Retract Ridge"]] = ridge31_
+            body31_.update_tag()
+            bpy.context.view_layer.update()
+            if with_.shape != without_.shape:
+                return -1.0
+            return float(np.linalg.norm((with_ - without_).reshape(-1, 3), axis=1).max())
+
+        lifts31_ = [lift31_(f_) for f_ in (int(a31_) - 2, int(a31_ + 0.5 * d31_), int(a31_ + d31_) + 2)]
+        check(lifts31_[0] < 1e-6 and 0.3 * ridge31_ < lifts31_[1] <= 1.001 * ridge31_ and lifts31_[2] < 1e-6,
+              "snaps back: the ridge stands out only while it pulls back (%s, at most %.4f)"
+              % (["%.4f" % v_ for v_ in lifts31_], ridge31_))
+        coat31_ = next((sl_.material for m_ in target.meshes for sl_ in m_.material_slots
+                        if sl_.material is not None and sl_.material.node_tree is not None
+                        and sl_.material.node_tree.nodes.get(materials.LAYER + " Retract Pull") is not None), None)
+        pull_ = coat31_.node_tree.nodes[materials.LAYER + " Retract Pull"].outputs[0] if coat31_ else None
+        ad31_ = coat31_.node_tree.animation_data if coat31_ else None
+        drv31_ = next((d_ for d_ in (ad31_.drivers if ad31_ else [])
+                       if pull_ is not None and d_.data_path == pull_.path_from_id("default_value")), None)
+        pulls31_ = []
+        for f_ in (int(a31_) - 2, int(a31_ + d31_) + 2):
+            scene.frame_set(f_)
+            pulls31_.append(round(float(pull_.default_value), 4) if pull_ is not None else -1.0)
+        check(drv31_ is not None and drv31_.driver.is_simple_expression and pulls31_[0] == 0.0
+              and abs(pulls31_[1] - materials.RETRACT_FLOW) < 1e-3,
+              "snaps back: its smears and veins stream in towards her chest (%s), a simple driver" % pulls31_)
+    s.venom_retract = False
+    ad31_ = coat31_.node_tree.animation_data if coat31_ is not None else None
+    check(tmod31_ is not None and tmod31_[tids31_["Retract Ridge"]] == 0.0
+          and not [d_ for d_ in (ad31_.drivers if ad31_ else []) if "Retract Pull" in d_.data_path],
+          "snaps back off: no ridge, nothing streaming")
+    check(not draw_panels(bpy.context), "panels draw with the 1.31 options")
+    for key_, value_ in saved31_.items():
+        if plain31_(getattr(s, key_)) != value_:
+            try:
+                setattr(s, key_, value_)
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                pass
+    s.base, s.target = base_root, target_was31_
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.31 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along
@@ -5728,6 +5973,7 @@ def run():
         preset_camera.location = (float(centre_xy[0]), float(centre_xy[1]) - 2.5 * height, 0.55 * height)
         preset_camera.rotation_euler = (math.radians(90.0), 0.0, 0.0)
         scene.camera = preset_camera
+    lock_before_presets_ = s.lock_patterns  # (1.31: the symbiote's presets unlock her face; put back after them)
     for key, _label, _desc in presets.ITEMS:
         s.frame_start, s.frame_end = 1, 100  # (a move of the dance or the hands' pace moves them)
         check(bpy.ops.mmd_disperse.apply_preset(preset=key) == {"FINISHED"}, "preset " + key)
@@ -5843,6 +6089,7 @@ def run():
         if key == "WATER_BREATHING":
             check(s.ring_style == "WATER" and len(rings.ring_objects(s.mask)) == 1,
                   "water breathing preset: the band of toon water")
+    s.lock_patterns = lock_before_presets_
     s.beat_sync = False  # (the beat drop preset turned it on; the finale checks below are not on the beat)
     s.finish_style = "NONE"  # (a layer the presets keep: its hold would stop the mask for a while)
     s.frame_start, s.frame_end = 1, 100

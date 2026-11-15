@@ -18,6 +18,7 @@ RIBBON_MATERIAL = "MMD Disperse Ribbon"
 PARTICLE_MATERIAL = "MMD Disperse Particle"
 GOO_MATERIAL = "MMD Disperse Goo"
 TONGUE_MATERIAL = "MMD Disperse Tongue"  # 1.29: the symbiote's tongue (roar.py)
+SLIME_MATERIAL = "MMD Disperse Slime"  # 1.31: the strands of slime between its jaws (roar.py)
 COIN_MATERIAL = "MMD Disperse Coin"
 ICE_MATERIAL = "MMD Disperse Ice"
 CARD_MATERIAL = "MMD Disperse Card"
@@ -46,7 +47,9 @@ INNER = "MMDD Inner"
 P_INNER = "mmd_disperse_inner"
 LAYER = "MMDD Layer"
 P_LAYER = "mmd_disperse_layer"
-LAYER_REVISION = 2  # bumped when the undersuit's nodes change (1.29: the snap back, the roaring mouth): made again
+LAYER_REVISION = 3  # bumped when the undersuit's nodes change (1.29: the snap back, the roaring mouth; 1.31: the goo
+# streaming in as it snaps back): made again
+RETRACT_FLOW = 0.55  # 1.31: the goo's smears and veins come this share of the way in to her chest as it snaps back
 SURFACE = "MMDD Surface"
 P_SURFACE = "mmd_disperse_surface"  # the style the surface nodes were made for
 SURFACE_STYLES = ("VEINS", "FROST", "CHAR", "INK", "STONE", "GOLD", "SILK", "CODE", "PAPERCUT", "TATTOO", "LED",
@@ -1006,6 +1009,38 @@ def ensure_tongue_material():
     return mat
 
 
+def ensure_slime_material(color=(0.006, 0.006, 0.009), metallic=0.0):
+    """The strands of slime between the symbiote's jaws (1.31): wet and glossy under a clear coat, glassy - the goo's
+    colour where they face the camera, light along their edges - so they read against the dark mouth; made once, the
+    colours and metal kept up."""
+    mat = bpy.data.materials.get(SLIME_MATERIAL)
+    if mat is None:
+        mat = bpy.data.materials.new(SLIME_MATERIAL)
+        if mat.node_tree is None:
+            mat.use_nodes = True
+        nt = mat.node_tree
+        nt.nodes.clear()
+        out = _new(nt, "ShaderNodeOutputMaterial", "Output", 300, 0)
+        bsdf = _new(nt, "ShaderNodeBsdfPrincipled", "Slime BSDF", 0, 0)
+        _set_input(bsdf, ("Roughness",), 0.05)
+        _set_input(bsdf, ("Specular IOR Level", "Specular"), 1.0)
+        _set_input(bsdf, ("Coat Weight", "Clearcoat"), 1.0)
+        _set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.02)
+        nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
+        facing = _new(nt, "ShaderNodeLayerWeight", "Slime Facing", -500, 0)
+        facing.inputs["Blend"].default_value = 0.35
+        ramp = _new(nt, "ShaderNodeValToRGB", "Slime Ramp", -250, 0)
+        nt.links.new(facing.outputs["Facing"], ramp.inputs[0])
+        nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    nodes = mat.node_tree.nodes if mat.node_tree is not None else {}
+    if nodes.get("Slime Ramp") is not None:
+        _ramp_stops(nodes["Slime Ramp"], [(0.0, tuple(min(1.0, 0.6 * c + 0.03) for c in color) + (1.0,)),
+                                          (1.0, tuple(min(1.0, 0.4 * c + 0.55) for c in color) + (1.0,))])
+    if nodes.get("Slime BSDF") is not None:
+        _set_input(nodes["Slime BSDF"], ("Metallic",), float(metallic))
+    return mat
+
+
 def update_goo_material(color, cell, metallic=0.0, sheen=None, pulse=None):
     mat = bpy.data.materials.get(GOO_MATERIAL)
     if mat is None or mat.node_tree is None:
@@ -1469,8 +1504,22 @@ def add_layer(mat):
     _set_input(bsdf, ("Metallic",), 0.8)
     _set_input(bsdf, ("Roughness",), 0.32)
     nt.links.new(glow.outputs[0], bsdf.inputs["Emission Strength"])
-    # The symbiote's style: wet black goo instead (Style 1).
-    goo = _goo_shader(nt, LAYER + " Goo", rest.outputs["Vector"], x - 300, y - 800)
+    # The symbiote's style: wet black goo instead (Style 1). (1.31) As it snaps back into her chest its smears and
+    # veins stream in towards there: they are drawn that share (" Retract Pull", a frame driver) of the way from
+    # where they are to " Retract Centre"
+    centre = _new(nt, "ShaderNodeCombineXYZ", LAYER + " Retract Centre", x - 1300, y + 700)
+    pull = _new(nt, "ShaderNodeValue", LAYER + " Retract Pull", x - 1700, y - 1000)
+    pull.outputs[0].default_value = 0.0
+    towards = _new(nt, "ShaderNodeVectorMath", LAYER + " Retract Towards", x - 1500, y - 900, operation="SUBTRACT")
+    nt.links.new(centre.outputs[0], towards.inputs[0])
+    nt.links.new(rest.outputs["Vector"], towards.inputs[1])
+    pulled = _new(nt, "ShaderNodeVectorMath", LAYER + " Retract Pulled", x - 1300, y - 900, operation="SCALE")
+    nt.links.new(towards.outputs["Vector"], pulled.inputs[0])
+    nt.links.new(pull.outputs[0], pulled.inputs[3])
+    flow = _new(nt, "ShaderNodeVectorMath", LAYER + " Retract Flow", x - 1100, y - 900, operation="ADD")
+    nt.links.new(rest.outputs["Vector"], flow.inputs[0])
+    nt.links.new(pulled.outputs["Vector"], flow.inputs[1])
+    goo = _goo_shader(nt, LAYER + " Goo", flow.outputs["Vector"], x - 300, y - 800)
     alpha = _alpha_source(nt)
     if alpha is not None:  # lace and other cut-outs keep their holes
         nt.links.new(alpha, bsdf.inputs["Alpha"])
@@ -1491,7 +1540,6 @@ def add_layer(mat):
                                                                 y=y + 350), x=x - 300, y=y + 350)
     # (1.29) the goo snaps back into her chest: gone outside a ball round " Retract Centre" whose radius " Retract
     # Radius" (a frame driver) shrinks to nothing, its edge " Retract Width" soft
-    centre = _new(nt, "ShaderNodeCombineXYZ", LAYER + " Retract Centre", x - 1300, y + 700)
     radius = _new(nt, "ShaderNodeValue", LAYER + " Retract Radius", x - 1300, y + 550)
     radius.outputs[0].default_value = 1e6
     width = _new(nt, "ShaderNodeValue", LAYER + " Retract Width", x - 1300, y + 450)
@@ -1777,6 +1825,10 @@ def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=
             width.outputs[0].default_value = float(retract[2])
             _face_clock(radius.outputs[0], "%.5f * (1 - pow(clamp((frame - %.2f) / %.2f, 0, 1), 2))" % (
                 retract[1], retract[3], max(retract[4], 1e-3)), mask)
+    pull = nodes.get(LAYER + " Retract Pull")  # (1.31: its smears and veins streaming in)
+    if pull is not None:
+        _face_clock(pull.outputs[0], "%.3f * pow(clamp((frame - %.2f) / %.2f, 0, 1), 2)" % (
+            RETRACT_FLOW, retract[3], max(retract[4], 1e-3)) if retract is not None else None, mask)
 
 
 def remove_layer(mat):

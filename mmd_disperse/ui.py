@@ -17,6 +17,8 @@ def _model_row(layout, settings, prop, role):
     row = layout.row(align=True)
     row.prop(settings, prop)
     row.operator("mmd_disperse.assign", text="", icon="EYEDROPPER").role = role
+    if role == "TARGET":  # (1.31: a second copy of the old outfit as the new one)
+        row.operator("mmd_disperse.copy_outfit", text="", icon="DUPLICATE")
 
 
 class MMDDISPERSE_PT_main(_Panel, bpy.types.Panel):
@@ -808,6 +810,7 @@ class MMDDISPERSE_PT_venom(_Panel, bpy.types.Panel):
         sub3 = sub.column(align=True)
         sub3.active = s.venom_eyes and s.venom_roar
         sub3.prop(s, "venom_roar_time")
+        sub3.prop(s, "venom_slime")
         col = layout.column(align=True)
         col.prop(s, "venom_back")
         sub = col.column(align=True)

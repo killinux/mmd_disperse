@@ -733,10 +733,28 @@ def _update_layer(ob, settings):
                                    settings.mask)
         else:
             materials.remove_layer(mat)
+    _update_ridge(ob, retract if settings.layer_enable else None, height)
+
+
+def _update_ridge(ob, retract, height):
+    """(1.31) The ridge of goo at the edge it snaps back from on mesh `ob` of the new outfit (node_groups.RIDGE_INPUTS
+    of our modifier): the ball the coat is left in as `retract` says (object space, as the material's; None: no
+    ridge), RETRACT_RIDGE of her height (`height`, object units) high."""
+    for mod in ob.modifiers:
+        group = mod.node_group if mod.type == "NODES" else None
+        ids = input_identifiers(group) if group is not None and group.name == TARGET_GROUP else {}
+        if ids.get("Retract Ridge") is None:
+            continue
+        mod[ids["Retract Ridge"]] = RETRACT_RIDGE * height if retract is not None else 0.0
+        if retract is not None:
+            mod[ids["Retract Centre"]] = tuple(float(c) for c in retract[0])
+            mod[ids["Retract Reach"]] = float(retract[1])
+            mod[ids["Retract Width"]] = float(retract[2])
 
 
 RETRACT = 0.45  # 1.29: seconds the goo takes to snap back into her chest ...
-RETRACT_RIM = 0.04  # ... the edge of what is left of it this soft (a share of her height)
+RETRACT_RIM = 0.04  # ... the edge of what is left of it this soft (a share of her height) ...
+RETRACT_RIDGE = 0.02  # ... (1.31) and the goo bunches up in a ridge this high just inside it
 PRELUDE_BEATS = 1.1  # the veins' prelude: this many heartbeats a second at first (then faster, 2.6 times by its end)
 BACK_EMERGE = 0.06  # the big tendrils off her back come out once the edge is this far past their root ...
 BACK_GROW = 0.3  # ... and are grown out once it is this much further (shares of her height)
@@ -816,7 +834,7 @@ def _update_inertia(settings, mask, objects):
     when Inertia is 0 or there is neither."""
     scene = settings.id_data
     strength = float(getattr(settings, "venom_inertia", 0.0)) if settings.venom_enable else 0.0
-    tongue = next((ob for ob in roar.objects(mask) if ob.type == "MESH"), None)
+    tongue = roar.tongue(mask)
     tmod = next((m for m in tongue.modifiers if m.type == "NODES"), None) if tongue is not None else None
     tid = input_identifiers(tmod.node_group).get("Lag") if tmod is not None and tmod.node_group else None
     back = next((ob for ob in objects if ob.type == "MESH" and venom.skeleton(ob) is not None
@@ -847,7 +865,7 @@ def _update_inertia(settings, mask, objects):
              str(retract), tuple(bones))
     key = inertia._motion_key(scene, arm, frames, extra)
     hidden = list({ob for m in models for ob in m.meshes} | {ob for ob in objects if ob.type == "MESH"}
-                  | ({tongue} if tongue is not None else set()))
+                  | {ob for ob in roar.objects(mask) if ob.type == "MESH"})
     mats = inertia.play(scene, arm, bones, frames, hidden, key)
     height = max(settings.size_reference, 1e-3)
     if want_tongue:
@@ -2212,6 +2230,9 @@ def build(context, settings):
     height = hi.z - lo.z
     if settings.auto_size and abs(height - settings.size_reference) > 1e-4 * max(height, 1.0):
         fit_sizes(settings, height)
+        from . import presets  # (1.31: the preset's own sizes at her height, also when it was chosen first)
+
+        presets.refit(settings, height)
 
     owner = base if base else target
     meshes = target.meshes + base.meshes

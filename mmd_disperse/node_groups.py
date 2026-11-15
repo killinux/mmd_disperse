@@ -28,7 +28,7 @@ import os
 
 import bpy
 
-VERSION = 22
+VERSION = 23
 CACHE_PREFIX = "mmd_disperse_node_groups_"  # the main groups, once built, are kept in the user's config folder
 
 FIELD_GROUP = "MMDDisperse Field"
@@ -46,6 +46,7 @@ MIST_GROUP = "MMDDisperse Mist"
 TITLE_GROUP = "MMDDisperse Finish Title"
 TITLE_TEXT = "MMDD Title Text"  # its String to Curves node (finish.py sets its font)
 TONGUE_GROUP = "MMDDisperse Tongue"  # 1.29 (roar.py): the symbiote's tongue
+SLIME_GROUP = "MMDDisperse Slime"  # 1.31 (roar.py): strands of slime between its jaws
 
 ATTR_EDGE = "disperse_edge"
 ATTR_LOCK = "disperse_lock"
@@ -252,6 +253,18 @@ SCALE_INPUTS = (
     ("Flip Width", "NodeSocketFloat", 1.5, 0.0, 1e9, "DISTANCE"),
 )
 
+# 1.31, the new outfit: the goo bunching up in a ridge at the edge it snaps back from. The ball the coat is left in,
+# round Retract Centre (object space), shrinks from Retract Reach to nothing as the material's does (Retract At over
+# Retract Frames, slowly then fast); just inside its soft edge (Retract Width) the surface stands out, Retract Ridge
+RIDGE_INPUTS = (
+    ("Retract Centre", "NodeSocketVector", (0.0, 0.0, 0.0), None, None, None),
+    ("Retract Reach", "NodeSocketFloat", 0.0, 0.0, 1e9, None),
+    ("Retract Width", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
+    ("Retract Ridge", "NodeSocketFloat", 0.0, 0.0, 1e9, None),
+)
+RIDGE_SHAPE = (4.0, 1.2, 0.2)  # the ridge rises from this many widths inside the ball's edge, is highest this many in,
+# gone this many in
+
 TARGET_INPUTS = FIELD_INPUTS + (
     ("Subdivide", "NodeSocketInt", 0, 0, 3, None),
     ("Edge Width", "NodeSocketFloat", 1.0, 0.0, 10000.0, "DISTANCE"),
@@ -312,7 +325,7 @@ TARGET_INPUTS = FIELD_INPUTS + (
     ("Smoke Density", "NodeSocketFloat", 1.0, 0.0, 1e9, None),
     ("Smoke Size", "NodeSocketFloat", 1.0, 0.0, 1e9, "DISTANCE"),
     ("Smoke Material", "NodeSocketMaterial", None, None, None, None),
-) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS + SPIRIT_INPUTS
+) + VENOM_INPUTS + SCALE_INPUTS + TIMELINE_INPUTS + EXTRA_INPUTS + SPIRIT_INPUTS + RIDGE_INPUTS
 
 BASE_INPUTS = FIELD_INPUTS + (
     ("Shrink", "NodeSocketFloat", 0.08, -10000.0, 10000.0, "DISTANCE"),
@@ -536,6 +549,22 @@ TONGUE_INPUTS = (
     ("Lag", "NodeSocketVector", (0.0, 0.0, 0.0), None, None, None),
 )
 TONGUE_POINTS = 28  # points along the tongue
+SLIME_INPUTS = (  # 1.31 (roar.py): the jaws parting as the face's Mouth Open, the face's up and front in its space
+    ("Start", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("End", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Open Frames", "NodeSocketFloat", 6.0, 0.0, 1e6, None),
+    ("Close Frames", "NodeSocketFloat", 7.5, 0.0, 1e6, None),
+    ("Pull Frames", "NodeSocketFloat", 5.0, 0.0, 1e6, None),
+    ("Up", "NodeSocketVector", (0.0, 0.0, 1.0), None, None, None),
+    ("Out", "NodeSocketVector", (0.0, 1.0, 0.0), None, None, None),
+    ("Material", "NodeSocketMaterial", None, None, None, None),
+    ("Effect Clock", "NodeSocketBool", False, None, None, None),
+    ("Effect Time", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+)
+SLIME_KEEP = (0.24, 0.1)  # a snapped strand's upper half keeps this share of its length (a hanging drop), the lower
+SLIME_REST = 6.0  # a strand this many times as long as it is thick (radius) is as thick as at rest; longer, thinner ...
+SLIME_THINNEST = 0.33  # ... down to this share, and in its middle this much less again
+SLIME_NECK = 0.55
 
 DISTANCE_INPUTS = frozenset(spec[0] for spec in FIELD_INPUTS + TARGET_INPUTS + BASE_INPUTS if spec[5] == "DISTANCE")
 
@@ -1396,6 +1425,27 @@ def build_target_group(field_group, venom_group):
                                                                      x=1300, y=-3700), x=1500, y=-3600),
                          x=1000, y=500)
     suit = b.switch("GEOMETRY", gi.outputs["Goo"], suit, goo, x=1100, y=350)
+    # (1.31) the ridge of goo at the edge it snaps back from (RIDGE_INPUTS), along the normal, as soon as it starts
+    r_frame = b.switch("FLOAT", gi.outputs["Effect Clock"], b.node("GeometryNodeInputSceneTime", 300, -4300).outputs[
+        "Frame"], gi.outputs["Effect Time"], x=500, y=-4300)
+    r_u = b.math("DIVIDE", b.math("SUBTRACT", r_frame, gi.outputs["Retract At"], x=700, y=-4250),
+                 b.math("MAXIMUM", gi.outputs["Retract Frames"], 1e-3, x=700, y=-4400), x=900, y=-4300, clamp=True)
+    r_ball = b.math("MULTIPLY", gi.outputs["Retract Reach"], b.math("SUBTRACT", 1.0, b.math(
+        "MULTIPLY", r_u, r_u, x=1100, y=-4300), x=1300, y=-4300), x=1500, y=-4250)
+    r_w = b.math("MAXIMUM", gi.outputs["Retract Width"], 1e-5, x=1300, y=-4450)
+    r_far = b.vmath("DISTANCE", b.switch("VECTOR", goo_has_rest, b.node("GeometryNodeInputPosition", 900, -4600)
+                                         .outputs[0], goo_rest, x=1100, y=-4600), gi.outputs["Retract Centre"],
+                    x=1300, y=-4600)
+    r_edges = [b.math("MULTIPLY_ADD", r_w, -k, r_ball, x=1500, y=-4400 - 100 * i) for i, k in enumerate(RIDGE_SHAPE)]
+    r_rise = b.map_range(r_far, r_edges[0], r_edges[1], x=1700, y=-4450, smooth=True)
+    r_fall = b.map_range(r_far, r_edges[1], r_edges[2], x=1700, y=-4600, smooth=True)
+    r_hump = b.math("MULTIPLY", b.math("MULTIPLY", r_rise, b.math("SUBTRACT", 1.0, r_fall, x=1900, y=-4600),
+                                       x=2100, y=-4500), b.map_range(r_u, 0.0, 0.08, x=1900, y=-4300), x=2300,
+                    y=-4400)
+    ridged = b.set_position(suit, b.vmath("SCALE", normal, scale=b.math("MULTIPLY", r_hump, gi.outputs[
+        "Retract Ridge"], x=2500, y=-4400), x=2700, y=-4400), x=1200, y=500)
+    suit = b.switch("GEOMETRY", b.compare("GREATER_THAN", gi.outputs["Retract Ridge"], 0.0, x=1100, y=650), suit,
+                    ridged, x=1300, y=350)
     # Inner glow: 1 at the edge, fading over Inner Depth; materials light up the back faces there, the inside of the
     # outfit seen through the cut.
     cut = b.math("SUBTRACT", 1.0, b.math("DIVIDE", b.math("ABSOLUTE", b.math("SUBTRACT", d, radius, x=-700, y=-3400),
@@ -5406,6 +5456,108 @@ def ensure_tongue_group():
     if not _is_current(TONGUE_GROUP):
         build_tongue_group()
     return bpy.data.node_groups[TONGUE_GROUP]
+
+
+def build_slime_group():
+    """Strands of slime between the symbiote's jaws while it roars (1.31, roar.py), from its object's mesh: each strand
+    two halves of points at its middle on her face (their position), mmdd_upper 1 on the half off the upper teeth, 0 the
+    lower, mmdd_w 0 at its teeth .. 1 at the middle; mmdd_gap how far the jaws part there (half, wide open), mmdd_teeth
+    how far into that its roots are (up the teeth), mmdd_thick its radius there, mmdd_snap the frame it snaps (its halves
+    then pull back in Pull Frames: a drop hanging off the upper teeth, a stub on the lower), mmdd_seed. The jaws part
+    as the face's Mouth Open (Start over Open Frames, shut over Close Frames by End) along Up; stretched, a strand is
+    thinner, most in its middle, bows out a little (Out) and sways. Nothing while the jaws are shut."""
+    ng = _new_group(SLIME_GROUP, is_modifier=True)
+    _add_socket(ng, "Geometry", "INPUT", "NodeSocketGeometry")
+    for spec in SLIME_INPUTS:
+        _add_socket(ng, spec[0], "INPUT", *spec[1:])
+    _add_socket(ng, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    b = _Builder(ng)
+    gi = b.node("NodeGroupInput", -2800, 0)
+    go = b.node("NodeGroupOutput", 2400, 0)
+    frame = b.switch("FLOAT", gi.outputs["Effect Clock"], b.node("GeometryNodeInputSceneTime", -2800, 700).outputs[
+        "Frame"], gi.outputs["Effect Time"], x=-2600, y=700)
+    opened = b.map_range(frame, gi.outputs["Start"], b.math("ADD", gi.outputs["Start"], b.math(
+        "MAXIMUM", gi.outputs["Open Frames"], 1e-3, x=-2600, y=500), x=-2400, y=500), x=-2200, y=550, smooth=True)
+    closed = b.map_range(frame, b.math("SUBTRACT", gi.outputs["End"], b.math(
+        "MAXIMUM", gi.outputs["Close Frames"], 1e-3, x=-2600, y=350), x=-2400, y=350), gi.outputs["End"], x=-2200,
+        y=400, smooth=True)
+    jaws = b.math("MULTIPLY", opened, b.math("SUBTRACT", 1.0, closed, x=-2000, y=400), x=-1800, y=450)
+    curve = b.node("GeometryNodeMeshToCurve", -2400, 0)
+    b.feed(curve.inputs["Mesh"], gi.outputs["Geometry"])
+    w, upper, gap, teeth, snap, seed, thick = (b.named_attribute(name, "FLOAT", x=-2400, y=-300 - 150 * i)[0]
+                                               for i, name in enumerate(("mmdd_w", "mmdd_upper", "mmdd_gap",
+                                                                         "mmdd_teeth", "mmdd_snap", "mmdd_seed",
+                                                                         "mmdd_thick")))
+    up = gi.outputs["Up"]
+    # the jaws apart there past the teeth (half of it): the strand is twice that long
+    half = b.math("MAXIMUM", b.math("SUBTRACT", b.math("MULTIPLY", jaws, gap, x=-2000, y=-600), teeth, x=-1800,
+                                    y=-650), 0.0, x=-1600, y=-650)
+    length = b.math("MULTIPLY", half, 2.0, x=-1400, y=-650)
+    sign = b.math("MULTIPLY_ADD", upper, 2.0, -1.0, x=-2000, y=-450)  # (+1 off the upper teeth, -1 the lower)
+    anchor = b.vmath("ADD", b.node("GeometryNodeInputPosition", -1600, -200).outputs[0], b.vmath(
+        "SCALE", up, scale=b.math("MULTIPLY", sign, half, x=-1400, y=-450), x=-1200, y=-400), x=-1000, y=-300)
+    # snapped: its halves pull back to their teeth
+    pulled = b.map_range(frame, snap, b.math("ADD", snap, b.math("MAXIMUM", gi.outputs["Pull Frames"], 1e-3,
+                                                                 x=-2000, y=-1350), x=-1800, y=-1300), x=-1600,
+                         y=-1250, smooth=True)
+    keep = b.math("MULTIPLY_ADD", upper, SLIME_KEEP[0] - SLIME_KEEP[1], SLIME_KEEP[1], x=-1600, y=-1450)
+    reach = b.math("MULTIPLY", length, b.math("MULTIPLY_ADD", pulled, b.math("SUBTRACT", keep, 0.5, x=-1400, y=-1450),
+                                              0.5, x=-1200, y=-1400), x=-1000, y=-1350)
+    along = b.vmath("SCALE", up, scale=b.math("MULTIPLY", b.math("MULTIPLY", sign, -1.0, x=-1000, y=-1500), b.math(
+        "MULTIPLY", w, reach, x=-800, y=-1400), x=-600, y=-1450), x=-400, y=-1400)
+    # stretched it bows out a little and sways, most in its middle; a snapped drop swings at its end
+    neck = b.math("SINE", b.math("MULTIPLY", w, math.pi / 2.0, x=-1400, y=-1650), x=-1200, y=-1650)
+    loose = b.math("MULTIPLY", neck, b.math("SUBTRACT", 1.0, pulled, x=-1200, y=-1800), x=-1000, y=-1750)
+    bow = b.math("MULTIPLY", b.math("MULTIPLY", length, b.math("MULTIPLY_ADD", seed, 0.07, 0.03, x=-1000, y=-1900),
+                                    x=-800, y=-1850), loose, x=-600, y=-1850)
+    swing = b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.45, b.math("MULTIPLY", seed, 6.283, x=-1200, y=-2050),
+                                  x=-1000, y=-2050), x=-800, y=-2050)
+    dangle = b.math("ADD", loose, b.math("MULTIPLY", b.math("MULTIPLY", pulled, w, x=-1000, y=-2200), 0.6, x=-800,
+                                         y=-2200), x=-600, y=-2150)
+    sway = b.math("MULTIPLY", b.math("MULTIPLY", length, 0.07, x=-600, y=-2000), b.math("MULTIPLY", swing, dangle,
+                                                                                         x=-400, y=-2100),
+                  x=-200, y=-2050)
+    side = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", up, gi.outputs["Out"], x=-400, y=-2300), x=-200, y=-2300)
+    pos = b.vmath("ADD", b.vmath("ADD", anchor, along, x=-200, y=-800), b.vmath("ADD", b.vmath(
+        "SCALE", gi.outputs["Out"], scale=bow, x=-200, y=-1900), b.vmath("SCALE", side, scale=sway, x=0, y=-2150),
+        x=200, y=-2000), x=400, y=-900)
+    shaped = b.set_position(curve.outputs["Curve"], position=pos, x=600, y=0)
+    # thinner the more it stretches, most in its middle; the snapped upper half ends in a drop
+    thin = b.math("MAXIMUM", b.math("SQRT", b.math("MINIMUM", b.math("DIVIDE", b.math(
+        "MULTIPLY", thick, SLIME_REST, x=-400, y=-2500), b.math("MAXIMUM", length, 1e-6, x=-400, y=-2650), x=-200,
+        y=-2550), 1.0, x=0, y=-2550), x=200, y=-2550), SLIME_THINNEST, x=400, y=-2550)
+    thin = b.math("MULTIPLY_ADD", b.math("SUBTRACT", 1.0, thin, x=600, y=-2650), pulled, thin, x=800, y=-2600)
+    necked = b.math("MULTIPLY_ADD", loose, -SLIME_NECK, 1.0, x=600, y=-2800)
+    drop = b.math("MULTIPLY_ADD", b.math("MULTIPLY", b.math("MULTIPLY", pulled, upper, x=400, y=-2950), b.math(
+        "MULTIPLY", w, w, x=400, y=-3100), x=600, y=-3000), 0.8, 1.0, x=800, y=-3000)
+    showing = b.map_range(half, 0.0, b.math("MAXIMUM", thick, 1e-6, x=600, y=-3200), x=800, y=-3200)
+    radius = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", thick, thin, x=1000, y=-2600), necked, x=1200,
+                                       y=-2700), b.math("MULTIPLY", drop, showing, x=1000, y=-3100), x=1400, y=-2800)
+    sized = b.node("GeometryNodeSetCurveRadius", 800, 0)
+    b.feed(sized.inputs["Curve"], shaped)
+    b.feed(sized.inputs["Radius"], radius)
+    circle = b.node("GeometryNodeCurvePrimitiveCircle", 800, -400, mode="RADIUS")
+    circle.inputs["Resolution"].default_value = 8
+    circle.inputs["Radius"].default_value = 1.0
+    tube = b.curve_to_mesh(sized.outputs["Curve"], circle.outputs["Curve"], x=1100, y=0)
+    caps = tube.node.inputs.get("Fill Caps")
+    if caps is not None:
+        caps.default_value = True
+    smooth = b.node("GeometryNodeSetShadeSmooth", 1400, 0)
+    b.feed(smooth.inputs["Geometry"], tube)
+    mat = b.node("GeometryNodeSetMaterial", 1700, 0)
+    b.feed(mat.inputs["Geometry"], smooth.outputs["Geometry"])
+    b.feed(mat.inputs["Material"], gi.outputs["Material"])
+    shown = b.switch("GEOMETRY", b.compare("GREATER_THAN", jaws, 0.01, x=1700, y=300), None, mat.outputs["Geometry"],
+                     x=2100, y=0)
+    b.feed(go.inputs["Geometry"], shown)
+    return ng
+
+
+def ensure_slime_group():
+    if not _is_current(SLIME_GROUP):
+        build_slime_group()
+    return bpy.data.node_groups[SLIME_GROUP]
 
 
 def ensure_title_group():

@@ -27,6 +27,32 @@ class MMDDISPERSE_OT_assign(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class MMDDISPERSE_OT_copy_outfit(bpy.types.Operator):
+    """Copy the old outfit's model as the new one (own materials; it follows the old armature and physics)"""
+
+    bl_idname = "mmd_disperse.copy_outfit"
+    bl_label = "Copy the Old Outfit as the New One"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.mmd_disperse.base is not None
+
+    def execute(self, context):
+        settings = context.scene.mmd_disperse
+        found = model.resolve(settings.base)
+        if not found:
+            self.report({"ERROR"}, "The outfit has no meshes")
+            return {"CANCELLED"}
+        if any(ob.get(effect.P_ROLE) is not None for ob in found.meshes):
+            self.report({"ERROR"}, "Remove the effect first: the old outfit carries it")
+            return {"CANCELLED"}
+        settings.target = model.copy_model(found.root)
+        settings.follow_base = True
+        self.report({"INFO"}, "Copied the old outfit as the new one")
+        return {"FINISHED"}
+
+
 class MMDDISPERSE_OT_build(bpy.types.Operator):
     """Create the mask, the Geometry Nodes modifiers and the wire material"""
 
@@ -348,6 +374,7 @@ class MMDDISPERSE_OT_white_flash(bpy.types.Operator):
 
 classes = (
     MMDDISPERSE_OT_assign,
+    MMDDISPERSE_OT_copy_outfit,
     MMDDISPERSE_OT_build,
     MMDDISPERSE_OT_remove,
     MMDDISPERSE_OT_fit,

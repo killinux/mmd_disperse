@@ -144,6 +144,69 @@ def auto_origin_bone(armature):
     return roots[0].name if roots else ""
 
 
+_LEFT_OUT = _PHYSICS_TYPES | {"RIGID_GRP_OBJ", "JOINT_GRP_OBJ", "TEMPORARY_GRP_OBJ", "SPRING_CONSTRAINT",
+                              "SPRING_GOAL"}  # (copy_model: mmd_tools' physics and the empties holding it)
+
+
+def _left_out(ob, root):
+    """(copy_model) A rigid body, joint or other physics of mmd_tools, a helper of ours, or something under one."""
+    while ob is not None and ob is not root:
+        if (ob.rigid_body is not None or ob.rigid_body_constraint is not None or _mmd_type(ob) in _LEFT_OUT
+                or (ob.type == "EMPTY" and ob.name.split(".")[0] in _HELPER_EMPTIES)
+                or any(key in ob for key in HELPERS)):
+            return True
+        ob = ob.parent
+    return False
+
+
+def copy_model(root):
+    """A second copy of the model under `root` (1.31: a new outfit that is the same model, for when she turns into
+    the symbiote and is herself again under it). The root and everything under it, with mesh and armature data of
+    their own and materials of their own (what the effect does to one outfit's materials stays off the other), parents,
+    modifiers and constraints pointing at the copies, linked where the originals are; but not the rigid bodies and
+    joints, built or not: the copy is moved by the old model's armature (Follow the Old Armature), whose physics is
+    the one simulated. Returns the new root."""
+    copies = {}
+    for ob in [root] + list(root.children_recursive):
+        if _left_out(ob, root):
+            continue
+        dup = ob.copy()
+        if ob.data is not None:
+            dup.data = ob.data.copy()
+        copies[ob] = dup
+        for collection in ob.users_collection:
+            collection.objects.link(dup)
+    materials = {}
+    for ob, dup in copies.items():
+        if ob.parent in copies:
+            dup.parent = copies[ob.parent]
+        for mod in dup.modifiers:
+            if getattr(mod, "object", None) in copies:
+                mod.object = copies[mod.object]
+        for con in dup.constraints:
+            if getattr(con, "target", None) in copies:
+                con.target = copies[con.target]
+        if dup.type == "ARMATURE":
+            for pb in dup.pose.bones:
+                for con in pb.constraints:
+                    if getattr(con, "target", None) in copies:
+                        con.target = copies[con.target]
+        if dup.type == "MESH":
+            for slot in dup.material_slots:
+                if slot.material is not None:
+                    if slot.material not in materials:
+                        materials[slot.material] = slot.material.copy()
+                    slot.material = materials[slot.material]
+    new_root = copies[root]
+    mmd_root = getattr(new_root, "mmd_root", None)
+    if mmd_root is not None and getattr(mmd_root, "is_built", False):
+        try:
+            mmd_root.is_built = False  # (its rigid bodies stayed behind)
+        except (AttributeError, TypeError):
+            pass
+    return new_root
+
+
 def material_key(mat):
     """Lower-case material name without Blender's .001 duplicate suffix, for pattern matching."""
     return _DUP_SUFFIX.sub("", mat.name).lower() if mat else ""

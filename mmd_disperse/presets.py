@@ -90,7 +90,7 @@ PRESETS = (
           venom_split_after=1.2, venom_split_hold=1.0, layer_stay=True, layer_width=Height(0.3),
           surface_width=Height(0.18), moment_at="FACE", shot_enable=True, shot_style="CLOSEUP", shot_length=4.2,
           time_warp="SLOW", warp_length=1.2, impact_enable=True, impact_frames=3, speed_lines=True,
-          shockwave=False, surface_prelude=1.5, venom_back=4, venom_back_length=0.45, venom_roar=True,
+          shockwave=False, surface_prelude=1.5, venom_back=4, venom_back_length=0.45, venom_roar=True, venom_slime=True,
           venom_roar_time=1.4, body_grow=1.0, warp_effect=True, venom_inertia=1.0)),
     ("VENOM_SNAP", "Symbiote, Then It Snaps Back", "The classic beats, then the goo snaps back into her chest in a "
                                                     "few frames (from her hands, feet and head inwards), the big "
@@ -102,7 +102,7 @@ PRESETS = (
           venom_split_after=1.2, venom_split_hold=1.0, layer_stay=True, layer_width=Height(0.3),
           surface_width=Height(0.18), moment_at="FACE", shot_enable=True, shot_style="CLOSEUP", shot_length=4.2,
           time_warp="SLOW", warp_length=1.2, impact_enable=True, impact_frames=3, speed_lines=True,
-          shockwave=False, surface_prelude=1.5, venom_back=4, venom_back_length=0.45, venom_roar=True,
+          shockwave=False, surface_prelude=1.5, venom_back=4, venom_back_length=0.45, venom_roar=True, venom_slime=True,
           venom_roar_time=1.4, body_grow=1.0, venom_retract=True, venom_retract_after=4.5, warp_effect=True,
           venom_inertia=1.0)),
     ("LIQUID_METAL", "Liquid Metal", "Liquid metal runs over the body from the chest in silver veins and tendrils, "
@@ -909,9 +909,36 @@ REFRACTION = {"ICE", "OPTICAL_CAMO"}  # presets with clear ice or optical camouf
 # space refraction before 4.2) goes on
 
 
+FACE_WORDS = ("face", "顔", "eye", "目", "瞳", "brow", "眉", "lash", "まつ", "睫", "mouth", "口", "teeth", "歯",
+              "tongue", "舌")  # (1.31) lock patterns that would keep her face from the symbiote's goo
+
+
+def _unlock_face(settings):
+    """(1.31) Take her face out of the lock patterns (face, eyes, brows, lashes, mouth, teeth, tongue): the symbiote's
+    eyes, grin and roar are drawn on the goo that covers it; the rest (hair ...) stays locked. True if they changed."""
+    if not settings.use_lock:
+        return False  # (nothing is locked)
+    patterns = [p.strip() for p in settings.lock_patterns.split(";") if p.strip()]
+    kept = [p for p in patterns if not any(word in p.lower() for word in FACE_WORDS)]
+    if len(kept) == len(patterns):
+        return False
+    settings.lock_patterns = ";".join(kept)
+    return True
+
+
+def refit(settings, height):
+    """(1.31) The sizes of the preset applied last at `height`, the model's: chosen before the model, the preset had
+    measured another height, and the build has just fitted the sizes to this one."""
+    values = next((v for k, _label, _description, v in PRESETS if k == settings.last_preset), None)
+    for name, value in (values or {}).items():
+        if isinstance(value, Height):
+            setattr(settings, name, float(value) * height)
+
+
 def apply(settings, key):
     """Set the panel values of preset `key`; True when a rebuild is needed for them to take effect. A Height value is
-    a share of the model height (the panel's sizes are fitted to the model)."""
+    a share of the model height (the panel's sizes are fitted to the model). The symbiote's presets with eyes take her
+    face out of the lock patterns (1.31)."""
     values = next(values for k, _label, _description, values in PRESETS if k == key)
     rebuild = False
     height = None
@@ -929,6 +956,9 @@ def apply(settings, key):
         if name in BUILD_TIME and getattr(settings, name) != value:
             rebuild = True
         setattr(settings, name, value)
+    if values.get("venom_eyes") and _unlock_face(settings):
+        rebuild = True
+    settings.last_preset = key
     return rebuild
 
 

@@ -28,7 +28,7 @@ import os
 
 import bpy
 
-VERSION = 23
+VERSION = 24
 CACHE_PREFIX = "mmd_disperse_node_groups_"  # the main groups, once built, are kept in the user's config folder
 
 FIELD_GROUP = "MMDDisperse Field"
@@ -563,8 +563,12 @@ SLIME_INPUTS = (  # 1.31 (roar.py): the jaws parting as the face's Mouth Open, t
 )
 SLIME_KEEP = (0.24, 0.1)  # a snapped strand's upper half keeps this share of its length (a hanging drop), the lower
 SLIME_REST = 6.0  # a strand this many times as long as it is thick (radius) is as thick as at rest; longer, thinner ...
-SLIME_THINNEST = 0.33  # ... down to this share, and in its middle this much less again
-SLIME_NECK = 0.55
+SLIME_THINNEST = 0.42  # ... down to this share, and in its middle this much less again
+SLIME_NECK = 0.45
+SLIME_BEADS = (1.4, 1.5)  # stretched, beads of slime along it (a viscous thread breaking up): this much thicker at
+# most (times how stretched it is), about this many along each half
+SLIME_DRIP = (0.5, 1.1, 0.72, 0.2)  # snapped, the upper half a drop: this thick at the teeth, a bulb this much
+# thicker this far along it and this wide, closing round at its end
 
 DISTANCE_INPUTS = frozenset(spec[0] for spec in FIELD_INPUTS + TARGET_INPUTS + BASE_INPUTS if spec[5] == "DISTANCE")
 
@@ -5522,17 +5526,41 @@ def build_slime_group():
         "SCALE", gi.outputs["Out"], scale=bow, x=-200, y=-1900), b.vmath("SCALE", side, scale=sway, x=0, y=-2150),
         x=200, y=-2000), x=400, y=-900)
     shaped = b.set_position(curve.outputs["Curve"], position=pos, x=600, y=0)
-    # thinner the more it stretches, most in its middle; the snapped upper half ends in a drop
-    thin = b.math("MAXIMUM", b.math("SQRT", b.math("MINIMUM", b.math("DIVIDE", b.math(
+    # thinner the more it stretches, fast away from the teeth and most in its middle, beads of slime along it
+    stretched = b.math("MAXIMUM", b.math("SQRT", b.math("MINIMUM", b.math("DIVIDE", b.math(
         "MULTIPLY", thick, SLIME_REST, x=-400, y=-2500), b.math("MAXIMUM", length, 1e-6, x=-400, y=-2650), x=-200,
         y=-2550), 1.0, x=0, y=-2550), x=200, y=-2550), SLIME_THINNEST, x=400, y=-2550)
-    thin = b.math("MULTIPLY_ADD", b.math("SUBTRACT", 1.0, thin, x=600, y=-2650), pulled, thin, x=800, y=-2600)
-    necked = b.math("MULTIPLY_ADD", loose, -SLIME_NECK, 1.0, x=600, y=-2800)
-    drop = b.math("MULTIPLY_ADD", b.math("MULTIPLY", b.math("MULTIPLY", pulled, upper, x=400, y=-2950), b.math(
-        "MULTIPLY", w, w, x=400, y=-3100), x=600, y=-3000), 0.8, 1.0, x=800, y=-3000)
+    thin = b.math("MULTIPLY_ADD", b.math("SUBTRACT", 1.0, stretched, x=600, y=-2650), pulled, stretched, x=800,
+                  y=-2600)
+    held = b.math("SUBTRACT", 1.0, pulled, x=400, y=-2750)
+    necked = b.math("MULTIPLY_ADD", b.math("MULTIPLY", b.math("POWER", neck, 0.6, x=400, y=-2850), held, x=600,
+                                           y=-2850), -SLIME_NECK, 1.0, x=800, y=-2800)
+    bead = b.math("POWER", b.math("MAXIMUM", b.math("SINE", b.math("MULTIPLY", b.math(
+        "MULTIPLY_ADD", w, SLIME_BEADS[1], b.math("MULTIPLY", seed, 2.0, x=200, y=-3050), x=400, y=-3000), math.pi,
+        x=600, y=-3000), x=800, y=-3000), 0.0, x=1000, y=-3000), 6.0, x=1200, y=-3000)
+    beads = b.math("MULTIPLY_ADD", b.math("MULTIPLY", b.math("MULTIPLY", b.math(
+        "SUBTRACT", 1.0, stretched, x=1000, y=-3150), held, x=1200, y=-3150), bead, x=1400, y=-3100),
+        SLIME_BEADS[0], 1.0, x=1600, y=-3050)
+    # snapped: the upper half a hanging drop (a neck at the teeth, a round bulb at its end), the lower a stub rounding
+    # off, both closing round
+    off = b.math("MULTIPLY", b.math("SUBTRACT", w, SLIME_DRIP[2], x=200, y=-3350), 1.0 / SLIME_DRIP[3], x=400,
+                 y=-3350)
+    bulb = b.math("EXPONENT", b.math("MULTIPLY", b.math("MULTIPLY", off, off, x=600, y=-3350), -1.0, x=800, y=-3350),
+                  x=1000, y=-3350)
+    w2 = b.math("MULTIPLY", w, w, x=200, y=-3500)
+    w4 = b.math("MULTIPLY", w2, w2, x=400, y=-3500)
+    drip = b.math("MULTIPLY", b.math("MULTIPLY_ADD", bulb, SLIME_DRIP[1], SLIME_DRIP[0], x=1200, y=-3350), b.math(
+        "SQRT", b.math("MAXIMUM", b.math("SUBTRACT", 1.0, b.math("MULTIPLY", w4, w4, x=600, y=-3500), x=800,
+                                         y=-3500), 0.0, x=1000, y=-3500), x=1200, y=-3500), x=1400, y=-3400)
+    stub = b.math("MULTIPLY", b.math("SQRT", b.math("MAXIMUM", b.math("SUBTRACT", 1.0, w4, x=600, y=-3650), 0.0,
+                                                    x=800, y=-3650), x=1000, y=-3650),
+                  b.math("MULTIPLY_ADD", w, -0.4, 1.0, x=1000, y=-3800), x=1200, y=-3700)
+    end = b.math("MULTIPLY_ADD", b.math("SUBTRACT", drip, stub, x=1400, y=-3550), upper, stub, x=1600, y=-3550)
+    shape = b.math("MULTIPLY_ADD", b.math("SUBTRACT", end, 1.0, x=1800, y=-3550), pulled, 1.0, x=2000, y=-3500)
     showing = b.map_range(half, 0.0, b.math("MAXIMUM", thick, 1e-6, x=600, y=-3200), x=800, y=-3200)
-    radius = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", thick, thin, x=1000, y=-2600), necked, x=1200,
-                                       y=-2700), b.math("MULTIPLY", drop, showing, x=1000, y=-3100), x=1400, y=-2800)
+    radius = b.math("MULTIPLY", b.math("MULTIPLY", b.math("MULTIPLY", thick, thin, x=1000, y=-2600), b.math(
+        "MULTIPLY", necked, beads, x=1800, y=-2900), x=2000, y=-2700), b.math("MULTIPLY", shape, showing, x=2200,
+                                                                            y=-3300), x=2400, y=-2800)
     sized = b.node("GeometryNodeSetCurveRadius", 800, 0)
     b.feed(sized.inputs["Curve"], shaped)
     b.feed(sized.inputs["Radius"], radius)

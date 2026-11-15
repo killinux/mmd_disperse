@@ -829,10 +829,12 @@ Decade 式的残影汇聚、冰封碎裂、燃烧成灰、方块消散、金币�
 - **咆哮拉丝**（毒液面板「咆哮时长」下面的「黏液拉丝」，默认开）：张大嘴时，舌头两边的上下牙之间拉出八根黏液丝（从牙齿半中间
   拉出来，透亮：正对镜头的地方是黏液的颜色，边缘发亮），随着下巴张开拉长、越拉越细（中间最细），微微往前鼓、左右晃；其中五根
   在张嘴途中先后断开，上半截缩成挂在上牙上的一滴，下半截缩回下牙，另外三根一直连着，闭嘴时一起收回。
+  1.31.1：拉长的丝上串着一两颗液珠（黏稠的丝快断时那样），离开牙齿就很快变细；断开的上半截是挂着的一滴（牙边细、末端鼓成圆球），
+  下半截收成圆头；颜色更像黏液，不那么银亮（1.31.0 的丝像一排银色线轴，断头像漏斗和钉子）。
 - **缩回起脊**（「一下缩回」）：黏液往胸口缩的时候，退去的边缘鼓起一道黏液脊（几何上真的鼓起来，最高约身高的 2%），
   跟着边缘一路往里卷；黏液表面的湿亮纹路和皮下脉管也跟着往胸口流（缩回结束时流过去一半多）。
 - 「毒液·经典变身」和「毒液·一下缩回」预设打开拉丝。
-- 1.31 起只在 Blender 3.6 上测试，只出 3.6 用的传统插件包（`mmd_disperse-1.31.0-legacy.zip`）。
+- 1.31 起只在 Blender 3.6 上测试，只出 3.6 用的传统插件包（`mmd_disperse-1.31.1-legacy.zip`）。
 - 做法：
   - 复制：模型根物体和它下面的所有物体各复制一份，网格、骨架数据和材质也各复制一份（同一个材质只复制一次），父子关系、
     修改器和约束里指向原模型的都改指向复制品，放进原物体所在的集合；mmd_tools 的刚体、关节和装它们的空物体（以及插件自己的
@@ -986,8 +988,8 @@ Decade 式的残影汇聚、冰封碎裂、燃烧成灰、方块消散、金币�
 支持 Blender 3.6 及以上。1.31 起只在 Blender 3.6.15 上测试，只出 3.6 用的传统插件包（1.30 及以前也在 4.5、5.1 上测过）。
 安装包可以在 [GitHub Releases](https://github.com/killinux/mmd_disperse/releases) 下载，也可以用下面的命令自己生成（zip 不进 git）：
 
-- **Blender 3.6**：传统插件包 `dist/mmd_disperse-1.31.0-legacy.zip`（zip 里是 `mmd_disperse/` 文件夹），
-  用 `python -c "import shutil; shutil.make_archive('dist/mmd_disperse-1.31.0-legacy', 'zip', '.', 'mmd_disperse')"` 生成。
+- **Blender 3.6**：传统插件包 `dist/mmd_disperse-1.31.1-legacy.zip`（zip 里是 `mmd_disperse/` 文件夹），
+  用 `python -c "import shutil; shutil.make_archive('dist/mmd_disperse-1.31.1-legacy', 'zip', '.', 'mmd_disperse')"` 生成。
   安装：编辑 > 偏好设置 > 插件 > 安装，选这个 zip 后勾选启用。
 - **Blender 4.2 及以上**（1.31 起没有测试、不出这个包）：扩展包可以用
   `blender --command extension build --source-dir mmd_disperse --output-dir dist` 自己生成，

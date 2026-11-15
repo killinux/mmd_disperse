@@ -15,6 +15,7 @@ part (as the face's Mouth Open), on either side of the tongue at the teeth's inn
 their halves pulling back to the teeth.
 """
 
+import hashlib
 import math
 import random
 
@@ -40,12 +41,13 @@ TILT_ANGLE = 0.38  # radians her head tilts back (22 degrees) ...
 TILT_TIMES = (0.35, 0.4)  # ... taking this many seconds, and this many to come forward again at the end
 SLIME = "MMD Disperse Slime"
 P_PART = "mmd_disperse_roar_part"  # (1.31) on the slime: "SLIME" (the tongue and the empty have none)
+P_SLIME = "mmd_disperse_slime_key"  # (1.31.1) on the slime: what its mesh holds (made again only when it changes)
 SLIME_ACROSS = (0.48, 0.62, 0.76, 0.9)  # 1.31, the slime between its jaws: strands this far either side of the
 # middle of the grin (eye distances; the tongue takes the middle) ...
 SLIME_JITTER = 0.03  # ... give or take this much (they stay apart) ...
 SLIME_THICK = (0.03, 0.05)  # ... this thick at the teeth (radius, eye distances) ...
 SLIME_ROOT = 0.5  # ... from this far up the teeth (a share of how far they reach into the gap) ...
-SLIME_FRONT = 0.03  # ... this far in front of her face ...
+SLIME_FRONT = 0.0  # ... their roots on her face (they grow out of the teeth) ...
 SLIME_BAND = 0.12  # ... (her face found within this far of where they are, eye distances) ...
 SLIME_FIRST = 0.8  # ... the first may snap once the jaws are this far through parting ...
 SLIME_SNAP = (0.65, 0.6)  # ... this share of them snap (picked at random), within this share of the rest of the roar
@@ -271,16 +273,25 @@ def _sync_slime(settings, mask, collection, place, arm, head, eyes, shown, span,
                                     ("mmdd_thick", thick)):
                     attrs[name].append(value)
             edges += [(base + k, base + k + 1) for k in range(SLIME_POINTS - 1)]
-    me = ob.data
-    me.clear_geometry()
-    me.from_pydata(verts, edges, [])
-    for name, values in attrs.items():
-        attr = me.attributes.get(name)
-        if attr is None:
+    # (a new mesh swapped in when what it holds changes, the old one dropped: a sync runs on every setting changed,
+    # and clearing and refilling the mesh in place while its evaluated copy is about can crash Blender 3.6)
+    digest = hashlib.md5(np.array(verts, dtype=np.float32).tobytes())
+    for name in SLIME_ATTRS:
+        digest.update(np.array(attrs[name], dtype=np.float32).tobytes())
+    key = digest.hexdigest()
+    if ob.get(P_SLIME) != key or len(ob.data.vertices) != len(verts):
+        me = bpy.data.meshes.new(SLIME)
+        me.from_pydata(verts, edges, [])
+        for name, values in attrs.items():
             attr = me.attributes.new(name, "FLOAT", "POINT")
-        if values:
-            attr.data.foreach_set("value", np.array(values, dtype=np.float32))
-    me.update()
+            if values:
+                attr.data.foreach_set("value", np.array(values, dtype=np.float32))
+        me.update()
+        old = ob.data
+        ob.data = me
+        if old is not None and old.users == 0:
+            bpy.data.meshes.remove(old)
+        ob[P_SLIME] = key
     if mod is not None:
         ids = node_groups.input_identifiers(mod.node_group)
         for name, value in (("Start", start), ("End", end), ("Open Frames", open_f), ("Close Frames", close_f),

@@ -1022,22 +1022,24 @@ def ensure_slime_material(color=(0.006, 0.006, 0.009), metallic=0.0):
         nt.nodes.clear()
         out = _new(nt, "ShaderNodeOutputMaterial", "Output", 300, 0)
         bsdf = _new(nt, "ShaderNodeBsdfPrincipled", "Slime BSDF", 0, 0)
-        _set_input(bsdf, ("Roughness",), 0.05)
-        _set_input(bsdf, ("Specular IOR Level", "Specular"), 1.0)
-        _set_input(bsdf, ("Coat Weight", "Clearcoat"), 1.0)
-        _set_input(bsdf, ("Coat Roughness", "Clearcoat Roughness"), 0.02)
         nt.links.new(bsdf.outputs[0], out.inputs["Surface"])
         facing = _new(nt, "ShaderNodeLayerWeight", "Slime Facing", -500, 0)
-        facing.inputs["Blend"].default_value = 0.35
         ramp = _new(nt, "ShaderNodeValToRGB", "Slime Ramp", -250, 0)
         nt.links.new(facing.outputs["Facing"], ramp.inputs[0])
         nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    # (kept up on every call: a file made by an earlier version gets these too)
     nodes = mat.node_tree.nodes if mat.node_tree is not None else {}
+    if nodes.get("Slime Facing") is not None:
+        nodes["Slime Facing"].inputs["Blend"].default_value = 0.25
     if nodes.get("Slime Ramp") is not None:
-        _ramp_stops(nodes["Slime Ramp"], [(0.0, tuple(min(1.0, 0.6 * c + 0.03) for c in color) + (1.0,)),
-                                          (1.0, tuple(min(1.0, 0.4 * c + 0.55) for c in color) + (1.0,))])
-    if nodes.get("Slime BSDF") is not None:
-        _set_input(nodes["Slime BSDF"], ("Metallic",), float(metallic))
+        _ramp_stops(nodes["Slime Ramp"], [(0.0, tuple(min(1.0, 0.6 * c + 0.02) for c in color) + (1.0,)),
+                                          (1.0, tuple(min(1.0, 0.35 * c + 0.3) for c in color) + (1.0,))])
+    bsdf = nodes.get("Slime BSDF")
+    if bsdf is not None:
+        for names, value in ((("Roughness",), 0.08), (("Specular IOR Level", "Specular"), 0.7),
+                             (("Coat Weight", "Clearcoat"), 1.0), (("Coat Roughness", "Clearcoat Roughness"), 0.03),
+                             (("Metallic",), float(metallic))):
+            _set_input(bsdf, names, value)
     return mat
 
 

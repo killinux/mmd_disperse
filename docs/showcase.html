@@ -231,7 +231,7 @@
 <header class="hero">
   <div class="wrap">
     <h1>MMD 变身效果展示</h1>
-    <p>mmd_disperse 1.30：用 Blender 几何节点给 MMD 模型做换装变身。下面一百七十六段视频都是插件生成的
+    <p>mmd_disperse 1.31：用 Blender 几何节点给 MMD 模型做换装变身。下面一百七十六段视频都是插件生成的
       （Tifa Gantz 18：镂空款 V2 变成全包款 V1）。每段都附了在插件面板里手动做出同样效果的步骤；同一种效果的静止、跳舞、转圈几个版本并排放在一起。</p>
     <div class="stats">
       <span><b>176</b> 段演示</span>
@@ -1103,21 +1103,22 @@
             <figcaption>本地还没有这段视频（<code>test_output/</code> 不进 git），用 README 里的命令先渲染。</figcaption>
           </figure>
           <div class="info">
-            <div class="meta"><span class="mode">完整的电影片段 · 女武神 · 跳舞（有声音）</span><span class="ver">1.30</span><span class="tag">VMD 舞蹈</span><span class="tag">毒液共生体</span><span class="tag">血管前奏</span><span class="tag">从手开始</span><span class="tag">盘绕的触手</span><span class="tag">共生体之眼</span><span class="tag">咧嘴獠牙</span><span class="tag">咆哮吐舌</span><span class="tag">后背大触手</span><span class="tag">变壮</span><span class="tag">面罩中分露脸</span><span class="tag">一下缩回</span><span class="tag">推近看脸</span><span class="tag">慢放</span><span class="tag">变身也一起慢</span><span class="tag">惯性甩动</span><span class="tag">冲击帧</span><span class="tag">另一个模型</span></div>
+            <div class="meta"><span class="mode">完整的电影片段 · 女武神 · 跳舞（有声音）</span><span class="ver">1.31</span><span class="tag">VMD 舞蹈</span><span class="tag">毒液共生体</span><span class="tag">血管前奏</span><span class="tag">从手开始</span><span class="tag">盘绕的触手</span><span class="tag">共生体之眼</span><span class="tag">咧嘴獠牙</span><span class="tag">咆哮吐舌</span><span class="tag">黏液拉丝</span><span class="tag">后背大触手</span><span class="tag">变壮</span><span class="tag">面罩中分露脸</span><span class="tag">一下缩回</span><span class="tag">缩回起脊</span><span class="tag">推近看脸</span><span class="tag">慢放</span><span class="tag">变身也一起慢</span><span class="tag">惯性甩动</span><span class="tag">冲击帧</span><span class="tag">另一个模型</span></div>
             <h3>毒液·一下缩回（新预设，另一个模型）</h3>
             <p class="lead">白金的女武神装被共生体吞没，照电影的顺序走完一整段：黏液出来前，手脚皮下的黑血管先跟着心跳一下一下地跳，越跳越快；
             黏液从双手双脚往上爬，触手盘着手臂和腿往上绕，头最后盖上，镜头推近，白眼睛睁开，咧开一排獠牙；接着张大嘴，上下两排牙分开，
-            一条长舌头从嘴里垂下来晃，脖子往后仰——这时后背也长出了几根粗触手在空中甩，胸口肩膀变宽；面罩从鼻梁裂开露出她自己的脸，
-            再合上；镜头拉回，最后黏液「啪」地一下缩回胸口，触手抽回，她又是原来的样子。新衣服是同一个模型的第二份；
+            一条长舌头从嘴里垂下来晃，上下牙之间拉着几根黏液丝，越拉越细，一根根断开缩回牙上，脖子往后仰——这时后背也长出了
+            几根粗触手在空中甩，胸口肩膀变宽；面罩从鼻梁裂开露出她自己的脸，再合上；镜头拉回，最后黏液「啪」地一下缩回胸口，
+            退去的边缘鼓起一道黏液脊一路往里卷，触手抽回，她又是原来的样子。新衣服是同一个模型的第二份（1.31 起主面板一键复制）；
             模型的物理（头发、裙摆、飘带）也是构建过的。1.30 起慢放时变身也一起慢：黏液、白眼、獠牙跟着舞蹈慢下来，
             正好在推镜和冲击帧那一帧睁眼；舌头和后背触手跟着她的头、后背甩（惯性）。</p>
             <h4>手动操作</h4>
             <ol class="steps">
               <li>给旧模型加载舞蹈动作（VMD），开始帧和结束帧设在舞里想变身的那一段；场景里要有相机。</li>
-              <li>把同一个模型再导入一份当 <span class="ui">新服装</span>（她要变成毒液，不是换衣服：黏液层会一直留在这第二份上，直到缩回）。</li>
-              <li><span class="ui">预设</span> 选 <span class="v">毒液·一下缩回</span>（想让她一直是毒液就选 <span class="v">毒液·经典变身</span>）：<span class="ui">出发点</span> <span class="v">只从手脚</span>，<span class="ui">旧服装表面</span> 的 <span class="ui">前奏</span> <span class="v">1.5</span> 秒，<span class="ui">共生体之眼</span> <span class="ui">咧嘴獠牙</span> <span class="ui">咆哮（张嘴吐舌仰头）</span> <span class="ui">面罩中分露脸</span> 勾上，<span class="ui">后背大触手</span> <span class="v">4</span>，<span class="ui">一下缩回</span> 勾上、<span class="ui">关键时刻后几秒缩回</span> <span class="v">4.6</span>；<span class="ui">长高变壮</span> <span class="v">1</span>。</li>
-              <li><span class="ui">锁定部件</span> 里只留头发和头饰（演示用 <span class="v">*hair*;*Hair*;*Leaf*;*Headgear*</span>），脸和眼睛要让黏液盖到。</li>
-              <li>（预设已带上）<span class="ui">镜头与时间</span> 面板：<span class="ui">关键时刻在</span> <span class="v">前沿到脸</span>，<span class="ui">镜头运动</span> 勾上、运镜 <span class="v">推近看脸</span>、<span class="ui">运镜时长</span> <span class="v">3.6</span> 秒，<span class="ui">时间</span> <span class="v">慢放</span> <span class="v">1.2</span> 秒；<span class="ui">冲击帧</span> 勾上、<span class="v">3</span> 帧；<span class="ui">变身也一起慢</span> 勾上（1.30）；毒液面板的 <span class="ui">惯性甩动</span> <span class="v">1</span>。</li>
+              <li>填好 <span class="ui">旧服装</span>，点 <span class="ui">新服装</span> 右边的复制按钮（1.31）：同一个模型复制一份当新服装，材质各自独立、不带刚体（她要变成毒液，不是换衣服：黏液层会一直留在这第二份上，直到缩回）。</li>
+              <li><span class="ui">预设</span> 选 <span class="v">毒液·一下缩回</span>（想让她一直是毒液就选 <span class="v">毒液·经典变身</span>）：<span class="ui">出发点</span> <span class="v">只从手脚</span>，<span class="ui">旧服装表面</span> 的 <span class="ui">前奏</span> <span class="v">1.5</span> 秒，<span class="ui">共生体之眼</span> <span class="ui">咧嘴獠牙</span> <span class="ui">咆哮（张嘴吐舌仰头）</span> <span class="ui">面罩中分露脸</span> 勾上，<span class="ui">后背大触手</span> <span class="v">4</span>，<span class="ui">黏液拉丝</span> 勾上（1.31），<span class="ui">一下缩回</span> 勾上、<span class="ui">关键时刻后几秒缩回</span> <span class="v">4.5</span>；<span class="ui">长高变壮</span> <span class="v">1</span>。</li>
+              <li><span class="ui">锁定部件</span> 里只留头发和头饰（演示用 <span class="v">*hair*;*Hair*;*Leaf*;*Headgear*</span>），脸和眼睛要让黏液盖到（1.31 起毒液预设自动把脸、眼、嘴去掉）。</li>
+              <li>（预设已带上）<span class="ui">镜头与时间</span> 面板：<span class="ui">关键时刻在</span> <span class="v">前沿到脸</span>，<span class="ui">镜头运动</span> 勾上、运镜 <span class="v">推近看脸</span>、<span class="ui">运镜时长</span> <span class="v">4.2</span> 秒，<span class="ui">时间</span> <span class="v">慢放</span> <span class="v">1.2</span> 秒；<span class="ui">冲击帧</span> 勾上、<span class="v">3</span> 帧；<span class="ui">变身也一起慢</span> 勾上（1.30）；毒液面板的 <span class="ui">惯性甩动</span> <span class="v">1</span>。</li>
             </ol>
             <p class="cmd">演示参数：<code>--preset VENOM_SNAP --vmd 回レ！雪月花.vmd --wave 130:250 --view 1.15 --set "lock_patterns=*hair*;*Hair*;*Leaf*;*Headgear*" --target-blend "inase_a08_g05.blend" --target-root "Pc A08 Hd Full 穿G05衣服 V2" --base-root "Pc A08 Hd Full 穿G05衣服 V2" --physics-reach 5 --anim 80:372</code>（打开 inase_a08_g05.blend）</p>
           </div>

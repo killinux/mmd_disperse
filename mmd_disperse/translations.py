@@ -802,7 +802,10 @@ _ZH = {
     ("*", "Snaps Back After"): "关键时刻后几秒缩回",
     ("*", "Prelude"): "前奏",
     ("*", "Symbiote, Then It Snaps Back"): "毒液·一下缩回",
-    ("*", "Eyes need the goo on her face: unlock Face* and Eye*"): "要长出眼睛，黏液得盖到脸上：把 Face*、Eye* 从锁定里去掉",
+    ("*", "Transformation Slows Too"): "变身也一起慢",
+    ("*", "Inertia"): "惯性甩动",
+    ("*", "Eyes need the goo on her face: unlock Face* and Eye*"):
+        "要长出眼睛，黏液得盖到脸上：把 face、eye（顔、目）从「旧服装处理 › 材质」里去掉",
 }
 
 translations = {"zh_HANS": _ZH, "zh_CN": _ZH}

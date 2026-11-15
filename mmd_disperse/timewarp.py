@@ -6,6 +6,10 @@ The models' motion (the bones, the facial expressions on the shape keys, the roo
 time is animated: it stands still (or crawls) round the moment and then catches up with the music, so the dance is in
 time again afterwards. The rigid bodies (hair, skirts) are slowed by keying the rigid body world's speed the same way,
 so they hang in the air while the dance stands still. Removing the effect puts the actions back as they were.
+
+1.30: with Transformation Slows Too the transformation (the mask) gets a time of its own the same way (effect_keys):
+it stands still or crawls while the dance does and reaches the moment on the same frame, a little faster before to
+make up for it, and stays that much behind after; clock.py keeps that time for the rest of the transformation.
 """
 
 import bpy
@@ -106,6 +110,41 @@ def keys_for(kind, moment, length, fps, start=None, before=False):
     time = [(a - 1, a - 1, "LINEAR")] + [(f, f, "CONSTANT") for f in range(a, b, 2)] + [(b, b, "LINEAR"),
                                                                                          (b + 1, b + 1, "LINEAR")]
     return time, []
+
+
+SLOWS_TOO = ("SLOW", "FREEZE", "TWOS")  # 1.30: the warps the transformation can follow
+
+
+def effect_keys(kind, moment, length, fps, start=None):
+    """(scene frame, the transformation's time, interpolation) keys of the transformation following the warp `kind`
+    of the dance round frame `moment` (1.30): it stands still / crawls / goes on twos over the same frames as the
+    dance, through the moment at the same frame (its time is the frame there); before that it runs a little faster
+    for as long again (not before `start`: where the transformation starts) to get there, and after it stays as far
+    behind as it fell. Straight on beyond the keys (the curve's extrapolation is linear)."""
+    span = max(int(round(length * fps)), 2)
+    if kind == "TWOS":
+        return keys_for(kind, moment, length, fps)[0]
+    if kind == "FREEZE":
+        a = moment - int(round(0.4 * span))
+        at_a, at_b = float(moment), float(moment)
+    else:  # SLOW: a quarter speed
+        a = moment - int(round(0.35 * span))
+        at_a = moment - 0.25 * (moment - a)
+        at_b = moment + 0.25 * (a + span - moment)
+    b = a + span
+    pre = a - span
+    if start is not None:
+        pre = min(max(pre, int(start) + 1), a - 2)
+    keys = [(pre - 1, pre - 1), (pre, pre), (a, at_a), (b, at_b), (b + 1, at_b + 1)]
+    return [(f, v, "LINEAR") for f, v in keys]
+
+
+def effect_delay(keys):
+    """How far behind the scene the transformation stays after its own time's `keys` (frames)."""
+    if not keys:
+        return 0.0
+    frame, value, _interp = keys[-1]
+    return float(frame) - float(value)
 
 
 def hold_keys(first, length):
@@ -232,9 +271,10 @@ def sync(settings, mask, models, moment, hold=None):
     fps = scene.render.fps / scene.render.fps_base
     before = bool(getattr(settings, "puppet_enable", False) or getattr(settings, "shadow_enable", False))  # (1.16:
     # on twos while she hangs on the strings or is a figure of the shadow play, not after)
-    key = "%s:%s:%.3f:%.3f:%s:%d:%d" % (kind, int(moment) if moment is not None else -1, settings.warp_length, fps,
-                                        "%d,%d" % (int(hold[0]), int(hold[1])) if hold is not None else "-",
-                                        settings.frame_start, before)
+    slows = bool(getattr(settings, "warp_effect", False)) and kind in SLOWS_TOO and hold is None  # (1.30)
+    key = "%s:%s:%.3f:%.3f:%s:%d:%d:%d" % (kind, int(moment) if moment is not None else -1, settings.warp_length, fps,
+                                           "%d,%d" % (int(hold[0]), int(hold[1])) if hold is not None else "-",
+                                           settings.frame_start, before, slows)
     if mask.get(P_KEY) == key and _warped(mask):
         return len(_warped(mask))
     restore(mask, scene)
@@ -247,10 +287,20 @@ def sync(settings, mask, models, moment, hold=None):
             first = max(first, int(max(f for f, _v, _i in time)) + 2)
         held, held_speeds = hold_keys(first, hold[1])
     count = sum(1 for id_ in targets(models) if _warp(id_, mask, time + held))
-    # the transformation stands still with a finishing pose too, and rewinds and replays with the tape
+    # the transformation stands still with a finishing pose too, and rewinds and replays with the tape; with
+    # Transformation Slows Too it gets a time of its own following the dance's (1.30)
     own = (time if kind == "REWIND" else []) + held
+    until = own[-1][0] + 1 if own else None
+    from . import clock
+
+    if slows and mask.animation_data is not None and mask.animation_data.action is not None:
+        own = effect_keys(kind, int(moment), settings.warp_length, fps, settings.frame_start)
+        until = mask.animation_data.action.frame_range[1] + effect_delay(own) + 2
+        clock.set_time(mask, own)
+    else:
+        clock.clear_time(mask)
     if own and mask.animation_data is not None and mask.animation_data.action is not None:
-        _warp(mask, mask, own, until=own[-1][0] + 1)
+        _warp(mask, mask, own, until=until)
     _key_speed(scene, speeds + held_speeds)
     mask[P_KEY] = key
     return count
@@ -271,3 +321,7 @@ def restore(mask=None, scene=None):
         _clear_speed(sc)
     if mask is not None and P_KEY in mask:
         del mask[P_KEY]
+    if mask is not None:  # (1.30: the transformation's own time goes with it)
+        from . import clock
+
+        clock.clear_time(mask)

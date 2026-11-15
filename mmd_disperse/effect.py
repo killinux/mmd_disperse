@@ -13,6 +13,7 @@ from . import (arrival, beats, chain, compositor, cover, dimension, domain, fini
                afterimage, crown, fumble, gust, morph, peel, plumage, replay, sweat, talisman, title,
                ribbons, rings, sampling, shadowplay, shell, shots, spirit, timewarp, tint, toon, totem, trails, venom)
 from . import roar  # noqa: E402  (1.29: the symbiote's roar)
+from . import clock, inertia  # noqa: E402  (1.30: the transformation's own time, inertia)
 from . import model as mdl
 from .node_groups import (ATTR_ARRIVAL, BASE_GROUP, DISTANCE_INPUTS, TARGET_GROUP, ensure_node_groups,
                           input_identifiers)
@@ -507,9 +508,18 @@ def _uncopy_pose(armature):
             pb.constraints.remove(con)
 
 
+def _drop_input_drivers(ob, mod):
+    """(1.30) The drivers on the inputs of our modifier `mod` of `ob` (the transformation's own time, the lag)."""
+    ad = ob.animation_data
+    prefix = 'modifiers["%s"]' % mod.name
+    for fc in [fc for fc in (ad.drivers if ad is not None else []) if fc.data_path.startswith(prefix)]:
+        ad.drivers.remove(fc)
+
+
 def _cleanup_mesh(ob):
     for mod in list(ob.modifiers):
         if mod.type == "NODES" and mod.node_group and mod.node_group.name in (TARGET_GROUP, BASE_GROUP):
+            _drop_input_drivers(ob, mod)
             ob.modifiers.remove(mod)
     if ob.get(P_ROLE) in ("TARGET", "BASE"):
         for slot in ob.material_slots:
@@ -623,6 +633,8 @@ def remove_effect(mask):
     crown.remove(mask)
     grow.remove(mask)
     roar.remove(mask)  # 1.29
+    clock.remove(mask)  # 1.30
+    inertia.forget()
     chain.remove(mask)
     action = mask.animation_data.action if mask.animation_data else None
     bpy.data.objects.remove(mask)
@@ -717,7 +729,8 @@ def _update_layer(ob, settings):
         if settings.layer_enable:
             materials.add_layer(mat)
             materials.update_layer(mat, settings.layer_color, settings.glow_color, settings.layer_lines,
-                                   LAYER_CELL * height, goo, eyes, settings.layer_stay or when is not None, retract)
+                                   LAYER_CELL * height, goo, eyes, settings.layer_stay or when is not None, retract,
+                                   settings.mask)
         else:
             materials.remove_layer(mat)
 
@@ -768,6 +781,92 @@ def _face_beats(settings, mask):
                                 (settings.venom_split_after, settings.venom_split_hold) if settings.venom_split
                                 else None, settings.venom_roar_time if settings.venom_roar else 0.0,
                                 retract[0] if retract is not None else None)
+
+
+INERTIA_LEAD = 1.0  # 1.30: seconds before the front sets off the spring starts following her, at rest
+INERTIA_MOST = 1500  # ... and the most frames it follows her for
+
+
+def _back_lag_drivers(objects, mask, back):
+    """(1.30) The Back Lag input of our modifier on the mesh `back` driven by the clock's keyed lag; zero (no driver)
+    on every other mesh of the effect."""
+    for ob in objects:
+        if ob.type != "MESH":
+            continue
+        for mod in ob.modifiers:
+            group = mod.node_group if mod.type == "NODES" else None
+            if group is None or group.name not in (TARGET_GROUP, BASE_GROUP):
+                continue
+            ident = input_identifiers(group).get("Back Lag")
+            if ident is None:
+                continue
+            path = 'modifiers["%s"]["%s"]' % (mod.name, ident)
+            for k in range(3):
+                ob.driver_remove(path, k)
+            if ob == back:
+                for k in range(3):
+                    clock.drive_value(ob, path, mask, clock.BACK_LAG, component=k, index=k)
+            else:
+                mod[ident] = (0.0, 0.0, 0.0)
+
+
+def _update_inertia(settings, mask, objects):
+    """1.30: the tongue and the big tendrils off her back swing behind the way her head and her back move
+    (inertia.py): her armature played through once, a spring following each, its lag keyed frame by frame; nothing
+    when Inertia is 0 or there is neither."""
+    scene = settings.id_data
+    strength = float(getattr(settings, "venom_inertia", 0.0)) if settings.venom_enable else 0.0
+    tongue = next((ob for ob in roar.objects(mask) if ob.type == "MESH"), None)
+    tmod = next((m for m in tongue.modifiers if m.type == "NODES"), None) if tongue is not None else None
+    tid = input_identifiers(tmod.node_group).get("Lag") if tmod is not None and tmod.node_group else None
+    back = next((ob for ob in objects if ob.type == "MESH" and venom.skeleton(ob) is not None
+                 and venom.skeleton(ob).get(venom.P_BACK, 0)), None)
+    models = _models(settings)
+    arm = models[0].armature if models else None
+    head = next((n for n in motion.HEAD if arm is not None and n in arm.pose.bones), None)
+    chest = next((n for n in venom.BACK_CHEST if arm is not None and n in arm.pose.bones), None)
+    want_tongue = strength > 0.0 and tongue is not None and tid is not None and head is not None
+    want_back = strength > 0.0 and back is not None and chest is not None
+    if not want_tongue and tongue is not None and tid is not None:
+        inertia.clear(tongue, tmod, tid)
+    if not want_back:
+        inertia.clear(mask=mask)
+        _back_lag_drivers(objects, mask, None)
+    if not (want_tongue or want_back):
+        return
+    fps = scene.render.fps / scene.render.fps_base
+    first = _first_key(mask)
+    first = settings.frame_start if first is None else first
+    retract = _retract_frames(settings, mask)
+    start = int(first - INERTIA_LEAD * fps)
+    last = max(scene.frame_end, settings.frame_end, int(retract[0] + retract[1]) + 2 if retract else 0)
+    frames = list(range(start, min(last, start + INERTIA_MOST) + 1))
+    beats = _face_beats(settings, mask)
+    bones = [b for b in (head if want_tongue else None, chest if want_back else None) if b]
+    extra = (str(mask.get(timewarp.P_KEY, "")), str(beats.get("roar") if beats else None), round(settings.body_grow, 4),
+             str(retract), tuple(bones))
+    key = inertia._motion_key(scene, arm, frames, extra)
+    hidden = list({ob for m in models for ob in m.meshes} | {ob for ob in objects if ob.type == "MESH"}
+                  | ({tongue} if tongue is not None else set()))
+    mats = inertia.play(scene, arm, bones, frames, hidden, key)
+    height = max(settings.size_reference, 1e-3)
+    if want_tongue:
+        sig = repr((key, round(strength, 4)))
+        if tongue.get(inertia.P_KEY) != sig:
+            lag = inertia.tongue_lag(scene, arm, head, tongue, mats[head], strength, roar.TONGUE_LENGTH * height)
+            inertia.key_tongue(tongue, tmod, tid, frames, lag)
+            tongue[inertia.P_KEY] = sig
+    if want_back:
+        holder = clock.ensure(mask)
+        sig = repr((key, round(strength, 4), back.name))
+        if holder.get(inertia.P_KEY) != sig:
+            spine, _forward, _up = venom.back_frame(back)
+            bone = arm.data.bones[chest]
+            lag = inertia.back_lag(scene, chest, arm.matrix_world @ bone.matrix_local, back.matrix_world @ Vector(spine),
+                                   back, mats[chest], strength, settings.venom_back_length * height)
+            clock.key_vector(holder, clock.BACK_LAG, frames, lag)
+            holder[inertia.P_KEY] = sig
+        _back_lag_drivers(objects, mask, back)
 
 
 def _first_key(mask):
@@ -1535,6 +1634,7 @@ def sync(settings):
     grow.sync(settings, mask, next(iter(_models(settings)), None), grow_at, _retract_frames(settings, mask),
               taller=not settings.venom_enable)
     roar.sync(settings, mask, _models(settings), _face_beats(settings, mask))  # 1.29: the symbiote's roar
+    _update_inertia(settings, mask, objects)  # 1.30: the tongue and the big tendrils swing behind her
     # 1.12: the spirit self (the Dharma form, three heads and six arms), about empties following the dancer's joints
     outfit_meshes = [ob for ob in objects if ob.type == "MESH" and ob.get(P_ROLE) in ("BASE", "TARGET")]
     pivots = spirit.sync(settings, mask, next(iter(_models(settings)), None), outfit_meshes) or {}
@@ -1571,6 +1671,7 @@ def sync(settings):
         "Venom Material": goo,
         "Tendril Pulse": settings.venom_pulse,
         "Goo Drips": settings.venom_drips,
+        "Effect Clock": clock.has_time(mask),  # 1.30 (the time itself: a driver on Effect Time, below)
         "Back Emerge": BACK_EMERGE * height,
         "Back Grow": BACK_GROW * height,
         "Retract At": retract_at[0] if retract_at is not None else 1e9,
@@ -1804,6 +1905,13 @@ def sync(settings):
                 elif name == "Noise Scale":
                     value = value * s
                 mod[key] = value
+            # (1.30) the transformation's own time for the goo and the prelude: a driver on Effect Time
+            time_id = ids.get("Effect Time")
+            if time_id is not None:
+                path = 'modifiers["%s"]["%s"]' % (mod.name, time_id)
+                ob.driver_remove(path)
+                if clock.has_time(mask):
+                    clock.drive(ob, path, "frame", mask)
             ob.update_tag()
         flashes = settings.glitch_enable and settings.glitch_flash
         evolve = settings.entrance == "EVOLVE"

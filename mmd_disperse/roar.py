@@ -16,7 +16,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
-from . import materials, motion, node_groups
+from . import clock, materials, motion, node_groups
 
 P_ROAR = "mmd_disperse_roar"  # on our objects: the mask of their effect
 P_BONE = "mmd_disperse_roar_bone"  # on the empty: (armature, bone) its constraint is on
@@ -176,11 +176,18 @@ def sync(settings, mask, models, beats):
     height = max(settings.size_reference, 1e-3)
     if mod is not None:
         ids = node_groups.input_identifiers(mod.node_group)
+        own = clock.has_time(mask)  # (1.30: it comes out and sways by the transformation's own time)
         for name, value in (("Length", TONGUE_LENGTH * height), ("Width", TONGUE_WIDTH * size),
                             ("Flat", TONGUE_FLAT), ("Start", start + OUT[0] * fps), ("End", end - OUT[2] * fps),
-                            ("Out Frames", OUT[1] * fps), ("Material", materials.ensure_tongue_material())):
+                            ("Out Frames", OUT[1] * fps), ("Material", materials.ensure_tongue_material()),
+                            ("Effect Clock", own)):
             if ids.get(name) is not None:
                 mod[ids[name]] = value
+        if ids.get("Effect Time") is not None:
+            path = 'modifiers["%s"]["%s"]' % (mod.name, ids["Effect Time"])
+            tongue.driver_remove(path)
+            if own:
+                clock.drive(tongue, path, "frame", mask)
     tongue.update_tag()
     # --- her head tilting back
     empty = found.get("EMPTY")
@@ -194,12 +201,9 @@ def sync(settings, mask, models, beats):
     neck = _neck(arm, head)
     empty[P_BONE] = [arm.name, neck.name]
     empty.rotation_mode = "XYZ"
-    empty.driver_remove("rotation_euler", 0)
     angle = TILT_ANGLE * _tilt_sign(neck, _ahead(head, eyes))
-    driver = empty.driver_add("rotation_euler", 0).driver
-    driver.type = "SCRIPTED"
-    driver.expression = "%.5f * smoothstep(%.2f, %.2f, frame) * (1 - smoothstep(%.2f, %.2f, frame))" % (
-        angle, start, start + TILT_TIMES[0] * fps, end - TILT_TIMES[1] * fps, end)
+    clock.drive(empty, "rotation_euler", "%.5f * smoothstep(%.2f, %.2f, frame) * (1 - smoothstep(%.2f, %.2f, frame))"
+                % (angle, start, start + TILT_TIMES[0] * fps, end - TILT_TIMES[1] * fps, end), mask, 0)
     pb = arm.pose.bones[neck.name]
     tilt = pb.constraints.new("COPY_ROTATION")
     tilt.name = CONSTRAINT

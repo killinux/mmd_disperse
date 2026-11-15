@@ -28,7 +28,7 @@ import os
 
 import bpy
 
-VERSION = 21
+VERSION = 22
 CACHE_PREFIX = "mmd_disperse_node_groups_"  # the main groups, once built, are kept in the user's config folder
 
 FIELD_GROUP = "MMDDisperse Field"
@@ -151,6 +151,13 @@ VENOM_INPUTS = (
     ("Back Grow", "NodeSocketFloat", 2.0, 0.0, 1e9, "DISTANCE"),
     ("Retract At", "NodeSocketFloat", 1e9, -1e9, 1e9, None),
     ("Retract Frames", "NodeSocketFloat", 0.0, 0.0, 1e6, None),
+    # (1.30) with Effect Clock the goo (and the prelude) moves by Effect Time instead of the scene's frame: the
+    # transformation's own time when it slows down with the dance (clock.py drives it); the big tendrils off her back
+    # swing out by Back Lag at their tips (inertia.py keys it: how far a spring following her upper back lags behind,
+    # object space)
+    ("Effect Clock", "NodeSocketBool", False, None, None, None),
+    ("Effect Time", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Back Lag", "NodeSocketVector", (0.0, 0.0, 0.0), None, None, None),
 )
 
 # Entrances without a front, timed by the mask radius against Clamp Distance (the moment): the evolution flash
@@ -523,6 +530,10 @@ TONGUE_INPUTS = (
     ("End", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
     ("Out Frames", "NodeSocketFloat", 9.0, 0.0, 1e6, None),
     ("Material", "NodeSocketMaterial", None, None, None, None),
+    # (1.30) its own clock (as the venom group's) and the lag of inertia at its tip (its object's space, keyed)
+    ("Effect Clock", "NodeSocketBool", False, None, None, None),
+    ("Effect Time", "NodeSocketFloat", 0.0, -1e9, 1e9, None),
+    ("Lag", "NodeSocketVector", (0.0, 0.0, 0.0), None, None, None),
 )
 TONGUE_POINTS = 28  # points along the tongue
 
@@ -976,6 +987,9 @@ def build_venom_group():
             ag = a if ag is None else b.math("ADD", ag, a, x=x + 700, y=y - 500 * i - 300)
         return pos, nor, ag
 
+    # (1.30) the clock everything below moves by: the scene's frame, or the transformation's own time
+    clock = b.switch("FLOAT", gi.outputs["Effect Clock"], b.node("GeometryNodeInputSceneTime", -2200, -700).outputs[
+        "Frame"], gi.outputs["Effect Time"], x=-2000, y=-700)
     pa, na, age_a = end(VENOM_ENDS[0], -1800, 2400)
     pb, nb, age_b = end(VENOM_ENDS[1], -1800, 800)
     t = b.named_attribute("mmdd_t", "FLOAT", x=-900, y=-500)[0]
@@ -1021,7 +1035,7 @@ def build_venom_group():
                                                                                          y=-300), x=900, y=-300),
                                           x=1100, y=-300, clamp=True), 0.8, 1.0, x=1300, y=-300)
     # 1.27: bulges pumped along the tendril towards its tip (Tendril Pulse), each tendril on its own beat
-    frame0 = b.node("GeometryNodeInputSceneTime", 500, -500).outputs["Frame"]
+    frame0 = clock
     pulse = b.math("MINIMUM", gi.outputs["Tendril Pulse"], 1.0, x=500, y=-650)
     phase = b.math("SUBTRACT", b.math("MULTIPLY_ADD", b.math("DIVIDE", s, b.math("MAXIMUM", b.math(
         "MULTIPLY", length, 0.3, x=500, y=-850), 1e-4, x=700, y=-850), x=900, y=-850), 6.2832,
@@ -1035,7 +1049,7 @@ def build_venom_group():
     tendril_shown = b.boolean("AND", b.compare("GREATER_EQUAL", to_tip, 0.0, x=700, y=500),
                               b.compare("GREATER_EQUAL", from_tail, 0.0, x=700, y=650), x=900, y=550)
     # The tip rises off the body and sways, feeling its way.
-    frame = b.node("GeometryNodeInputSceneTime", 700, 900).outputs["Frame"]
+    frame = clock
     sway = b.math("MULTIPLY_ADD", b.math("SINE", b.math("MULTIPLY_ADD", frame, 0.22,
                                                          b.math("MULTIPLY", rnd, 2.0 * math.pi, x=700, y=1050),
                                                          x=900, y=950), x=1100, y=950), 0.5, 0.5, x=1300, y=950)
@@ -1104,7 +1118,7 @@ def build_venom_group():
 
     # --- 1.29: the goo snaps back in from Retract At over Retract Frames (slowly, then fast); the big tendrils off
     # her back first, in the first 60% of it
-    r_frame = b.node("GeometryNodeInputSceneTime", 300, -5000).outputs["Frame"]
+    r_frame = clock
     r_on = b.compare("GREATER_THAN", gi.outputs["Retract Frames"], 0.5, x=300, y=-5150)
     r_u = b.math("DIVIDE", b.math("SUBTRACT", r_frame, gi.outputs["Retract At"], x=500, y=-5000),
                  b.math("MAXIMUM", gi.outputs["Retract Frames"], 1e-3, x=500, y=-5150), x=700, y=-5050, clamp=True)
@@ -1131,7 +1145,7 @@ def build_venom_group():
                                          b.vmath("SCALE", side_b, scale=b.math("MULTIPLY", fan, 0.6, x=900, y=-6700),
                                                  x=1100, y=-6650), x=1300, y=-6500), x=1500, y=-6500)
     across_b = b.vmath("NORMALIZE", b.vmath("CROSS_PRODUCT", aim_b, side_b, x=1500, y=-6650), x=1700, y=-6650)
-    t_frame = b.node("GeometryNodeInputSceneTime", 300, -6900).outputs["Frame"]
+    t_frame = clock
     pace = b.math("MULTIPLY_ADD", rnd, 0.4, 0.8, x=500, y=-6900)
     lash1 = b.math("SINE", b.math("ADD", b.math("MULTIPLY", b.math("MULTIPLY", t_frame, 0.11, x=700, y=-6900), pace,
                                                 x=900, y=-6900),
@@ -1158,6 +1172,11 @@ def build_venom_group():
                                                  "MULTIPLY", lash_amp, 0.8, x=1500, y=-7350), x=1700, y=-7300),
                                                      x=1900, y=-7300), x=2100, y=-7100), x=2300, y=-6900),
                       b.vmath("SCALE", me_down, scale=sag_b, x=2300, y=-7700), x=2500, y=-7000)
+    # (1.30) inertia: the tips swing out the way the spring following her upper back lags (Back Lag), more towards
+    # the tip, as much as the tendril has grown
+    big_pos = b.vmath("ADD", big_pos, b.vmath("SCALE", gi.outputs["Back Lag"], scale=b.math(
+        "MULTIPLY", b.math("POWER", u_b, 1.5, x=2300, y=-7900), grow_b, x=2500, y=-7900), x=2700, y=-7900),
+        x=2900, y=-7000)
     flare = b.math("MULTIPLY_ADD", b.math("SUBTRACT", 1.0, b.math("DIVIDE", u_b, 0.12, x=1100, y=-8100), x=1300,
                                           y=-8100, clamp=True), 0.7, 1.0, x=1500, y=-8100)
     taper_b = b.math("POWER", b.math("MAXIMUM", b.math("MULTIPLY_ADD", u_b, -0.88, 1.0, x=1100, y=-8250), 0.05,
@@ -3419,7 +3438,8 @@ def build_base_group(field_group, venom_group):
     # (1.29) The prelude: before the front sets off the zone grows in from the start points over Prelude Frames,
     # pulsing with a heartbeat that quickens (the veins throb under her skin before the goo comes out: the tips of her
     # fingers and toes go dark on each beat)
-    pre_frame = b.node("GeometryNodeInputSceneTime", -2400, -3300).outputs["Frame"]
+    pre_frame = b.switch("FLOAT", gi.outputs["Effect Clock"], b.node("GeometryNodeInputSceneTime", -2600, -3300)
+                         .outputs["Frame"], gi.outputs["Effect Time"], x=-2400, y=-3300)  # (1.30: its own clock)
     pre_on = b.compare("GREATER_THAN", gi.outputs["Prelude Frames"], 0.5, x=-2200, y=-3450)
     pre_u = b.math("DIVIDE", b.math("SUBTRACT", pre_frame, gi.outputs["Prelude From"], x=-2200, y=-3300),
                    b.math("MAXIMUM", gi.outputs["Prelude Frames"], 1e-3, x=-2200, y=-3600), x=-2000, y=-3300,
@@ -5298,7 +5318,8 @@ def build_tongue_group():
     b = _Builder(ng)
     gi = b.node("NodeGroupInput", -2400, 0)
     go = b.node("NodeGroupOutput", 2400, 0)
-    frame = b.node("GeometryNodeInputSceneTime", -2400, 600).outputs["Frame"]
+    frame = b.switch("FLOAT", gi.outputs["Effect Clock"], b.node("GeometryNodeInputSceneTime", -2600, 600).outputs[
+        "Frame"], gi.outputs["Effect Time"], x=-2400, y=600)  # (1.30: its own clock)
     out_f = b.math("MAXIMUM", gi.outputs["Out Frames"], 1e-3, x=-2200, y=400)
     out = b.math("MULTIPLY", b.map_range(frame, gi.outputs["Start"], b.math("ADD", gi.outputs["Start"], out_f,
                                                                             x=-2000, y=500), x=-1800, y=500,
@@ -5338,6 +5359,9 @@ def build_tongue_group():
                       x=-100, y=-1100)
     pos = b.accumulate(b.vmath("SCALE", heading, scale=ds, x=0, y=-1100), 0, "FLOAT_VECTOR", x=200, y=-1100,
                        output="Trailing")
+    # (1.30) inertia: the tip swings out the way her head moved (Lag), more towards the tip, as far as it is out
+    pos = b.vmath("ADD", pos, b.vmath("SCALE", gi.outputs["Lag"], scale=b.math(
+        "MULTIPLY", b.math("POWER", u, 1.5, x=200, y=-1300), out, x=300, y=-1300), x=300, y=-1200), x=350, y=-1100)
     shaped = b.set_position(resample.outputs["Curve"], position=pos, x=400, y=-200)
     # a round tip, as thick as it is out
     radius = b.math("MULTIPLY", b.math("MULTIPLY", gi.outputs["Width"], b.math("MULTIPLY", out, 3.0, x=200, y=-1500,

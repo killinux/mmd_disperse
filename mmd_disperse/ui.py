@@ -1,3 +1,5 @@
+import fnmatch
+
 import bpy
 from bpy.app.translations import pgettext_iface as iface_
 
@@ -560,6 +562,8 @@ class MMDDISPERSE_PT_camera(_Panel, bpy.types.Panel):
         layout.prop(s, "time_warp")
         if s.time_warp != "NONE":
             layout.prop(s, "warp_length")
+            if s.time_warp in ("SLOW", "FREEZE", "TWOS"):
+                layout.prop(s, "warp_effect")
             layout.label(text="Removing the effect puts the dance back", icon="INFO")
         layout.separator()
         layout.prop(s, "toon_style")
@@ -765,6 +769,13 @@ class MMDDISPERSE_PT_venom(_Panel, bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
         s = context.scene.mmd_disperse
+        # (1.30) the two whole-film presets one click away: they are hard to find among all the presets
+        row = layout.row(align=True)
+        for key, label in (("VENOM_CLASSIC", "Symbiote, the Classic Beats"),
+                           ("VENOM_SNAP", "Symbiote, Then It Snaps Back")):
+            op = row.operator("mmd_disperse.apply_preset", text=iface_(label), translate=False, icon="PRESET")
+            op.preset = key
+        layout = layout.column()
         layout.active = s.venom_enable
         col = layout.column(align=True)
         col.prop(s, "venom_tendrils")
@@ -807,8 +818,13 @@ class MMDDISPERSE_PT_venom(_Panel, bpy.types.Panel):
         sub = col.column(align=True)
         sub.active = s.venom_retract
         sub.prop(s, "venom_retract_after")
-        if s.venom_eyes and s.use_lock and any(p.strip().lower().startswith(("face", "eye"))
-                                               for p in s.lock_patterns.split(";")):
+        sub = layout.column()
+        sub.active = s.venom_roar or s.venom_back > 0
+        sub.prop(s, "venom_inertia")
+        # (1.30: the patterns are wildcards - the default "*face*" locks her face too)
+        if s.venom_eyes and s.use_lock and any(fnmatch.fnmatchcase(name, p.strip().lower())
+                                               for p in s.lock_patterns.split(";") if p.strip()
+                                               for name in ("face", "eye", "顔", "目")):
             layout.label(text="Eyes need the goo on her face: unlock Face* and Eye*", icon="INFO")
         if not (s.layer_enable and s.layer_style == "GOO"):
             layout.label(text="Goo coat: Dark Undersuit, Symbiote Goo style", icon="INFO")

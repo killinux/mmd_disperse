@@ -73,10 +73,12 @@ class FakeLayout:
 
     def __init__(self):
         self.errors = []
+        self.labels = []  # (1.30: the texts of the labels drawn)
 
     def _child(self, **_kw):
         child = FakeLayout()
         child.errors = self.errors
+        child.labels = self.labels
         return child
 
     row = column = box = _child
@@ -90,6 +92,7 @@ class FakeLayout:
 
     def label(self, **kw):
         self._icon(kw)
+        self.labels.append(kw.get("text", ""))
 
     def prop(self, data, name, **kw):
         self._icon(kw)
@@ -121,7 +124,8 @@ class FakeLayout:
         return type("OpProps", (), {})()
 
 
-def draw_panels(context):
+def draw_panels(context, labels=False):
+    """The errors drawing every panel of ours (with `labels`: the texts of the labels drawn instead)."""
     from mmd_disperse import ui
 
     layout = FakeLayout()
@@ -132,7 +136,7 @@ def draw_panels(context):
         if hasattr(cls, "draw_header"):
             cls.draw_header(holder, context)
         cls.draw(holder, context)
-    return layout.errors
+    return layout.labels if labels else layout.errors
 
 
 def evaluated_counts(ob):
@@ -5114,7 +5118,7 @@ def run():
         "venom_split_after", "venom_split_hold", "venom_tendrils", "venom_strands", "old_surface", "layer_enable",
         "layer_style", "layer_width", "layer_stay", "moment_at", "shot_enable", "impact_enable", "surface_width",
         "surface_prelude", "venom_back", "venom_back_length", "venom_roar", "venom_roar_time", "venom_retract",
-        "venom_retract_after", "body_grow")}
+        "venom_retract_after", "body_grow", "warp_effect", "venom_inertia")}
     s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
     s.shot_enable, s.impact_enable, s.moment_at, s.body_grow = False, False, "FACE", 0.0
     s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
@@ -5311,6 +5315,194 @@ def run():
     for key_, value in saved.items():
         setattr(s, key_, value)
     check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.29 checks")
+
+    # --- 1.30: the transformation slowing down with the dance (its own time, fixed at the moment) and inertia on the
+    # tongue and the big tendrils off her back (a spring following her, keyed frame by frame)
+    from mmd_disperse import clock as clock_
+    from mmd_disperse import inertia as inertia_
+    from mmd_disperse import roar as roar30_
+
+    saved = {key_: getattr(s, key_) for key_ in (
+        "path", "seeds", "entrance", "exit_style", "easing", "frame_start", "frame_end", "edge_glow", "beat_sync",
+        "trigger", "finale", "time_warp", "warp_length", "warp_effect", "venom_enable", "venom_eyes", "venom_teeth",
+        "venom_split", "venom_tendrils", "venom_strands", "old_surface", "layer_enable", "layer_style", "layer_width",
+        "layer_stay", "moment_at", "shot_enable", "impact_enable", "surface_prelude", "venom_back",
+        "venom_back_length", "venom_roar", "venom_roar_time", "venom_retract", "venom_inertia", "body_grow")}
+    s.trigger, s.finale, s.beat_sync, s.time_warp = "NONE", False, False, "NONE"
+    s.shot_enable, s.impact_enable, s.moment_at, s.body_grow, s.surface_prelude = False, False, "FACE", 0.0, 0.0
+    s.path, s.seeds, s.entrance, s.exit_style, s.easing = "SURFACE", "ORIGIN", "GROW", "SHRINK", "LINEAR"
+    s.layer_width, s.layer_stay = 0.3 * height, True
+    s.edge_glow, s.frame_start, s.frame_end = False, 40, 100
+    s.venom_enable, s.old_surface, s.layer_enable, s.layer_style = True, "VEINS", True, "GOO"
+    s.venom_eyes, s.venom_teeth, s.venom_split, s.venom_roar, s.venom_retract = True, True, False, True, False
+    s.venom_tendrils, s.venom_strands, s.venom_back, s.venom_inertia, s.warp_effect = 60, 20, 4, 0.0, False
+    # (a dance: her body sways slowly from side to side, so her head and her back accelerate; well under the
+    # tongue's own swing, so its lag goes against the acceleration)
+    arm30_ = base.armature
+    hips30_ = next((arm30_.pose.bones[n_] for n_ in motion.HIPS if n_ in arm30_.pose.bones), None)
+    sway30_ = bpy.data.actions.new("MMDD Test Sway 1.30")
+    ad30_ = arm30_.animation_data or arm30_.animation_data_create()
+    action_before_ = ad30_.action
+    ad30_.action = sway30_
+    for k_, f_ in enumerate(range(10, 251, 30)):
+        hips30_.location = (0.12 * height * (1.0 if k_ % 2 else -1.0), 0.0, 0.0)
+        hips30_.keyframe_insert("location", frame=f_)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "build for the 1.30 checks (a swaying dance)")
+    fps30_ = scene.render.fps / scene.render.fps_base
+
+    def radius_at(f_):
+        whole_ = int(math.floor(f_))
+        scene.frame_set(whole_, subframe=float(f_) - whole_)
+        return float(s.mask.matrix_world.to_scale()[0])
+
+    def node_value(m_, name_):
+        return float(m_.node_tree.nodes[materials.LAYER + name_].outputs[0].default_value)
+
+    coats30_ = [sl_.material for m_ in target.meshes for sl_ in m_.material_slots
+                if sl_.material is not None and sl_.material.node_tree is not None
+                and sl_.material.node_tree.nodes.get(materials.LAYER + " Teeth Strength") is not None]
+    s.time_warp, s.warp_length = "SLOW", 1.2
+    moment_ = s.mask.get(effect.P_MOMENT)
+    before_ = {f_: radius_at(f_) for f_ in (moment_ - 4, moment_, moment_ + 4)}
+    teeth_off_ = None
+    if coats30_:
+        scene.frame_set(int(moment_) + 6)
+        teeth_off_ = node_value(coats30_[0], " Teeth Strength")
+    s.warp_effect = True
+    own_ = clock_.has_time(s.mask)
+    moment2_ = s.mask.get(effect.P_MOMENT)
+    after_ = {f_: radius_at(f_) for f_ in (moment_ - 4, moment_, moment_ + 4)}
+    slope_before_ = (before_[moment_ + 4] - before_[moment_ - 4]) / 8.0
+    slope_after_ = (after_[moment_ + 4] - after_[moment_ - 4]) / 8.0
+    check(own_ and moment2_ == moment_ and abs(after_[moment_] - before_[moment_]) < 0.02 * max(abs(slope_before_) * 8,
+                                                                                                1e-6)
+          and 0.15 < slope_after_ / max(slope_before_, 1e-9) < 0.35,
+          "transformation slows too: its own time, through the moment on the same frame (%s -> %s, radius %.4f / %.4f),"
+          " the front a quarter as fast round it (%.5f -> %.5f a frame)"
+          % (moment_, moment2_, before_[moment_], after_[moment_], slope_before_, slope_after_))
+    keys30_ = effect.timewarp.effect_keys("SLOW", int(moment_), s.warp_length, fps30_, s.frame_start)
+    delay_ = effect.timewarp.effect_delay(keys30_)
+    late_ = int(keys30_[-1][0]) + 10
+    behind_ = radius_at(late_)
+    s.warp_effect = False
+    plain_ = radius_at(late_ - delay_)
+    s.warp_effect = True
+    check(delay_ > 0.0 and abs(behind_ - plain_) < 0.02 * max(abs(slope_before_) * 8, 1e-6),
+          "transformation slows too: after it the front stays %.1f frames behind instead of catching up (%.4f, %.4f)"
+          % (delay_, behind_, plain_))
+    if coats30_:
+        scene.frame_set(int(moment_) + 6)
+        teeth_on_ = node_value(coats30_[0], " Teeth Strength")
+        ad_ = coats30_[0].node_tree.animation_data
+        path_ = coats30_[0].node_tree.nodes[materials.LAYER + " Teeth Strength"].outputs[0].path_from_id(
+            "default_value")
+        drv_ = next((d_ for d_ in (ad_.drivers if ad_ else []) if d_.data_path == path_), None)
+        check(teeth_off_ is not None and teeth_on_ < teeth_off_ - 0.05 and drv_ is not None
+              and drv_.driver.is_simple_expression and any(v_.name == "t" for v_ in drv_.driver.variables),
+              "transformation slows too: the grin opens slower by its own time (%.2f -> %.2f six frames after the "
+              "moment), a simple driver reading it" % (teeth_off_ if teeth_off_ is not None else -1.0, teeth_on_))
+    mod30_ = next(m_ for m_ in base.meshes[0].modifiers if m_.type == "NODES" and m_.node_group is not None
+                  and m_.node_group.name == node_groups.BASE_GROUP)
+    ids30_ = node_groups.input_identifiers(mod30_.node_group)
+    ad_ = base.meshes[0].animation_data
+    driven_ = [d_.data_path for d_ in (ad_.drivers if ad_ else [])]
+    tongue30_ = next((ob_ for ob_ in roar30_.objects(s.mask) if ob_.type == "MESH"), None)
+    tmod30_ = next((m_ for m_ in tongue30_.modifiers if m_.type == "NODES"), None) if tongue30_ else None
+    tids_ = node_groups.input_identifiers(tmod30_.node_group) if tmod30_ else {}
+    tdriven_ = [d_.data_path for d_ in (tongue30_.animation_data.drivers if tongue30_ and tongue30_.animation_data
+                                        else [])]
+    check(bool(mod30_[ids30_["Effect Clock"]]) and any(ids30_["Effect Time"] in p_ for p_ in driven_)
+          and tmod30_ is not None and bool(tmod30_[tids_["Effect Clock"]])
+          and any(tids_["Effect Time"] in p_ for p_ in tdriven_),
+          "transformation slows too: the goo's and the tongue's node trees move by its time (Effect Clock, a driver "
+          "on Effect Time)")
+    s.warp_effect = False
+    ad_ = base.meshes[0].animation_data
+    check(not clock_.has_time(s.mask) and not bool(mod30_[ids30_["Effect Clock"]])
+          and not any(ids30_["Effect Time"] in d_.data_path for d_ in (ad_.drivers if ad_ else []))
+          and abs(radius_at(moment_ + 4) - before_[moment_ + 4]) < 1e-4,
+          "transformation slows too off: the scene's frame again")
+    s.time_warp = "NONE"
+    # inertia: the tongue's lag keyed on its node tree, the big tendrils' on the clock (driving the back mesh), a spring
+    # lagging behind her accelerating head; the same on any frame however it is reached
+    s.venom_inertia = 1.0
+    tongue30_ = next((ob_ for ob_ in roar30_.objects(s.mask) if ob_.type == "MESH"), None)
+    tmod30_ = next((m_ for m_ in tongue30_.modifiers if m_.type == "NODES"), None) if tongue30_ else None
+    lag_id_ = node_groups.input_identifiers(tmod30_.node_group).get("Lag") if tmod30_ else None
+    lag_path_ = 'modifiers["%s"]["%s"]' % (tmod30_.name, lag_id_) if tmod30_ else ""
+    tcurves_ = effect.timewarp._curves(tongue30_)[1] if tongue30_ else []
+    lag_curves_ = [fc_ for fc_ in tcurves_ if fc_.data_path == lag_path_]
+    holder_ = clock_.find(s.mask)
+    back_curves_ = [fc_ for fc_ in effect.timewarp._curves(holder_)[1] if fc_.data_path == '["%s"]' % clock_.BACK_LAG] \
+        if holder_ is not None else []
+    backs30_ = [m_ for m_ in base.meshes if venom.skeleton(m_) is not None and venom.skeleton(m_).get(venom.P_BACK, 0)]
+    ad_ = backs30_[0].animation_data if backs30_ else None
+    back_driven_ = [d_ for d_ in (ad_.drivers if ad_ else []) if d_.data_path.startswith("modifiers[")
+                    and any(v_.name == "v" for v_ in d_.driver.variables)]
+    check(len(lag_curves_) == 3 and len(lag_curves_[0].keyframe_points) > 50 and len(back_curves_) == 3
+          and len(back_driven_) == 3,
+          "inertia: the tongue's lag keyed (%d curves, %d keys), the big tendrils' on the clock (%d curves) driving "
+          "the back mesh (%d drivers)" % (len(lag_curves_), len(lag_curves_[0].keyframe_points) if lag_curves_ else 0,
+                                          len(back_curves_), len(back_driven_)))
+    if len(lag_curves_) == 3:
+        frames_ = [int(k_.co[0]) for k_ in lag_curves_[0].keyframe_points]
+        lag_ = np.array([[fc_.evaluate(f_) for fc_ in lag_curves_] for f_ in frames_])
+        head30_ = next(n_ for n_ in motion.HEAD if n_ in arm30_.pose.bones)
+        con_ = next(c_ for c_ in tongue30_.constraints if c_.type == "CHILD_OF")
+        placed_ = []
+        for f_ in frames_:
+            scene.frame_set(f_)
+            placed_.append(arm30_.matrix_world @ arm30_.pose.bones[head30_].matrix @ con_.inverse_matrix
+                           @ tongue30_.matrix_basis)
+        pts_ = np.array([tuple(p_.translation) for p_ in placed_])
+        world_lag_ = np.array([tuple(p_.to_3x3().normalized() @ Vector(v_)) for p_, v_ in zip(placed_, lag_)])
+        acc_ = np.gradient(np.gradient(pts_, axis=0), axis=0)
+        moving_ = np.linalg.norm(acc_, axis=1) > 1e-6
+        anti_ = float(np.mean(np.sum(world_lag_[moving_] * acc_[moving_], axis=1))) if moving_.any() else 0.0
+        biggest_ = float(np.linalg.norm(lag_, axis=1).max())
+        check(biggest_ > 1e-3 * height and biggest_ <= inertia_.LIMIT * roar30_.TONGUE_LENGTH * height * 1.0001
+              and anti_ < 0.0,
+              "inertia: the tongue lags behind her head (up to %.4f, at most %.4f), against its acceleration (%.6f)"
+              % (biggest_, inertia_.LIMIT * roar30_.TONGUE_LENGTH * height, anti_))
+        beats30_ = effect._face_beats(s, s.mask)
+        mid30_ = int(0.5 * (beats30_["roar"][0] + beats30_["roar"][1])) if beats30_ and beats30_["roar"] else None
+        if mid30_ is not None:
+            scene.frame_set(mid30_ - 40)
+            scene.frame_set(mid30_)
+            jumped_ = evaluated_positions(tongue30_)
+            scene.frame_set(mid30_ - 1)
+            scene.frame_set(mid30_)
+            stepped_ = evaluated_positions(tongue30_)
+            check(len(jumped_) > 50 and jumped_.shape == stepped_.shape and float(np.abs(jumped_ - stepped_).max())
+                  < 1e-5 * height, "inertia: the tongue the same on a frame jumped to as on one played to (%d points)"
+                  % len(jumped_))
+    s.venom_inertia = 0.0
+    tcurves_ = effect.timewarp._curves(tongue30_)[1] if tongue30_ else []
+    holder_ = clock_.find(s.mask)
+    check(not [fc_ for fc_ in tcurves_ if fc_.data_path == lag_path_]
+          and (holder_ is None or clock_.BACK_LAG not in holder_),
+          "inertia 0: the lag keys gone")
+    check(not draw_panels(bpy.context), "panels draw with the 1.30 options")
+    # (the hint that the eyes need her face unlocked: the default patterns lock it with wildcards)
+    hint_ = "Eyes need the goo on her face: unlock Face* and Eye*"
+    lock_was_ = (s.use_lock, s.lock_patterns)
+    s.use_lock, s.lock_patterns = True, "*face*;*hair*;*eye*"
+    shown_ = hint_ in draw_panels(bpy.context, labels=True)
+    s.lock_patterns = "*hair*;*Hair*"
+    hidden_ = hint_ not in draw_panels(bpy.context, labels=True)
+    s.use_lock, s.lock_patterns = lock_was_
+    check(shown_ and hidden_, "symbiote eyes: the hint shows while her face is locked by a wildcard, not once unlocked")
+    for key_ in ("VENOM_CLASSIC", "VENOM_SNAP"):
+        presets.apply(s, key_)
+        s.frame_start, s.frame_end = 40, 100
+        check(bpy.ops.mmd_disperse.build() == {"FINISHED"} and s.warp_effect and s.venom_inertia > 0.0
+              and clock_.has_time(s.mask), "preset %s builds slowing down with the dance" % key_)
+    ad30_.action = action_before_
+    bpy.data.actions.remove(sway30_)
+    hips30_.location = (0.0, 0.0, 0.0)
+    for key_, value in saved.items():
+        setattr(s, key_, value)
+    check(bpy.ops.mmd_disperse.build() == {"FINISHED"}, "rebuilt after the 1.30 checks")
 
     # --- leave behind: the body slides sideways while it disintegrates; recorded flakes stay where they
     # broke off, the others ride along

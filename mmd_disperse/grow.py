@@ -19,11 +19,11 @@ CHEST = ("上半身2", "上半身", "UpperBody2", "UpperBody", "upper body 2", "
 NECK = motion.NECK
 
 
-def _drive(id_, path, index, expression):
-    fc = id_.driver_add(path, index)
-    fc.driver.type = "SCRIPTED"
-    fc.driver.expression = expression
-    return fc
+def _drive(id_, path, index, expression, mask=None):
+    """A frame driver, by the transformation's own time when the effect of `mask` has one (1.30, clock.py)."""
+    from . import clock
+
+    return clock.drive(id_, path, expression, mask, index)
 
 
 def _undo(arm):
@@ -69,7 +69,7 @@ def sync(settings, mask, model, moment, until=None, taller=True):
     if tall:
         arm[P_SCALE] = list(arm.delta_scale)
         for k in range(3):
-            _drive(arm, "delta_scale", k, "%.5f * (1 + %.4f * %s)" % (arm.delta_scale[k], tall, ease))
+            _drive(arm, "delta_scale", k, "%.5f * (1 + %.4f * %s)" % (arm.delta_scale[k], tall, ease), mask)
     bones = {}
     chest = motion.find_bone(arm, CHEST)
     neck = motion.find_bone(arm, NECK)
@@ -80,7 +80,7 @@ def sync(settings, mask, model, moment, until=None, taller=True):
         for k in (0, 2):  # across the bone (its length is Y)
             base = pb.scale[k]
             if grow:
-                _drive(pb, "scale", k, "%.5f * (1 + %.4f * %s)" % (base, broader, ease))
+                _drive(pb, "scale", k, "%.5f * (1 + %.4f * %s)" % (base, broader, ease), mask)
             else:
-                _drive(pb, "scale", k, "%.5f / (1 + %.4f * %s)" % (base, broader, ease))
+                _drive(pb, "scale", k, "%.5f / (1 + %.4f * %s)" % (base, broader, ease), mask)
     arm[P_BONES] = bones

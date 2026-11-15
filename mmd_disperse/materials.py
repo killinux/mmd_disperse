@@ -1694,23 +1694,24 @@ def face_beats(cover, back, fps, teeth=True, split=None, roar=0.0, retract=None)
     return out
 
 
-def _face_clock(sock, expression):
-    """A frame driver `expression` on the value socket `sock` (None: no driver, 0)."""
+def _face_clock(sock, expression, mask=None):
+    """A frame driver `expression` on the value socket `sock` (None: no driver, 0); by the transformation's own time
+    when the effect of `mask` has one (1.30, clock.py)."""
     sock.driver_remove("default_value")
     sock.default_value = 0.0
     if expression is not None:
-        driver = sock.driver_add("default_value").driver
-        driver.type = "SCRIPTED"
-        driver.expression = expression
+        from . import clock
+
+        clock.drive(sock, "default_value", expression, mask)
 
 
-def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=False, retract=None):
+def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=False, retract=None, mask=None):
     """Undersuit colour, colour and brightness of its lines, cell size in object units; `goo` = (colour, smear size,
     metallic, sheen, pulse) for the symbiote's goo instead, and with it `eyes` = (left centre, right centre, the axis
     from the left to the right, the eye distance, clock) for the symbiote's face on it (None: none). The clock is a
     strength, or the face's beats (face_beats). `retract` (1.29): (centre, radius, width, first frame, frames) of the
     goo snapping back into her chest (object space: it is gone outside a ball round the centre shrinking from the
-    radius to nothing), or None."""
+    radius to nothing), or None. `mask`: the effect's, whose own time the face's drivers follow (1.30)."""
     nodes = mat.node_tree.nodes if mat.node_tree else {}
     bsdf = nodes.get(LAYER + " BSDF")
     if bsdf is not None:
@@ -1751,7 +1752,7 @@ def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=
         for name, expression in clocks.items():
             node = nodes.get(LAYER + name)
             if node is not None:
-                _face_clock(node.outputs[0], expression)
+                _face_clock(node.outputs[0], expression, mask)
         if not isinstance(when, dict):
             strength.outputs[0].default_value = float(when)
         if eyes is not None:
@@ -1775,7 +1776,7 @@ def update_layer(mat, color, glow_color, lines, cell, goo=None, eyes=None, stay=
                 centre.inputs[i].default_value = float(retract[0][i])
             width.outputs[0].default_value = float(retract[2])
             _face_clock(radius.outputs[0], "%.5f * (1 - pow(clamp((frame - %.2f) / %.2f, 0, 1), 2))" % (
-                retract[1], retract[3], max(retract[4], 1e-3)))
+                retract[1], retract[3], max(retract[4], 1e-3)), mask)
 
 
 def remove_layer(mat):

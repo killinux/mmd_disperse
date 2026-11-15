@@ -1030,6 +1030,12 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                     "keyed (removing the effect puts it back); the rigid bodies are slowed with it")
     warp_length: FloatProperty(name="Time Span", default=1.2, min=0.1, soft_max=6.0, update=_sync,
                                description="How long the dance stands still, slows or goes on twos, in seconds")
+    warp_effect: BoolProperty(name="Transformation Slows Too", default=False, update=_sync,
+                              description="The transformation stands still, slows down or goes on twos with the dance "
+                                          "(1.30): its front, the symbiote's goo, eyes, grin and roar crawl through "
+                                          "the moment and reach it on the same frame (the camera move and the impact "
+                                          "frames stay on it), a little faster just before; after it they stay that "
+                                          "much behind instead of rushing to catch up. Not with a finishing pose")
 
     # --- 1.11: cartoon physics
     toon_style: EnumProperty(
@@ -1326,6 +1332,10 @@ class MMDDisperseSettings(bpy.types.PropertyGroup):
                                             "stays on until then)")
     venom_retract_after: FloatProperty(name="Snaps Back After", default=4.0, min=0.0, soft_max=20.0, update=_sync,
                                        description="Seconds after the big moment the goo snaps back in")
+    venom_inertia: FloatProperty(name="Inertia", default=1.0, min=0.0, soft_max=3.0, update=_sync,
+                                 description="The tongue and the big tendrils off her back swing behind the way her "
+                                             "head and her back move (1.30): her dance is played through once and a "
+                                             "spring follows them, so any frame shows the same; 0: no swing")
 
     # --- the old outfit's surface ahead of the edge
     old_surface: EnumProperty(
